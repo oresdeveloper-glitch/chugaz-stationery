@@ -1,8 +1,10 @@
 {
+  "version": 2,
   "buildCommand": "cd frontend && npm install && npm run build",
-  "outputDirectory": "frontend/dist",
-  "installCommand": "npm install --prefix frontend",
+  "devCommand": "cd frontend && npx vite",
+  "installCommand": "cd frontend && npm install",
   "framework": "vite",
+  "regions": ["iad1"],
   "rewrites": [
     { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ],
