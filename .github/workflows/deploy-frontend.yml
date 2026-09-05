@@ -1,11 +1,7 @@
-name: Deploy Frontend to Vercel
+name: Deploy to Vercel
 on:
   push:
     branches: [main]
-    paths:
-      - 'frontend/**'
-      - 'vercel.json'
-      - 'package.json'
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -14,5 +10,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - run: npm install
       - run: cd frontend && npm install && npm run build
-      - run: npx vercel deploy --prebuilt --temporary --force
+      - run: npx vercel deploy --temporary --force
