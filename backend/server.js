@@ -92,89 +92,92 @@ if ((process.env.SERVE_FRONTEND || '1') === '1' && require('fs').existsSync(dist
 }
 
 app.use((err, req, res, next) => {
- console.error(err);
- res.status(500).json({ error: err.message || 'Server error' });
+  console.error(err);
+  res.status(500).json({ error: err.message || 'Server error' });
 });
 
-app.listen(PORT, () => {
- console.log(`API server running on http://localhost:${PORT}`);
-});
+db.initialize();
 
-// Alternate HTTP port: a different port is a different browser origin, so camera
-// permission there starts fresh (no stored "blocked" state, no certificate warning).
-const ALT_PORT = Number(process.env.ALT_PORT || 4002);
-if ((process.env.SERVE_FRONTEND || '1') === '1') {
- app.listen(ALT_PORT, () => {
-  console.log(`App also running on http://localhost:${ALT_PORT} (fresh camera permission origin)`);
- });
-}
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  app.listen(PORT, () => {
+    console.log(`API server running on http://localhost:${PORT}`);
+  });
 
-// Optional HTTPS server (fresh origin so the browser shows the camera prompt again)
-const HTTPS_PORT = Number(process.env.HTTPS_PORT || 4001);
-if ((process.env.SERVE_FRONTEND || '1') === '1') {
- (async () => {
-  try {
-   const fs = require('fs');
-   const os = require('os');
-   const https = require('https');
-   const crypto = require('crypto');
-   const selfsigned = require('selfsigned');
-   const certDir = path.join(__dirname, '..', 'certs');
-   const keyPath = path.join(certDir, 'key.pem');
-   const certPath = path.join(certDir, 'cert.pem');
-
-   const lanIPs = [];
-   const ifaces = os.networkInterfaces();
-   for (const name of Object.keys(ifaces || {})) {
-    for (const iface of ifaces[name] || []) {
-     if (iface.family === 'IPv4' && !iface.internal) lanIPs.push(iface.address);
-    }
-   }
-   const sanNames = ['localhost', '127.0.0.1', ...lanIPs];
-
-   const sanIncludes = (sanStr, name) => sanStr.includes(name === 'localhost' ? 'DNS:localhost' : `IP Address:${name}`);
-
-   let key, cert;
-   if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
-    key = fs.readFileSync(keyPath);
-    cert = fs.readFileSync(certPath);
-    let currentSan = '';
-    try { currentSan = new crypto.X509Certificate(cert).subjectAltName || ''; } catch (e) { /* regenerate below */ }
-    if (!sanNames.every((n) => sanIncludes(currentSan, n))) cert = null; // IP changed -> regenerate
-   }
-   if (!cert) {
-    fs.mkdirSync(certDir, { recursive: true });
-    const pems = await selfsigned.generate(
-     [{ name: 'commonName', value: 'localhost' }],
-     {
-      days: 825,
-      keySize: 2048,
-      algorithm: 'sha256',
-      extensions: [
-       { name: 'basicConstraints', cA: false },
-       { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
-       { name: 'extKeyUsage', serverAuth: true },
-       { name: 'subjectAltName', altNames: [
-        { type: 2, value: 'localhost' },
-        { type: 7, ip: '127.0.0.1' },
-        ...lanIPs.map((ip) => ({ type: 7, ip })),
-       ] },
-      ],
-     },
-    );
-    key = pems.private;
-    cert = pems.cert;
-    fs.writeFileSync(keyPath, key);
-    fs.writeFileSync(certPath, cert);
-   }
-
-   httpsCert = cert;
-
-   https.createServer({ key, cert }, app).listen(HTTPS_PORT, () => {
-    console.log(`HTTPS server running on https://localhost:${HTTPS_PORT} (SAN: ${sanNames.join(', ')})`);
-   });
-  } catch (e) {
-   console.error('HTTPS server failed to start:', e.message);
+  const ALT_PORT = Number(process.env.ALT_PORT || 4002);
+  if ((process.env.SERVE_FRONTEND || '1') === '1') {
+    app.listen(ALT_PORT, () => {
+      console.log(`App also running on http://localhost:${ALT_PORT} (fresh camera permission origin)`);
+    });
   }
- })();
+
+  const HTTPS_PORT = Number(process.env.HTTPS_PORT || 4001);
+  if ((process.env.SERVE_FRONTEND || '1') === '1') {
+    (async () => {
+      try {
+        const fs = require('fs');
+        const os = require('os');
+        const https = require('https');
+        const crypto = require('crypto');
+        const selfsigned = require('selfsigned');
+        const certDir = path.join(__dirname, '..', 'certs');
+        const keyPath = path.join(certDir, 'key.pem');
+        const certPath = path.join(certDir, 'cert.pem');
+
+        const lanIPs = [];
+        const ifaces = os.networkInterfaces();
+        for (const name of Object.keys(ifaces || {})) {
+          for (const iface of ifaces[name] || []) {
+            if (iface.family === 'IPv4' && !iface.internal) lanIPs.push(iface.address);
+          }
+        }
+        const sanNames = ['localhost', '127.0.0.1', ...lanIPs];
+
+        const sanIncludes = (sanStr, name) => sanStr.includes(name === 'localhost' ? 'DNS:localhost' : `IP Address:${name}`);
+
+        let key, cert;
+        if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+          key = fs.readFileSync(keyPath);
+          cert = fs.readFileSync(certPath);
+          let currentSan = '';
+          try { currentSan = new crypto.X509Certificate(cert).subjectAltName || ''; } catch (e) { /* regenerate below */ }
+          if (!sanNames.every((n) => sanIncludes(currentSan, n))) cert = null;
+        }
+        if (!cert) {
+          fs.mkdirSync(certDir, { recursive: true });
+          const pems = await selfsigned.generate(
+            [{ name: 'commonName', value: 'localhost' }],
+            {
+              days: 825,
+              keySize: 2048,
+              algorithm: 'sha256',
+              extensions: [
+                { name: 'basicConstraints', cA: false },
+                { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
+                { name: 'extKeyUsage', serverAuth: true },
+                { name: 'subjectAltName', altNames: [
+                  { type: 2, value: 'localhost' },
+                  { type: 7, ip: '127.0.0.1' },
+                  ...lanIPs.map((ip) => ({ type: 7, ip })),
+                ] },
+              ],
+            },
+          );
+          key = pems.private;
+          cert = pems.cert;
+          fs.writeFileSync(keyPath, key);
+          fs.writeFileSync(certPath, cert);
+        }
+
+        httpsCert = cert;
+
+        https.createServer({ key, cert }, app).listen(HTTPS_PORT, () => {
+          console.log(`HTTPS server running on https://localhost:${HTTPS_PORT} (SAN: ${sanNames.join(', ')})`);
+        });
+      } catch (e) {
+        console.error('HTTPS server failed to start:', e.message);
+      }
+    })();
+  }
 }

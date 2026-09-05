@@ -1,10 +1,21 @@
 {
-    "framework":  "vite",
     "version":  2,
+    "outputDirectory":  "frontend/dist",
+    "rewrites":  [
+                     {
+                         "destination":  "/api/",
+                         "source":  "/api(.*)"
+                     },
+                     {
+                         "destination":  "/index.html",
+                         "source":  "/((?!assets/).*)"
+                     }
+                 ],
+    "devCommand":  "cd frontend \u0026\u0026 npx vite",
+    "framework":  "vite",
     "buildCommand":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build",
-    "installCommand":  "npm install",
     "regions":  [
                     "iad1"
                 ],
-    "outputDirectory":  "frontend/dist"
+    "installCommand":  "npm install \u0026\u0026 cd backend \u0026\u0026 npm install"
 }
