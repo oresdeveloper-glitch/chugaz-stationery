@@ -2,8 +2,9 @@
     "version":  "3.0.0",
     "name":  "chugaz-stationery",
     "scripts":  {
+                    "build":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build",
                     "dev":  "cd frontend \u0026\u0026 npx vite",
-                    "build":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build"
+                    "start":  "cd frontend \u0026\u0026 npx vite preview"
                 },
     "devDependencies":  {
                             "vite":  "^5.4.0",
