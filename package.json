@@ -1,9 +1,10 @@
 {
-  "name": "chugaz-stationery",
-  "version": "3.0.0",
-  "private": true,
-  "scripts": {
-    "build": "cd frontend && npm install && npm run build",
-    "dev": "cd backend && node server.js"
-  }
+    "private":  false,
+    "name":  "chugaz-stationery",
+    "version":  "3.0.0",
+    "type":  "module",
+    "scripts":  {
+                    "dev":  "cd frontend \u0026\u0026 npx vite",
+                    "build":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build"
+                }
 }
