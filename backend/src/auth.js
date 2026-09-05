@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('./db');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR = process.env.VERCEL === '1' ? '/tmp/stationery-data' : path.join(__dirname, '..', 'data');
 
 // Persistent secret: env var wins; otherwise generated once and stored so
 // tokens survive restarts but no weak default is ever used.

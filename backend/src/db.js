@@ -2,7 +2,8 @@ const { DatabaseSync } = require('node:sqlite');
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const isVercel = process.env.VERCEL === '1';
+const DATA_DIR = isVercel ? '/tmp/stationery-data' : path.join(__dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'stationery.db');
