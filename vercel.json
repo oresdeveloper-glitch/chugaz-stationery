@@ -1,28 +1,9 @@
 {
-    "framework":  "vite",
-    "buildCommand":  "npm install \u0026\u0026 cd frontend \u0026\u0026 npm run build",
-    "version":  2,
-    "installCommand":  "npm install \u0026\u0026 cd frontend \u0026\u0026 npm install",
     "outputDirectory":  "frontend/dist",
-    "headers":  [
-                    {
-                        "headers":  [
-                                        {
-                                            "key":  "Cache-Control",
-                                            "value":  "public, max-age=31536000, immutable"
-                                        }
-                                    ],
-                        "source":  "/assets/(.*)"
-                    }
-                ],
-    "rewrites":  [
-                     {
-                         "destination":  "/index.html",
-                         "source":  "/((?!assets/).*)"
-                     }
-                 ],
+    "buildCommand":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build",
     "regions":  [
                     "iad1"
                 ],
-    "devCommand":  "cd frontend \u0026\u0026 npx vite"
+    "version":  2,
+    "framework":  "vite"
 }
