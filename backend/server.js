@@ -96,8 +96,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Server error' });
 });
 
-db.initialize();
-
 if (process.env.VERCEL) {
   module.exports = app;
 } else {
