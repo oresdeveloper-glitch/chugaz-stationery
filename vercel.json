@@ -1,8 +1,10 @@
 {
-    "outputDirectory":  "frontend/dist",
-    "buildCommand":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build",
+    "framework":  "vite",
     "version":  2,
+    "buildCommand":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build",
+    "installCommand":  "npm install",
     "regions":  [
                     "iad1"
-                ]
+                ],
+    "outputDirectory":  "frontend/dist"
 }
