@@ -1,18 +1,1 @@
-{
-    "devDependencies":  {
-                            "vite":  "^5.4.0",
-                            "@vitejs/plugin-react":  "^4.3.1"
-                        },
-    "name":  "chugaz-stationery",
-    "version":  "3.0.0",
-    "dependencies":  {
-                         "react-router-dom":  "^6.26.0",
-                         "react":  "^18.3.1",
-                         "react-dom":  "^18.3.1",
-                         "@zxing/library":  "^0.23.0"
-                     },
-    "scripts":  {
-                    "dev":  "cd frontend \u0026\u0026 npx vite",
-                    "build":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build"
-                }
-}
+{"name":"chugaz-stationery","version":"3.0.0","private":false,"scripts":{"build":"cd frontend && npm install && npm run build","dev":"cd frontend && npx vite"},"dependencies":{"@vercel/node":"^2.8.0","express":"^4.19.2","cors":"^2.8.5","bcryptjs":"^2.4.3","jsonwebtoken":"^9.0.2","multer":"^2.2.0","selfsigned":"^5.5.0"}}
