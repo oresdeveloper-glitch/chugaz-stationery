@@ -1,20 +1,18 @@
 {
-    "version":  "3.0.0",
-    "name":  "chugaz-stationery",
-    "scripts":  {
-                    "dev":  "cd frontend \u0026\u0026 npx vite",
-                    "build":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build"
-                },
     "devDependencies":  {
                             "vite":  "^5.4.0",
                             "@vitejs/plugin-react":  "^4.3.1"
                         },
-    "type":  "module",
+    "name":  "chugaz-stationery",
+    "version":  "3.0.0",
     "dependencies":  {
                          "react-router-dom":  "^6.26.0",
                          "react":  "^18.3.1",
                          "react-dom":  "^18.3.1",
                          "@zxing/library":  "^0.23.0"
                      },
-    "private":  false
+    "scripts":  {
+                    "dev":  "cd frontend \u0026\u0026 npx vite",
+                    "build":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build"
+                }
 }
