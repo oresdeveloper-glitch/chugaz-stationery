@@ -1,8 +1,8 @@
 {
     "framework":  "vite",
-    "buildCommand":  "cd frontend \u0026\u0026 npm install \u0026\u0026 npm run build",
+    "buildCommand":  "npm install \u0026\u0026 cd frontend \u0026\u0026 npm run build",
     "version":  2,
-    "installCommand":  "cd frontend \u0026\u0026 npm install",
+    "installCommand":  "npm install \u0026\u0026 cd frontend \u0026\u0026 npm install",
     "outputDirectory":  "frontend/dist",
     "headers":  [
                     {
