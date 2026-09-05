@@ -1,0 +1,17 @@
+node_modules/
+dist/
+backend/data/
+backend/uploads/
+*.log
+.DS_Store
+.env
+backend/.env
+tools/
+certs/
+*.pem
+*.exe
+tunnel-url.txt
+tunnel.err
+tun.err
+qr-phone.png
+*.tmp.js

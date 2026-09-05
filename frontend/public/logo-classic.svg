@@ -1,0 +1,5 @@
+<svg width="200" height="60" viewBox="0 0 200 60" xmlns="http://www.w3.org/2000/svg">
+  <rect width="200" height="60" rx="8" fill="white"/>
+  <text x="100" y="24" font-family="Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle" fill="#0a4a6b">CHUGAZ</text>
+  <text x="100" y="42" font-family="Arial, sans-serif" font-size="10" font-weight="600" text-anchor="middle" fill="#5a7286" letter-spacing="0.08em">STATIONERY</text>
+</svg>

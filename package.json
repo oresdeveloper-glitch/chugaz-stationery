@@ -1,0 +1,9 @@
+{
+  "name": "chugaz-stationery",
+  "version": "3.0.0",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "dev": "cd backend && node server.js"
+  }
+}
