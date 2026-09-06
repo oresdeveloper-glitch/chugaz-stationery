@@ -8,6 +8,7 @@ jobs:
     env:
       VERCEL_TEAM_ID: oresdeveloper-glitch
       VERCEL_PROJECT_ID: prj_zJ9SOfVZjJpITiyZgXow2r4P2ojb
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,7 +16,7 @@ jobs:
           node-version: 20
       - run: npm install
       - run: cd frontend && npm install && npm run build
-      - uses: amondnet/vercel-action@v30
+      - uses: amondnet/vercel-action@v42
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
