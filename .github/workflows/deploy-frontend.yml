@@ -5,6 +5,9 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      VERCEL_TEAM_ID: oresdeveloper-glitch
+      VERCEL_PROJECT_ID: prj_zJ9SOfVZjJpITiyZgXow2r4P2ojb
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -12,4 +15,6 @@ jobs:
           node-version: 20
       - run: npm install
       - run: cd frontend && npm install && npm run build
-      - run: npx vercel deploy --temporary --force
+      - run: npx vercel deploy --temporary --force --yes
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
