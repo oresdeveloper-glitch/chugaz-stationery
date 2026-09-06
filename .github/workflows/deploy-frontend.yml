@@ -15,9 +15,9 @@ jobs:
           node-version: 20
       - run: npm install
       - run: cd frontend && npm install && npm run build
-      - name: Trigger Vercel Deployment
+      - name: Deploy to Vercel
         run: |
-          echo "Vercel deployment triggered on push"
-          # The Vercel GitHub Integration will auto-deploy on push
-          # if the repo is connected in the Vercel dashboard
-          # Otherwise, use: npx vercel deploy --token=$VERCEL_TOKEN
+          echo "📦 Frontend built successfully"
+          echo "🚀 Vercel deployment will be triggered by GitHub integration"
+          # The Vercel GitHub Integration will auto-deploy on push if connected
+          # If not connected, use: npx vercel deploy --token=$VERCEL_TOKEN
