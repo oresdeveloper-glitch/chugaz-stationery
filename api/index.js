@@ -9,7 +9,15 @@ require('module').Module._initPaths();
 
 module.exports = (req, res) => {
   if (req.url && req.url.includes('/health')) {
-    return res.status(200).json({ ok: true, db: 'connected', payment_instructions: '356322054 - CHUGAZ STATIONERY' });
+    const fs = require('fs');
+    let dbg={};
+    try{ dbg['/var/task']=fs.readdirSync('/var/task').slice(0,20) }catch(e){dbg['/var/task']=e.message}
+    try{ dbg['/var/task/backend']=fs.readdirSync('/var/task/backend').slice(0,20) }catch(e){dbg['/var/task/backend']=e.message}
+    try{ dbg['/var/task/api']=fs.readdirSync('/var/task/api').slice(0,20) }catch(e){dbg['/var/task/api']=e.message}
+    try{ dbg['backend_exists']=fs.existsSync('/var/task/backend/node_modules/express')}catch(e){}
+    try{ dbg['root_exists']=fs.existsSync('/var/task/node_modules/express')}catch(e){}
+    try{ dbg['api_exists']=fs.existsSync('/var/task/api/node_modules/express')}catch(e){}
+    return res.status(200).json({ ok: true, db: 'connected', payment_instructions: '356322054 - CHUGAZ STATIONERY', dbg });
   }
   let app;
   try {
