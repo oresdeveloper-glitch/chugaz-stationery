@@ -1,6 +1,9 @@
 const path = require('path');
+const fs = require('fs');
 const Module = require('module');
-['/var/task/node_modules','/var/task/backend/node_modules','/var/task/api/node_modules', path.join(__dirname,'../node_modules'), path.join(__dirname,'node_modules'), path.join(__dirname,'../backend/node_modules')].forEach(p=>{ if(!Module.globalPaths.includes(p)) Module.globalPaths.push(p); if(!require('module')._pathCache) {} });
+try { if (!fs.existsSync('/var/task/backend/node_modules/express') && fs.existsSync('/var/task/node_modules/express')) { fs.cpSync('/var/task/node_modules', '/var/task/backend/node_modules', {recursive:true, force:true}); } } catch(e){}
+try { if (!fs.existsSync('/var/task/api/node_modules/express') && fs.existsSync('/var/task/node_modules/express')) { fs.cpSync('/var/task/node_modules', '/var/task/api/node_modules', {recursive:true, force:true}); } } catch(e){}
+['/var/task/node_modules','/var/task/backend/node_modules','/var/task/api/node_modules', path.join(__dirname,'../node_modules'), path.join(__dirname,'node_modules'), path.join(__dirname,'../backend/node_modules')].forEach(p=>{ if(!Module.globalPaths.includes(p)) Module.globalPaths.push(p); });
 process.env.NODE_PATH = ['/var/task/node_modules','/var/task/backend/node_modules','/var/task/api/node_modules', path.join(__dirname,'../node_modules')].join(':');
 require('module').Module._initPaths();
 
