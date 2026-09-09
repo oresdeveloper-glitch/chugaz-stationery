@@ -86,6 +86,8 @@ function migrate() {
 }
 migrate();
 
+db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('payment_instructions', '356322054 - CHUGAZ STATIONERY');
+
 function transact(fn) {
  db.exec('BEGIN');
  try {

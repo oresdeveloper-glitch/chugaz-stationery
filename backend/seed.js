@@ -98,7 +98,7 @@ function seed() {
    ('delivery_fee','3000'),
    ('free_delivery_threshold','50000'),
    ('pickup_available','1'),
-   ('payment_instructions','For card and mobile money orders, pay via the payment link on your order page.')`).run();
+   ('payment_instructions','356322054 - CHUGAZ STATIONERY')`).run();
 
   // Extra staff users so roles/reports are meaningful
   const staff = [
