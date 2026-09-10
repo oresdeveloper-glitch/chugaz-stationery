@@ -8,7 +8,9 @@ const { db } = require('./src/db');
 const { requireAuth, requireRole } = require('./src/auth');
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 7860;
+const isHuggingFace = process.env.SPACE_ID || process.env.HF_SPACE || process.env.HUGGINGFACE_SPACE;
+const isProduction = process.env.NODE_ENV === 'production' || isHuggingFace;
 
 // An error in an async route must never take the whole server down.
 process.on('unhandledRejection', (reason) => {
@@ -98,6 +100,11 @@ app.use((err, req, res, next) => {
 
 if (process.env.VERCEL) {
   module.exports = app;
+} else if (isHuggingFace) {
+  // Hugging Face Spaces - single port, no HTTPS/ALT
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`API server running on http://0.0.0.0:${PORT} (Hugging Face Spaces)`);
+  });
 } else {
   app.listen(PORT, () => {
     console.log(`API server running on http://localhost:${PORT}`);

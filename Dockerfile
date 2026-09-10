@@ -1,29 +1,42 @@
-# ---- frontend build stage ----
-FROM node:22-slim AS frontend-builder
-WORKDIR /app
-COPY frontend/package*.json ./
-RUN npm install
-COPY frontend ./
-RUN npm run build
+# Hugging Face Space - CHUGAZ STATIONERY
+# Uses Docker to run both frontend (Vite) and backend (Express) with SQLite
 
-# ---- backend runtime stage ----
-FROM node:22-slim
-WORKDIR /app
-ENV NODE_ENV=production
+FROM node:20-alpine
 
+# Install system dependencies
+RUN apk add --no-cache sqlite sqlite-dev python3 make g++
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
 COPY backend/package*.json ./backend/
-RUN cd backend && npm install --omit=dev
+COPY frontend/package*.json ./frontend/
+COPY api/package*.json ./api/
 
-COPY backend ./backend
-COPY --from=frontend-builder /app/dist ./frontend/dist
+# Install all dependencies
+RUN npm install --legacy-peer-deps
+RUN cd backend && npm install --legacy-peer-deps
+RUN cd frontend && npm install --legacy-peer-deps
+RUN cd api && npm install --legacy-peer-deps
 
-WORKDIR /app/backend
-ENV PORT=4000
-ENV SERVE_FRONTEND=1
-ENV JWT_SECRET=change-me-in-production
-ENV DB_PATH=/data/stationery.db
+# Copy source code
+COPY . .
 
-VOLUME /data
-EXPOSE 4000
+# Build frontend
+RUN cd frontend && npm run build
 
-CMD ["node", "server.js"]
+# Create data directory for SQLite (persisted on HF Spaces /data)
+RUN mkdir -p /data/backend
+
+# Environment variables (set in HF Space settings)
+ENV NODE_ENV=production
+ENV PORT=7860
+ENV VERCEL=1
+ENV DB_PATH=/data/backend/stationery.db
+
+# Expose port
+EXPOSE 7860
+
+# Start script
+CMD ["node", "backend/server.js"]
