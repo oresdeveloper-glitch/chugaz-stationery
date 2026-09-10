@@ -24,58 +24,58 @@ export default function ShopRegister() {
     return () => clearTimeout(t);
   }, [seconds]);
 
-  const submit = async (e) => {
-    e.preventDefault();
-    if (form.password !== form.confirm) return toast('Passwords do not match', 'error');
-    if (form.password.length < 8 || !/[A-Za-z]/.test(form.password) || !/[0-9]/.test(form.password)) {
-      return toast('Password: at least 8 characters with letters and numbers', 'error');
-    }
-    setBusy(true);
-    try {
-      const res = await shopApi('/register', { method: 'POST', body: { name: form.name, email: form.email, phone: form.phone, password: form.password } });
-      if (res.needs_verification) {
-        setPending({ email: res.email });
-        setSeconds(45);
-        toast(res.message || 'Verification code sent : check your email', 'info');
-      } else {
-        if (res.token) login(res.token, res.user);
-        toast(res.notice || 'Account created : welcome!');
-        navigate('/shop');
-      }
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
+const submit = async (e) => {
+        e.preventDefault();
+        if (form.password !== form.confirm) return toast('Passwords do not match', 'error');
+        if (form.password.length < 8 || !/[A-Za-z]/.test(form.password) || !/[0-9]/.test(form.password)) {
+          return toast('Password: at least 8 characters with letters and numbers', 'error');
+        }
+        setBusy(true);
+        try {
+          const res = await shopApi('/register', { method: 'POST', body: { name: form.name, email: form.email, phone: form.phone, password: form.password } });
+          if (res.needs_verification) {
+            setPending({ email: res.email });
+            setSeconds(45);
+            toast(res.message || 'Verification code sent — check your email (including spam/junk folder)', 'info');
+          } else {
+            if (res.token) login(res.token, res.user);
+            toast(res.notice || 'Account created : welcome!');
+            navigate('/shop');
+          }
+        } catch (err) {
+          toast(err.message, 'error');
+        } finally {
+          setBusy(false);
+        }
+      };
 
-  const confirm = async (e) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      const { token, user } = await shopApi('/verify-email', { method: 'POST', body: { email: pending.email, code } });
-      login(token, user);
-      toast('Email verified : your account is active!', 'info');
-      navigate('/shop');
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
+const confirm = async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        try {
+          const { token, user } = await shopApi('/verify-email', { method: 'POST', body: { email: pending.email, code } });
+          login(token, user);
+          toast('Email verified : your account is active!', 'info');
+          navigate('/shop');
+        } catch (err) {
+          toast(err.message || 'Invalid or expired code — try resending', 'error');
+        } finally {
+          setBusy(false);
+        }
+      };
 
-  const resend = async () => {
-    setBusy(true);
-    try {
-      await shopApi('/resend-verification', { method: 'POST', body: { email: pending.email } });
-      toast('A new code has been sent', 'info');
-      setSeconds(45);
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
+      const resend = async () => {
+        setBusy(true);
+        try {
+          await shopApi('/resend-verification', { method: 'POST', body: { email: pending.email } });
+          toast('A new code has been sent — check your email (including spam/junk folder)', 'info');
+          setSeconds(45);
+        } catch (err) {
+          toast(err.message || 'Could not resend — try again shortly', 'error');
+        } finally {
+          setBusy(false);
+        }
+      };
 
   if (pending) {
     return (
