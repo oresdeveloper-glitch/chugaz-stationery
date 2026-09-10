@@ -142,7 +142,7 @@ export default function Layout({ user, setUser, children }) {
     <div className="app">
       <div className={`sidebar-backdrop ${open ? 'show' : ''}`} onClick={close} />
       <aside className={`sidebar ${open ? 'open' : ''}`}>
-        <div className="brand"><img src="/logo.png?v=5" alt="CHUGAZ" className="brand-logo" /></div>
+        <div className="brand"><img src="/logo-classic.svg?v=1" alt="CHUGAZ STATIONERY" className="brand-logo" /></div>
         <nav>
           {links.map((l) => (
             <NavLink key={l.to} to={l.to} className={({ isActive }) => (isActive ? 'active' : '')} end={l.to === '/'} onClick={close}>
@@ -157,7 +157,7 @@ export default function Layout({ user, setUser, children }) {
                     <div className="staff-topbar">
             <button className="menu-btn" onClick={() => setOpen(true)} aria-label="Open menu"><I name="menu" size={20} /></button>
             <div className="staff-brand">
-              <img src="/logo.png?v=4" alt="" className="staff-brand-logo" />
+              <img src="/logo-classic.svg?v=1" alt="" className="staff-brand-logo" />
               <span className="staff-brand-titles">
                 <span className="staff-brand-title">CHUGAZ STATIONERY</span>
                 <span className="staff-brand-sub">{roleLabel}{officeLabel}</span>
