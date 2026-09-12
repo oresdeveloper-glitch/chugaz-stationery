@@ -18,5 +18,5 @@ jobs:
       - run: npm install
       - run: cd frontend && npm install && npm run build
       - run: cd api && npm install
-      - name: Deploy to Vercel via CLI
-        run: npx vercel deploy --temporary --force --yes --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy to Vercel Production
+        run: npx vercel deploy --prod --force --yes --token=${{ secrets.VERCEL_TOKEN }}
