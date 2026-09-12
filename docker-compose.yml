@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    ports:
+      - "4000:4000"
+    environment:
+      - JWT_SECRET=${JWT_SECRET:-change-this-secret-in-production}
+      - SERVE_FRONTEND=1
+    volumes:
+      - shopdata:/data
+    restart: unless-stopped
+
+volumes:
+  shopdata:

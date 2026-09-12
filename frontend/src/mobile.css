@@ -1,0 +1,173 @@
+/* ============================================================
+   MOBILE APP FORMAT — entire system as native app
+   ============================================================ */
+
+/* Base: ensure app feels like native */
+html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+body { overscroll-behavior-y: contain; }
+
+/* Touch targets: minimum 44px */
+.btn, button, a, input, select { min-height: 44px; }
+.btn { padding: 10px 16px; font-size: 14px; }
+.btn.sm { min-height: 36px; padding: 6px 12px; }
+
+/* Cards: more breathing, app-like */
+.card { border-radius: 12px; }
+
+/* Tables: on mobile convert to horizontal scroll, keep header sticky */
+@media (max-width: 640px) {
+  .table-wrap { border-radius: 10px; -webkit-overflow-scrolling: touch; }
+  table { font-size: 13px; }
+  th, td { padding: 10px 8px; white-space: nowrap; }
+}
+
+/* Forms: larger, easier to tap */
+@media (max-width: 640px) {
+  input, select, textarea { font-size: 16px; padding: 12px 14px; border-radius: 10px; } /* 16px prevents iOS zoom */
+  .field label { font-size: 13px; }
+}
+
+/* ---------- Staff bottom nav + side slide (both functional) ---------- */
+.staff-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 64px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+  z-index: 40;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.staff-bottom-nav-inner {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  height: 100%;
+}
+.staff-bottom-nav a,
+.staff-bottom-nav button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-decoration: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  min-height: auto;
+}
+.staff-bottom-nav a .ico,
+.staff-bottom-nav button .ico { font-size: 18px; line-height: 1; }
+.staff-bottom-nav a.active { color: var(--primary); }
+.staff-bottom-nav a.active .ico { color: var(--primary); }
+
+@media (max-width: 860px) {
+  .staff-bottom-nav { display: block; }
+  .staff-col .main { padding-bottom: 88px; }
+  .sidebar { z-index: 50 !important; }
+  .sidebar-backdrop { z-index: 45 !important; }
+  .staff-topbar { padding: 10px 14px; gap: 10px; }
+  .staff-brand-title { font-size: 15px; }
+  .staff-search { display: none; }
+  .staff-subbar .staff-search { display: flex; }
+}
+
+/* ---------- Shop bottom nav + side slide ---------- */
+.shop-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 62px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+  z-index: 40;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.shop-bottom-nav-inner {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  height: 100%;
+}
+.shop-bottom-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-decoration: none;
+  min-height: auto;
+}
+.shop-bottom-nav a .ico { font-size: 20px; }
+.shop-bottom-nav a.active { color: var(--primary); }
+.shop-bottom-nav .cart-badge {
+  position: absolute; top: -6px; right: -10px;
+  background: var(--primary); color: #fff;
+  font-size: 10px; font-weight: 700;
+  min-width: 16px; height: 16px; border-radius: 999px;
+  display: grid; place-items: center; padding: 0 4px;
+}
+.shop-bottom-nav .nav-item { position: relative; }
+
+@media (max-width: 640px) {
+  .shop-bottom-nav { display: block; }
+  .shop-shell { padding-bottom: 76px; }
+  .shop-topbar { padding: 8px 12px; gap: 8px; }
+  .shop-topbar .shop-search { display: flex; flex: 1; min-width: 0; }
+  .shop-topbar .shop-search input { font-size: 14px; }
+  .shop-nav { gap: 8px; }
+  .shop-drawer { z-index: 100 !important; }
+  .shop-drawer-scrim { z-index: 90 !important; }
+}
+
+/* ---------- Mobile page headers: more app-like ---------- */
+@media (max-width: 640px) {
+  .page-header { flex-direction: column; align-items: stretch; gap: 10px; border-bottom: none; padding-bottom: 0; }
+  .page-header h1 { font-size: 20px; }
+  .toolbar { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px; }
+  .toolbar .search-input, .toolbar select { max-width: none; width: 100%; }
+  .stats-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stats-grid .stat-card .value { font-size: 18px; }
+  .grid-2 { grid-template-columns: 1fr; }
+  .alibaba-grid { grid-template-columns: 1fr; }
+  .alibaba-card { flex-direction: row; }
+  .alibaba-img { width: 110px; min-width: 110px; height: 110px; }
+  .pos-layout { grid-template-columns: 1fr; }
+  .pos-products { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---------- Splash + Auth: fit mobile phone (100dvh, safe area) ---------- */
+@media (max-width: 640px) {
+  .auth-wrap {
+    min-height: 100dvh !important;
+    min-height: 100vh !important;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)) !important;
+    align-items: flex-start !important;
+    padding-top: max(24px, env(safe-area-inset-top)) !important;
+  }
+  .auth-card {
+    padding: 22px 18px !important;
+    border-radius: 12px !important;
+    max-width: 100% !important;
+  }
+  .auth-card h1 { font-size: 20px !important; }
+  .auth-card .login-logo { height: 56px !important; margin-bottom: 10px !important; }
+}
+
+/* ---------- Disable hover effects on touch ---------- */
+@media (hover: none) {
+  .btn:hover, .alibaba-card:hover, .pos-tile:hover { transform: none; box-shadow: none; }
+}
+
+/* Print tweaks */
+@media print {
+  .staff-bottom-nav, .shop-bottom-nav { display: none !important; }
+}

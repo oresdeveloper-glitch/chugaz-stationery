@@ -1,0 +1,14 @@
+{
+  "name": "CHUGAZ Stationery - Inventory & POS",
+  "short_name": "CHUGAZ",
+  "description": "Manage products, stock, sales, purchases and online orders for CHUGAZ STATIONERY",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0e6ea8",
+  "theme_color": "#0e6ea8",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/logo.png?v=4", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/logo.png?v=4", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

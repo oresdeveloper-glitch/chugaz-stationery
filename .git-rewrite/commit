@@ -1,0 +1,6 @@
+tree d48524157d4c5b22f957bdc91dd3722cbb24e97d
+parent fd613b75afdb22ec6c3f82a29e142e7523692f95
+author orresydeveloper <orresydeveloper@users.noreply.github.com> 1788611761 +0300
+committer orresydeveloper <orresydeveloper@users.noreply.github.com> 1788611761 +0300
+
+Copy vite.config.js to root

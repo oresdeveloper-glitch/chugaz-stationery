@@ -1,0 +1,21 @@
+name: Deploy Backend to Railway
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'railway.json'
+      - 'package.json'
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jakejarvis/wait-for-service@v1
+        with:
+          service: 'railway'
+          timeout: 60
+      - run: |
+          cd backend
+          npm install
+          node server.js

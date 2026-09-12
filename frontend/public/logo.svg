@@ -1,0 +1,22 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0e6ea8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0a4a6b;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="silverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e0eef7;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#94a3b8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Hexagon background -->
+  <path d="M100 10 L180 50 L180 150 L100 190 L20 150 L20 50 Z" fill="url(#blueGrad)" stroke="#0a4a6b" stroke-width="2"/>
+  <!-- Inner G shape -->
+  <path d="M120 60 L150 60 L150 90 L120 90 L120 120 L150 120 L150 150 L80 150 L40 120 L40 80 L80 50 Z" fill="url(#silverGrad)" stroke="#334155" stroke-width="1.5"/>
+  <path d="M90 80 L120 80 L120 100 L90 100 Z" fill="#0a4a6b"/>
+  <!-- Circuit lines -->
+  <path d="M70 110 L110 110 L130 90 L170 90" fill="none" stroke="#0e6ea8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="175" cy="90" r="8" fill="#e0eef7" stroke="#0e6ea8" stroke-width="2"/>
+  <path d="M70 130 L110 130 L130 150 L170 150" fill="none" stroke="#0e6ea8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="175" cy="150" r="8" fill="#e0eef7" stroke="#0e6ea8" stroke-width="2"/>
+</svg>
