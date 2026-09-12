@@ -98,25 +98,17 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Server error' });
 });
 
-if (process.env.VERCEL) {
-  module.exports = app;
-} else if (isHuggingFace) {
-  // Hugging Face Spaces - single port, no HTTPS/ALT
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`API server running on http://0.0.0.0:${PORT} (Hugging Face Spaces)`);
-  });
-} else {
-  app.listen(PORT, () => {
-    console.log(`API server running on http://localhost:${PORT}`);
-  });
+module.exports = app;
 
+if (!module.parent) {
+  const PORT = process.env.PORT || 7860;
+  const isHuggingFace = process.env.SPACE_ID || process.env.HF_SPACE || process.env.HUGGINGFACE_SPACE;
   const ALT_PORT = Number(process.env.ALT_PORT || 4002);
   if ((process.env.SERVE_FRONTEND || '1') === '1') {
     app.listen(ALT_PORT, () => {
-      console.log(`App also running on http://localhost:${ALT_PORT} (fresh camera permission origin)`);
+      console.log(`App also running on http://localhost:${ALT_PORT}`);
     });
   }
-
   const HTTPS_PORT = Number(process.env.HTTPS_PORT || 4001);
   if ((process.env.SERVE_FRONTEND || '1') === '1') {
     (async () => {
@@ -129,7 +121,6 @@ if (process.env.VERCEL) {
         const certDir = path.join(__dirname, '..', 'certs');
         const keyPath = path.join(certDir, 'key.pem');
         const certPath = path.join(certDir, 'cert.pem');
-
         const lanIPs = [];
         const ifaces = os.networkInterfaces();
         for (const name of Object.keys(ifaces || {})) {
@@ -138,9 +129,7 @@ if (process.env.VERCEL) {
           }
         }
         const sanNames = ['localhost', '127.0.0.1', ...lanIPs];
-
         const sanIncludes = (sanStr, name) => sanStr.includes(name === 'localhost' ? 'DNS:localhost' : `IP Address:${name}`);
-
         let key, cert;
         if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
           key = fs.readFileSync(keyPath);
@@ -153,36 +142,25 @@ if (process.env.VERCEL) {
           fs.mkdirSync(certDir, { recursive: true });
           const pems = await selfsigned.generate(
             [{ name: 'commonName', value: 'localhost' }],
-            {
-              days: 825,
-              keySize: 2048,
-              algorithm: 'sha256',
-              extensions: [
-                { name: 'basicConstraints', cA: false },
-                { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
-                { name: 'extKeyUsage', serverAuth: true },
-                { name: 'subjectAltName', altNames: [
-                  { type: 2, value: 'localhost' },
-                  { type: 7, ip: '127.0.0.1' },
-                  ...lanIPs.map((ip) => ({ type: 7, ip })),
-                ] },
-              ],
-            },
+            { days: 825, keySize: 2048, algorithm: 'sha256', extensions: [{ name: 'basicConstraints', cA: false }, { name: 'keyUsage', digitalSignature: true, keyEncipherment: true }, { name: 'extKeyUsage', serverAuth: true }, { name: 'subjectAltName', altNames: [{ type: 2, value: 'localhost' }, { type: 7, ip: '127.0.0.1' }, ...lanIPs.map((ip) => ({ type: 7, ip }))] }] },
           );
           key = pems.private;
           cert = pems.cert;
           fs.writeFileSync(keyPath, key);
           fs.writeFileSync(certPath, cert);
         }
-
         httpsCert = cert;
-
         https.createServer({ key, cert }, app).listen(HTTPS_PORT, () => {
-          console.log(`HTTPS server running on https://localhost:${HTTPS_PORT} (SAN: ${sanNames.join(', ')})`);
+          console.log(`HTTPS server running on https://localhost:${HTTPS_PORT}`);
         });
       } catch (e) {
         console.error('HTTPS server failed to start:', e.message);
       }
     })();
+  }
+  if (isHuggingFace) {
+    app.listen(PORT, '0.0.0.0', () => { console.log(`API server running on http://0.0.0.0:${PORT} (HF Spaces)`); });
+  } else {
+    app.listen(PORT, () => { console.log(`API server running on http://localhost:${PORT}`); });
   }
 }
