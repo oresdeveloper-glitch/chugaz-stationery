@@ -1,30 +1,52 @@
+const express = require('express');
+const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
-const Module = require('module');
-try { if (!fs.existsSync('/var/task/backend/node_modules/express') && fs.existsSync('/var/task/node_modules/express')) { fs.cpSync('/var/task/node_modules', '/var/task/backend/node_modules', {recursive:true, force:true}); } } catch(e){}
-try { if (!fs.existsSync('/var/task/api/node_modules/express') && fs.existsSync('/var/task/node_modules/express')) { fs.cpSync('/var/task/node_modules', '/var/task/api/node_modules', {recursive:true, force:true}); } } catch(e){}
-['/var/task/node_modules','/var/task/backend/node_modules','/var/task/api/node_modules', path.join(__dirname,'../node_modules'), path.join(__dirname,'node_modules'), path.join(__dirname,'../backend/node_modules')].forEach(p=>{ if(!Module.globalPaths.includes(p)) Module.globalPaths.push(p); });
-process.env.NODE_PATH = ['/var/task/node_modules','/var/task/backend/node_modules','/var/task/api/node_modules', path.join(__dirname,'../node_modules')].join(':');
-require('module').Module._initPaths();
 
-module.exports = (req, res) => {
-  if (req.url && req.url.includes('/health')) {
-    const fs = require('fs');
-    let dbg={};
-    try{ dbg['/var/task']=fs.readdirSync('/var/task').slice(0,20) }catch(e){dbg['/var/task']=e.message}
-    try{ dbg['/var/task/backend']=fs.readdirSync('/var/task/backend').slice(0,20) }catch(e){dbg['/var/task/backend']=e.message}
-    try{ dbg['/var/task/api']=fs.readdirSync('/var/task/api').slice(0,20) }catch(e){dbg['/var/task/api']=e.message}
-    try{ dbg['backend_exists']=fs.existsSync('/var/task/backend/node_modules/express')}catch(e){}
-    try{ dbg['root_exists']=fs.existsSync('/var/task/node_modules/express')}catch(e){}
-    try{ dbg['api_exists']=fs.existsSync('/var/task/api/node_modules/express')}catch(e){}
-    return res.status(200).json({ ok: true, db: 'connected', payment_instructions: '356322054 - CHUGAZ STATIONERY', dbg });
-  }
-  let app;
-  try {
-    try { app = require('./backend/server'); } catch (_) { app = require('../backend/server'); }
-  } catch (e) {
-    console.error('load error', e);
-    return res.status(500).json({ error: 'load failed', message: e.message, stack: e.stack });
-  }
-  return app(req, res);
-};
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '5mb' }));
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  next();
+});
+
+const { requireAuth, requireRole } = require('../backend/src/auth');
+const customerRoutes = require('../backend/src/routes/customer');
+const staff = [requireAuth, requireRole('clerk', 'cashier', 'manager', 'admin')];
+
+app.use('/api/auth', require('../backend/src/routes/auth'));
+app.use('/api/shop', require('../backend/src/routes/shop'));
+app.use('/api/shop', customerRoutes.publicRouter);
+app.use('/api/shop/cart', require('../backend/src/routes/cart'));
+app.use('/api/shop', requireAuth, customerRoutes.protectedRouter);
+app.use('/api/shop/orders', requireAuth, require('../backend/src/routes/customerOrders'));
+app.use('/api/products', staff, require('../backend/src/routes/products'));
+app.use('/api/suppliers', staff, require('../backend/src/routes/suppliers'));
+app.use('/api/customers', staff, require('../backend/src/routes/customers'));
+app.use('/api/purchases', requireAuth, requireRole('admin'), require('../backend/src/routes/purchases'));
+app.use('/api/sales', staff, require('../backend/src/routes/sales'));
+app.use('/api/stock', staff, require('../backend/src/routes/stock'));
+app.use('/api/expenses', staff, require('../backend/src/routes/expenses'));
+app.use('/api/users', staff, require('../backend/src/routes/users'));
+app.use('/api/offices', staff, require('../backend/src/routes/offices'));
+app.use('/api/reports', staff, require('../backend/src/routes/reports'));
+app.use('/api/orders', staff, require('../backend/src/routes/orderAdmin'));
+app.use('/api/messages', staff, require('../backend/src/routes/messages'));
+app.use('/api/system', staff, require('../backend/src/routes/system'));
+
+app.get('/api/health', (req, res) => res.json({ ok: true, db: 'connected', payment_instructions: '356322054 - CHUGAZ STATIONERY' }));
+
+const dist = path.join(__dirname, '..', 'frontend', 'dist');
+app.use('/api', (req, res) => res.status(404).json({ error: 'API endpoint not found' }));
+app.use(express.static(dist));
+app.get('*', (req, res) => { res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); res.sendFile(path.join(dist, 'index.html')); });
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: err.message || 'Server error' });
+});
+
+module.exports = app;
