@@ -113,6 +113,31 @@ try {
     console.error('[db] bootstrap seed skipped:', e && e.message ? e.message : e);
   }
 
+  // Catalog bootstrap: ship the real store catalog so the customer shop
+  // is not empty on fresh serverless disks. Idempotent — skipped when
+  // products already exist (warm instances).
+  try {
+    const prodCount = real.prepare('SELECT COUNT(*) AS c FROM products').get().c;
+    if (!prodCount) {
+      const seed = require('./catalog-seed');
+      const insCat = real.prepare('INSERT OR IGNORE INTO categories (id, name, description) VALUES (?,?,?)');
+      for (const c of seed.categories) insCat.run(c.id, c.name, c.description || null);
+      const insBrand = real.prepare('INSERT OR IGNORE INTO brands (id, name) VALUES (?,?)');
+      for (const b of seed.brands) insBrand.run(b.id, b.name);
+      const insProd = real.prepare(
+        'INSERT OR IGNORE INTO products (id, sku, barcode, name, category_id, brand_id, unit, purchase_price, selling_price, tax_rate, discount_rate, reorder_level, current_stock, reserved_stock, image, status, description, specifications, unit_prices, parent_id, office_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)'
+      );
+      for (const p of seed.products) {
+        insProd.run(p.id, p.sku || null, p.barcode || null, p.name, p.category_id || null, p.brand_id || null,
+          p.unit || 'piece', p.purchase_price ?? 0, p.selling_price ?? 0, p.tax_rate ?? 0, p.discount_rate ?? 0,
+          p.reorder_level ?? 0, p.current_stock ?? 0, p.reserved_stock ?? 0, p.image || null, p.status || 'active',
+          p.description || null, p.specifications || null, p.unit_prices || null, p.parent_id || null);
+      }
+    }
+  } catch (e) {
+    console.error('[db] catalog seed skipped:', e && e.message ? e.message : e);
+  }
+
   db = real;
   dbReady = true;
 } catch (e) {
