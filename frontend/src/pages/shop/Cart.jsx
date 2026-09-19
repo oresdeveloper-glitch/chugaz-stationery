@@ -5,6 +5,7 @@ import { useShop } from '../../shop/ShopContext';
 import RequireShopAuth from '../../shop/RequireShopAuth';
 import { useToast } from '../../components/Toast';
 import I from '../../components/icons';
+import SafeImg from '../../shop/SafeImg';
 
 function CartInner() {
   const [cart, setCart] = useState(null);
@@ -56,9 +57,8 @@ function CartInner() {
             {cart.items.map((i) => (
               <div className="cart-line" key={i.id} style={{ alignItems: 'center', gap: 14 }}>
                 <Link to={`/shop/product/${i.product_id}`} style={{ flexShrink: 0 }}>
-                  {i.image
-                    ? <img src={i.image} alt="" style={{ width: 56, height: 56, borderRadius: 10, objectFit: 'cover', border: '1px solid var(--border)', display: 'block' }} />
-                    : <span style={{ width: 56, height: 56, borderRadius: 10, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}><I name="box" size={24} /></span>}
+                  <SafeImg src={i.image} alt="" style={{ width: 56, height: 56, borderRadius: 10, objectFit: 'cover', border: '1px solid var(--border)', display: 'block' }}
+                    fallback={<span style={{ width: 56, height: 56, borderRadius: 10, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}><I name="box" size={24} /></span>} />
                 </Link>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <Link to={`/shop/product/${i.product_id}`} className="name" style={{ fontWeight: 650 }}>{i.product_name}</Link>

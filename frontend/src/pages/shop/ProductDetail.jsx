@@ -4,6 +4,7 @@ import { shopApi, fmt } from '../../lib/api';
 import { useShop } from '../../shop/ShopContext';
 import { useToast } from '../../components/Toast';
 import I from '../../components/icons';
+import SafeImg from '../../shop/SafeImg';
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -62,13 +63,13 @@ export default function ProductDetail() {
 
       <div className="card pd-hero">
         <div className="pd-media">
-          {mainImg
-            ? <img src={mainImg} className="pd-main-img" alt={eff.name} />
-            : <div className="pd-main-empty" style={{display:'grid',placeItems:'center',color:'var(--muted)',fontWeight:600}}>{eff.name?.[0] || 'P'}</div>}
+          <SafeImg src={mainImg} alt={eff.name} className="pd-main-img"
+            fallback={<div className="pd-main-empty" style={{display:'grid',placeItems:'center',color:'var(--muted)',fontWeight:600}}>{eff.name?.[0] || 'P'}</div>} />
           {gallery.length > 1 && (
             <div className="pd-thumbs">
               {gallery.map((g, i) => (
-                <img key={i} src={g} onClick={() => setImgIdx(i)} className={`pd-thumb${i === imgIdx ? ' on' : ''}`} alt="" />
+                <SafeImg key={i} src={g} onClick={() => setImgIdx(i)} className={`pd-thumb${i === imgIdx ? ' on' : ''}`} alt=""
+                  fallback={<span style={{display:'none'}} />} />
               ))}
             </div>
           )}
@@ -161,7 +162,8 @@ export default function ProductDetail() {
           <div className="pd-similar-grid">
             {p.similar.map((s) => (
               <Link key={s.id} to={`/shop/product/${s.id}`} className="pd-mini">
-                <div className="pd-mini-img">{s.image ? <img src={s.image} alt={s.name} loading="lazy" /> : <span style={{display:'grid',placeItems:'center',width:'100%',height:'100%',color:'var(--muted)',fontWeight:600}}>{s.name?.[0] || 'P'}</span>}</div>
+                <div className="pd-mini-img"><SafeImg src={s.image} alt={s.name} loading="lazy" letter={s.name?.[0] || 'P'}
+                  fallback={<span style={{display:'grid',placeItems:'center',width:'100%',height:'100%',color:'var(--muted)',fontWeight:600}}>{s.name?.[0] || 'P'}</span>} /></div>
                 <div className="pd-mini-body">
                   <div className="pd-mini-name">{s.name}</div>
                   <div className="pd-mini-price">{fmt(s.selling_price)} <span>{currency}/{s.unit || 'piece'}</span></div>

@@ -4,6 +4,7 @@ import { shopApi, fmt } from '../../lib/api';
 import { useShop } from '../../shop/ShopContext';
 import { useToast } from '../../components/Toast';
 import I from '../../components/icons';
+import SafeImg from '../../shop/SafeImg';
 
 export default function Catalog() {
   const [products, setProducts] = useState([]);
@@ -87,7 +88,7 @@ export default function Catalog() {
             {row1.map((c) => (
               <button key={c.id || 'all'} className={`cat-slide-card ${cat == c.id ? 'active' : ''}`} onClick={() => setParam('category', cat == c.id ? '' : c.id)}>
                 <span className={`cat-slide-ico ${c.id === '' ? 'cat-g-navy' : catGrad(c.name)}${c.image ? ' has-img' : ''}`}>
-                  {c.id === '' ? <I name="cart" size={24} /> : (c.image ? <img src={c.image} alt={c.name} /> : <span style={{fontWeight:700,color:"var(--muted)"}}>S</span>)}
+                  {c.id === '' ? <I name="cart" size={24} /> : <SafeImg src={c.image} alt={c.name} letter="S" />}
                 </span>
                 <span className="cat-slide-txt">
                   <span className="cat-slide-name">{c.name}</span>
@@ -101,7 +102,7 @@ export default function Catalog() {
               {row2.map((c) => (
                 <button key={c.id} className={`cat-slide-card ${cat == c.id ? 'active' : ''}`} onClick={() => setParam('category', cat == c.id ? '' : c.id)}>
                   <span className={`cat-slide-ico ${catGrad(c.name)}${c.image ? ' has-img' : ''}`}>
-                    {c.image ? <img src={c.image} alt={c.name} /> : <span style={{fontWeight:700,color:"var(--muted)"}}>S</span>}
+                    <SafeImg src={c.image} alt={c.name} letter="S" />
                   </span>
                   <span className="cat-slide-txt">
                     <span className="cat-slide-name">{c.name}</span>
@@ -132,7 +133,7 @@ export default function Catalog() {
             {products.map((p) => (
               <Link key={p.id} to={`/shop/product/${p.id}`} className="alibaba-card" style={p.in_stock === false ? { opacity: 0.62 } : {}}>
                 <div className="alibaba-img">
-                  {p.image ? <img src={p.image} alt={p.name} loading="lazy" /> : <span style={{fontWeight:700,color:"var(--muted)"}}>{p.name?.[0] || "P"}</span>}
+                  <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || "P"} loading="lazy" />
                 </div>
                 <div className="alibaba-card-body">
                   <div className="alibaba-name">
