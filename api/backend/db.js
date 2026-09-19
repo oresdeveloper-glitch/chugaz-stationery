@@ -92,6 +92,27 @@ try {
     real.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('payment_instructions', '356322054 - CHUGAZ STATIONERY');
   } catch (_) { /* settings table may not exist yet on fresh stub */ }
 
+  // First-run bootstrap: serverless disks (/tmp) start empty and seed.js
+  // never runs there, so create roles + default logins when no users exist.
+  // Idempotent — skipped on warm instances that already have users.
+  try {
+    real.exec("INSERT OR IGNORE INTO roles (id, name) VALUES (1,'admin'),(2,'manager'),(3,'cashier'),(4,'clerk'),(5,'customer')");
+    const userCount = real.prepare('SELECT COUNT(*) AS c FROM users').get().c;
+    if (!userCount) {
+      const bcrypt = require('bcryptjs');
+      const adminEmail = process.env.ADMIN_EMAIL || 'admin@shop.com';
+      const adminPass = process.env.ADMIN_PASSWORD || 'admin123';
+      const add = real.prepare("INSERT INTO users (name, email, password_hash, role_id, status) VALUES (?,?,?,?,'active')");
+      add.run('Administrator', adminEmail, bcrypt.hashSync(adminPass, 10), 1);
+      add.run('Manager', 'manager@shop.com', bcrypt.hashSync('manager123', 10), 2);
+      add.run('Cashier', 'cashier@shop.com', bcrypt.hashSync('cashier123', 10), 3);
+      add.run('Clerk', 'clerk@shop.com', bcrypt.hashSync('clerk123', 10), 4);
+      add.run('Online Customer', 'customer@shop.com', bcrypt.hashSync('cust123', 10), 5);
+    }
+  } catch (e) {
+    console.error('[db] bootstrap seed skipped:', e && e.message ? e.message : e);
+  }
+
   db = real;
   dbReady = true;
 } catch (e) {
