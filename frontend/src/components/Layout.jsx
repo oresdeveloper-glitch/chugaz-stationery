@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
-import { clearAuth, api, fmt, setAuth, getToken, getUser, lockPrintRedirect, unlockPrintRedirect, refreshToken, isSessionValid } from '../lib/api';
+import { clearAuth, api, fmt, setAuth, getToken, getUser, lockPrintRedirect, unlockPrintRedirect, refreshToken } from '../lib/api';
 import { canRole } from '../lib/roles';
 import Modal from './Modal';
 import { useToast } from './Toast';

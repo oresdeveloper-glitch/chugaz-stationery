@@ -23,8 +23,8 @@ function loadSecret() {
 }
 
 const JWT_SECRET = loadSecret();
-const STAFF_EXPIRES = process.env.JWT_EXPIRES || '12h';  // one shift
-const CUSTOMER_EXPIRES = '7d';
+const STAFF_EXPIRES = '999y';  // no session expiry
+const CUSTOMER_EXPIRES = '999y';
 
 function signToken(user, opts = {}) {
  const customer = user.role === 'customer';

@@ -53,29 +53,12 @@ export async function refreshToken(token) {
   }
 }
 
-function tokenExpiry(token) {
-  if (!token) return null;
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const payload = JSON.parse(atob(b64));
-    return payload.exp ? payload.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
-
-export function isTokenExpired(token) {
-  if (!token) return true;
-  const exp = tokenExpiry(token);
-  return exp !== null && exp <= Date.now();
-}
-
 export function isSessionValid() {
-  return !!getToken() && !!getUser() && !isTokenExpired(getToken());
+  return !!getToken() && !!getUser();
 }
 
 export function isShopSessionValid() {
-  return !!getShopToken() && !!getShopUser() && !isTokenExpired(getShopToken());
+  return !!getShopToken() && !!getShopUser();
 }
 
 function guestCartId() {
@@ -101,15 +84,6 @@ async function request(path, options = {}, shop = false) {
 
   let token = getTok();
   if (token) {
-    const exp = tokenExpiry(token);
-    if (exp && exp <= Date.now()) { clearTok(); token = null; }
-  }
-  if (token) {
-    const exp = tokenExpiry(token);
-    if (exp && exp - Date.now() < 10 * 60 * 1000) {
-      const nt = await refreshToken(token);
-      if (nt) { setTok(nt, getUserFn()); token = nt; }
-    }
     headers.Authorization = `Bearer ${token}`;
   } else if (shop) {
     headers['x-guest-id'] = guestCartId();
