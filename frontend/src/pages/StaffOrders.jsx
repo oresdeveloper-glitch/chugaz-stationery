@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmt, fmtDateTime, getUser } from '../lib/api';
+import { api, fmt, fmtDateTime, getUser, lockPrintRedirect, unlockPrintRedirect } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { useToast } from '../components/Toast';
 import I from '../components/icons';
@@ -118,9 +118,10 @@ export default function StaffOrders() {
             <div class="pay-card"><h4>4. Halotel — HaloPesa</h4><div>Piga: <span class="ussd">*150*88#</span></div><ol><li>Chagua Lipa</li><li>Chagua Lipa kwa Simu</li><li>Chagua M-Pesa</li><li>Weka Lipa Namba ya Vodacom</li><li>Weka kiasi: <b>\${fmt(selected.total)} ${cur}</b></li><li>Hakikisha jina la M-Pesa</li><li>Weka PIN ya HaloPesa</li><li>Thibitisha</li></ol></div>
           </div>
         </div>`;
-    const paySection = selected.order_status === 'pending' ? payHtml : '';
-    const w = window.open('', '_blank');
-    w.document.write(`<!doctype html><html><head><title>${selected.order_number}</title>    <style>
+     const paySection = selected.order_status === 'pending' ? payHtml : '';
+     lockPrintRedirect();
+     const w = window.open('', '_blank');
+     w.document.write(`<!doctype html><html><head><title>${selected.order_number}</title>    <style>
       @page { size: A4 portrait; margin: 14mm 12mm 18mm 12mm; @bottom-right { content: "Page " counter(page); font-size: 7.5px; color: #5a7286; } }
       * { box-sizing: border-box; }
       body { font-family: inherit; color: #17191c; padding: 0 0 30px; margin: 0; }
@@ -225,9 +226,10 @@ export default function StaffOrders() {
         <div class="print-footer"><span>Designed by CHUGAZ ICT SERVICES</span><span class="page-num"></span></div>
       </div>
     </body></html>`);
-    w.document.close();
-    w.print();
-  };
+     w.document.close();
+     w.print();
+     unlockPrintRedirect();
+   };
 
   return (
     <div>

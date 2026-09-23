@@ -88,6 +88,10 @@ function guestCartId() {
   return id;
 }
 
+let printLocked = false;
+export function lockPrintRedirect() { printLocked = true; }
+export function unlockPrintRedirect() { printLocked = false; }
+
 async function request(path, options = {}, shop = false) {
   const headers = { ...(options.headers || {}) };
   const getTok = shop ? getShopToken : getToken;
@@ -126,7 +130,7 @@ async function request(path, options = {}, shop = false) {
       res = await fetch(`${base}/api${shop ? '/shop' : ''}${path}`, { ...options, headers });
     } else {
       clearTok();
-      if (!shop) window.location.href = '/login';
+      if (!shop && !printLocked) window.location.href = '/login';
       throw new Error(shop ? 'Session expired' : 'Your session expired. Please sign in again.');
     }
   }

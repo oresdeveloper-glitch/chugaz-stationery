@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
-import { clearAuth, api, fmt, setAuth, getToken, getUser } from '../lib/api';
+import { clearAuth, api, fmt, setAuth, getToken, getUser, lockPrintRedirect, unlockPrintRedirect, refreshToken, isSessionValid } from '../lib/api';
 import { canRole } from '../lib/roles';
 import Modal from './Modal';
 import { useToast } from './Toast';
@@ -63,6 +63,28 @@ export default function Layout({ user, setUser, children }) {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    const onBeforePrint = async () => {
+      lockPrintRedirect();
+      try {
+        const token = getToken();
+        if (token) {
+          const nt = await refreshToken(token);
+          if (nt) setAuth(nt, getUser());
+        }
+      } catch { /* proceed with print even if refresh fails */ }
+    };
+    const onAfterPrint = () => {
+      unlockPrintRedirect();
+    };
+    window.addEventListener('beforeprint', onBeforePrint);
+    window.addEventListener('afterprint', onAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', onBeforePrint);
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
   }, []);
 
   const doSearch = useCallback(async (q) => {
