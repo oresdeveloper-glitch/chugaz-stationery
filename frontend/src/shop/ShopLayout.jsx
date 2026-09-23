@@ -38,7 +38,7 @@ export default function ShopLayout() {
       {!hideChrome && (
       <div className="shop-topbar">
         <button className="shop-menu-btn" onClick={() => setMenuOpen(true)} aria-label="Open menu"><I name="menu" size={20} /></button>
-        <Link to="/shop" className="shop-brand"><span className="shop-brand-logo"><img src="/logo-classic.svg?v=1" alt="CHUGAZ STATIONERY" /></span><span className="shop-brand-text"><span className="shop-brand-slide">CHUGAZ STATIONERY</span></span></Link>
+        <Link to="/shop" className="shop-brand"><span className="shop-brand-logo"><img src="/logo.png" alt="" /></span><span className="shop-brand-text"><span className="shop-brand-slide">CHUGAZ STATIONERY</span></span></Link>
         <form className="shop-search" onSubmit={search}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products, SKU or barcode..." />
           <button className="btn primary sm">Search</button>
@@ -65,7 +65,7 @@ export default function ShopLayout() {
       {!hideChrome && <div className={`shop-drawer-scrim ${menuOpen ? 'open' : ''}`} onClick={closeMenu} />}
       {!hideChrome && <aside className={`shop-drawer ${menuOpen ? 'open' : ''}`} aria-label="Side menu">
         <div className="shop-drawer-head">
-          <span className="shop-drawer-brand"><img src="/logo-classic.svg?v=1" alt="CHUGAZ STATIONERY" /> CHUGAZ STATIONERY</span>
+          <span className="shop-drawer-brand"><img src="/logo.png" alt="" /> CHUGAZ STATIONERY</span>
           <button className="shop-drawer-close" onClick={closeMenu} aria-label="Close menu"><I name="x" size={18} /></button>
         </div>
         <nav className="shop-side-nav">

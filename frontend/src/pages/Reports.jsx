@@ -67,7 +67,7 @@ export default function Reports() {
   return (
     <div>
       <div className="doc-head">
-        <img src="/logo-doc.png?v=2" alt="" />
+        <img src="/logo.png" alt="" />
         <div className="doc-head-meta">
           <h2>{tabLabel}</h2>
           <div className="muted small">

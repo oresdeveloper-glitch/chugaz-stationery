@@ -396,7 +396,7 @@ export default function Pos() {
           <div className="modal">
             <style>{RECEIPT_STYLE}</style>
             <div id="receipt">
-              <img src="/logo-doc.png?v=2" alt="" className="rlogo" />
+              <img src="/logo.png" alt="" className="rlogo" />
               <h2>{settings.shop_name || ''}</h2>
               {settings.shop_address && <div className="sub">{settings.shop_address}</div>}
               {settings.shop_phone && <div className="sub">Tel: {settings.shop_phone}</div>}
