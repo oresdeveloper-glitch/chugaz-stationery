@@ -191,7 +191,7 @@ export default function StaffOrders() {
       <div class="wrap">
         <div class="head">
           <div class="brand">
-            <img src="${location.origin}/logo-doc.png?v=3" />
+            <img src="/logo-doc.png?v=3" />
             <div>
               <div class="nm">${shop.shop_name || ''}</div>
               <div class="mt">${shop.shop_address || ''}<br/>${shop.shop_phone || ''}${shop.shop_email ? ' · ' + shop.shop_email : ''}</div>

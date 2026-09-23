@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 import Barcode from '../components/Barcode';
 import I from '../components/icons';
+import SafeImg from '../shop/SafeImg';
 
 const EMPTY = {
   sku: '', barcode: '', name: '', category_id: '', brand_id: '', unit: 'piece',
@@ -174,7 +175,7 @@ export default function Products() {
           {filtered.map((p) => (
             <div key={p.id} className="alibaba-card" style={{ cursor: 'default' }}>
               <div className="alibaba-img">
-                {p.image ? <img src={p.image} alt={p.name} loading="lazy" /> : <span style={{ display: 'grid', placeItems: 'center', width: '100%', height: '100%', background: 'var(--panel-2)', color: 'var(--muted)', fontWeight: 600 }}>{p.name?.[0] || 'P'}</span>}
+                {p.image ? <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || 'P'} loading="lazy" /> : <span style={{ display: 'grid', placeItems: 'center', width: '100%', height: '100%', background: 'var(--panel-2)', color: 'var(--muted)', fontWeight: 600 }}>{p.name?.[0] || 'P'}</span>}
               </div>
               <div className="alibaba-card-body">
                 <div className="alibaba-name">{p.name}</div>
@@ -364,7 +365,7 @@ export default function Products() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
               {(gallery.images || []).map((im) => (
                 <div key={im.id} style={{ position: 'relative' }}>
-                  <img src={im.path} style={{ width: 110, height: 110, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--border)' }} />
+                  <SafeImg src={im.path} alt={gallery?.name || 'Photo'} letter="P" style={{ width: 110, height: 110, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--border)' }} />
                   <button
                     className="btn sm danger"
                     style={{ position: 'absolute', top: 4, right: 4, padding: '2px 7px', borderRadius: '50%' }}

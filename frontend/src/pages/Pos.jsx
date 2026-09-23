@@ -4,6 +4,7 @@ import { api, fmt, getUser } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { takeScanned } from '../lib/scanStore';
 import I from '../components/icons';
+import SafeImg from '../shop/SafeImg';
 
 const RECEIPT_STYLE = `
   #receipt { font-family: monospace; font-size: 12px; width: 80mm; padding: 10px 8px; color: #000; background: #fff; }
@@ -278,7 +279,7 @@ export default function Pos() {
                 {products.length === 0 && <div className="muted" style={{ padding: 24, textAlign: 'center' }}>No products found.</div>}
                 {products.map((p) => (
                   <button type="button" className="pos-tile" key={p.id} onClick={() => addToCart(p)}>
-                    <div className="pimg">{p.image ? <img src={p.image} alt="" /> : <span style={{fontWeight:700,color:"var(--muted)"}}>{p.name?.[0] || "P"}</span>}</div>
+                    <div className="pimg">{p.image ? <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || "P"} /> : <span style={{fontWeight:700,color:"var(--muted)"}}>{p.name?.[0] || "P"}</span>}</div>
                     <div className="pname">{p.name}</div>
                     <div className="pprice">{fmt(p.selling_price)}</div>
                     <div className="pstock">{p.in_stock ? `${fmt(p.in_stock)} ${p.unit || ''} in stock`.trim() : 'Out of stock'}</div>
@@ -319,7 +320,7 @@ export default function Pos() {
           {cart.length === 0 && <div className="pos-empty"><I name="cart" size={28} /><p>Cart is empty</p><span className="muted small">Scan or search to add items</span></div>}
           {cart.map((i) => (
             <div className="pos-line" key={i.product_id}>
-              <div className="pos-line-img">{i.image ? <img src={i.image} alt="" /> : <span style={{fontWeight:700,color:"var(--muted)"}}>{i.name?.[0] || "P"}</span>}</div>
+              <div className="pos-line-img">{i.image ? <SafeImg src={i.image} alt={i.name} letter={i.name?.[0] || "P"} /> : <span style={{fontWeight:700,color:"var(--muted)"}}>{i.name?.[0] || "P"}</span>}</div>
               <div className="pos-line-main">
                 <span className="pos-line-name">{i.name}</span>
                 <span className="muted small">{fmt(i.price)} · {i.unit || 'piece'}</span>
