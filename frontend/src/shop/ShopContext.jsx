@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { getShopUser, setShopAuth, clearShopAuth, shopApi, isShopSessionValid } from '../lib/api';
+import { getShopUser, setShopAuth, clearShopAuth, shopApi, isShopSessionValid, validateShopSession } from '../lib/api';
 
 const ShopCtx = createContext(null);
 
@@ -9,6 +9,7 @@ export function ShopProvider({ children }) {
     return getShopUser();
   });
   const [cartCount, setCartCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   const refreshCart = useCallback(async () => {
     try {
@@ -17,6 +18,24 @@ export function ShopProvider({ children }) {
     } catch {
       setCartCount(0);
     }
+  }, []);
+
+  useEffect(() => {
+    const validate = async () => {
+      try {
+        const valid = await validateShopSession();
+        if (!valid) {
+          clearShopAuth();
+          setUser(null);
+        }
+      } catch {
+        clearShopAuth();
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+    validate();
   }, []);
 
   useEffect(() => {
@@ -34,7 +53,7 @@ export function ShopProvider({ children }) {
   };
 
   return (
-    <ShopCtx.Provider value={{ user, setUser, login, logout, cartCount, refreshCart }}>
+    <ShopCtx.Provider value={{ user, setUser, login, logout, cartCount, refreshCart, loading }}>
       {children}
     </ShopCtx.Provider>
   );

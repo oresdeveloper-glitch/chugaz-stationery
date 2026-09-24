@@ -68,23 +68,34 @@ function CheckoutInner() {
       return toast('Enter the transaction reference from your payment (min 4 characters)', 'error');
     }
     setPlacing(true);
-    try {
-      const body = {
-        fulfillment_type: form.fulfillment,
-        delivery_address_id: form.address_id || null,
-        payment_method: form.method,
-        transaction_reference: form.reference || null,
-        notes: form.notes || null,
-      };
-      const order = await shopApi('/orders', { method: 'POST', body });
-      await refreshCart();
-      toast(`Order ${order.order_number} placed`);
-      navigate(`/shop/order/${order.id}`);
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      setPlacing(false);
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const body = {
+          fulfillment_type: form.fulfillment,
+          delivery_address_id: form.address_id || null,
+          payment_method: form.method,
+          transaction_reference: form.reference || null,
+          notes: form.notes || null,
+        };
+        const order = await shopApi('/orders', { method: 'POST', body });
+        await refreshCart();
+        toast(`Order ${order.order_number} placed`);
+        navigate(`/shop/order/${order.id}`);
+        setPlacing(false);
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (err.message.includes('session') || err.message.includes('Session')) {
+          try { await shopApi('/logout'); } catch {}
+          window.location.href = '/shop/login';
+          return;
+        }
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      }
     }
+    toast(lastErr?.message || 'Failed to place order. Please try again.', 'error');
+    setPlacing(false);
   };
 
   if (!cart || !info) return <div className="card">Loading…</div>;

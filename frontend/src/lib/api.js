@@ -120,7 +120,17 @@ export async function api(path, options = {}) {
 }
 
 export async function shopApi(path, options = {}) {
-  return request(path, options, true);
+    return request(path, options, true);
+}
+
+export async function validateShopSession() {
+    try {
+        const data = await shopApi('/me');
+        return data ? true : false;
+    } catch {
+        clearShopAuth();
+        return false;
+    }
 }
 
 export const fmt = (n) => {
