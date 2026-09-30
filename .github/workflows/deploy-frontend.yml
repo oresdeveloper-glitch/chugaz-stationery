@@ -18,5 +18,22 @@ jobs:
       - run: npm install
       - run: cd frontend && npm install && npm run build
       - run: cd api && npm install
+      - name: Ensure JWT_SECRET exists on Vercel
+        continue-on-error: true
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if npx vercel env ls --token="$VERCEL_TOKEN" 2>/dev/null | grep -q "JWT_SECRET"; then
+            echo "JWT_SECRET already set on Vercel - nothing to do"
+          else
+            echo "JWT_SECRET missing - generating once and adding (production + preview)"
+            SECRET="$(openssl rand -hex 64)"
+            printf '%s' "$SECRET" | npx vercel env add JWT_SECRET production --token="$VERCEL_TOKEN" >/dev/null 2>&1
+            printf '%s' "$SECRET" | npx vercel env add JWT_SECRET preview --token="$VERCEL_TOKEN" >/dev/null 2>&1
+            unset SECRET
+            echo "JWT_SECRET added"
+          fi
       - name: Deploy to Vercel Production
         run: npx vercel deploy --prod --force --yes --token=${{ secrets.VERCEL_TOKEN }}

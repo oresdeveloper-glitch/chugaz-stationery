@@ -1,11 +1,8 @@
 name: Deploy Backend to Railway
+# Disabled on push: this job never actually deployed (it just ran the server
+# inside CI and failed). Run manually only.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'backend/**'
-      - 'railway.json'
-      - 'package.json'
+  workflow_dispatch
 jobs:
   deploy:
     runs-on: ubuntu-latest
