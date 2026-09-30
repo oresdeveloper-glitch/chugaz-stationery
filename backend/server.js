@@ -5,7 +5,7 @@ const express = require('express');
 const cors = require('cors');
 
 const { db } = require('./src/db');
-const { requireAuth, requireRole } = require('./src/auth');
+const { requireAuth, requireRole, optionalAuth } = require('./src/auth');
 
 const app = express();
 const PORT = process.env.PORT || 7860;
@@ -39,10 +39,11 @@ app.use('/api/shop', require('./src/routes/shop'));
 const customerRoutes = require('./src/routes/customer');
 app.use('/api/shop', customerRoutes.publicRouter);
 app.use('/api/shop/cart', require('./src/routes/cart'));
+// Orders BEFORE the protectedRouter mount: its requireAuth would otherwise
+// reject guest checkouts before they reach the guest-aware orders router.
+// Customer orders: signed-in customers AND guests (guest checkout needs no token)
+app.use('/api/shop/orders', optionalAuth, require('./src/routes/customerOrders'));
 app.use('/api/shop', requireAuth, customerRoutes.protectedRouter);
-
-// Customer (requires customer token)
-app.use('/api/shop/orders', requireAuth, require('./src/routes/customerOrders'));
 
 // Staff protected (all staff roles; individual routes may require more)
 const staff = [requireAuth, requireRole('clerk', 'cashier', 'manager', 'admin')];

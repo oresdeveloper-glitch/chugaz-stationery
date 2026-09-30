@@ -1,11 +1,37 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { db, audit, transact } = require('../db');
 const { requireCustomer } = require('../auth');
 const u = require('../units');
 
 const router = express.Router();
 
-router.use(requireCustomer);
+// System customer that owns guest-checkout orders (created on demand).
+// Guests can order without signing in, so placing an order never depends
+// on a session. This row can never log in (random unguessable hash).
+const GUEST_EMAIL = 'guest@shop.local';
+function ensureGuestUserId() {
+  const existing = db.prepare('SELECT id FROM users WHERE email=?').get(GUEST_EMAIL);
+  if (existing) return Number(existing.id);
+  const roleId = db.prepare("SELECT id FROM roles WHERE name='customer'").get();
+  if (!roleId) throw new Error('Customer role not configured');
+  const hash = bcrypt.hashSync(crypto.randomBytes(48).toString('hex'), 10);
+  try {
+    const info = db.prepare('INSERT INTO users (name, email, phone, password_hash, role_id, status) VALUES (?,?,?,?,?,?)')
+      .run('Guest Checkout', GUEST_EMAIL, null, hash, roleId.id, 'active');
+    return Number(info.lastInsertRowid);
+  } catch (e) {
+    const retry = db.prepare('SELECT id FROM users WHERE email=?').get(GUEST_EMAIL);
+    if (retry) return Number(retry.id);
+    throw e;
+  }
+}
+
+function guestId(req) {
+  const id = req.get('x-guest-id');
+  return id && /^[A-Za-z0-9-]{8,64}$/.test(id) ? id : null;
+}
 
 const PAYMENT_METHODS = ['cash_on_delivery', 'pay_at_shop', 'card', 'mobile_money', 'bank_transfer', 'credit'];
 const ONLINE_PAID = ['card', 'mobile_money', 'bank_transfer'];
@@ -33,29 +59,60 @@ function settings() {
  return s;
 }
 
-// ---- place order from cart ----
+// ---- place order from cart (signed-in customers AND guests) ----
 router.post('/', (req, res) => {
- const { fulfillment_type, delivery_address_id, payment_method, transaction_reference, notes } = req.body;
- const ft = fulfillment_type === 'pickup' ? 'pickup' : 'delivery';
- const method = PAYMENT_METHODS.includes(payment_method) ? payment_method : 'cash_on_delivery';
- if (ft === 'delivery' && !delivery_address_id) {
-  return res.status(400).json({ error: 'Please select a delivery address' });
- }
+  const isGuest = !req.user;
+  if (req.user && req.user.role !== 'customer') {
+    return res.status(403).json({ error: 'Customer account required' });
+  }
+  const { fulfillment_type, delivery_address_id, payment_method, transaction_reference, notes,
+    guest_name, guest_phone, guest_address, guest_city } = req.body;
+  const ft = fulfillment_type === 'pickup' ? 'pickup' : 'delivery';
+  const method = PAYMENT_METHODS.includes(payment_method) ? payment_method : 'cash_on_delivery';
+  if (method === 'credit' && isGuest) {
+    return res.status(400).json({ error: 'Credit purchases require a customer account — please sign in' });
+  }
+  let gName = null, gPhone = null, gAddr = null, gCity = null;
+  if (isGuest) {
+    gName = String(guest_name || '').trim().slice(0, 80);
+    gPhone = String(guest_phone || '').trim().slice(0, 30);
+    if (!gName || !gPhone) return res.status(400).json({ error: 'Please enter your name and phone number' });
+    if (ft === 'delivery') {
+      gAddr = String(guest_address || '').trim().slice(0, 160);
+      gCity = String(guest_city || '').trim().slice(0, 80);
+      if (!gAddr || !gCity) return res.status(400).json({ error: 'Please enter your delivery address and city' });
+    }
+  } else if (ft === 'delivery' && !delivery_address_id) {
+    return res.status(400).json({ error: 'Please select a delivery address' });
+  }
 
  const sf = settings();
 
- const created = transact(() => {
-  const user = db.prepare('SELECT * FROM users WHERE id=? AND status=\'active\'').get(req.user.id);
-  if (!user) throw new Error('Account is not active');
+  let orderUserId;
+  const created = transact(() => {
+    let user = null;
+    if (isGuest) {
+      orderUserId = ensureGuestUserId();
+    } else {
+      user = db.prepare('SELECT * FROM users WHERE id=? AND status=\'active\'').get(req.user.id);
+      if (!user) throw new Error('Account is not active');
+      orderUserId = user.id;
+    }
 
-  let address = null;
-  if (ft === 'delivery') {
-   address = db.prepare('SELECT * FROM customer_addresses WHERE id=? AND user_id=?').get(delivery_address_id, req.user.id);
-   if (!address) throw new Error('Address not found');
-  }
+    let address = null;
+    if (ft === 'delivery' && !isGuest) {
+      address = db.prepare('SELECT * FROM customer_addresses WHERE id=? AND user_id=?').get(delivery_address_id, req.user.id);
+      if (!address) throw new Error('Address not found');
+    }
 
-  const cart = db.prepare('SELECT * FROM carts WHERE user_id=?').get(req.user.id);
-  if (!cart) throw new Error('Your cart is empty');
+    let cart = null;
+    if (isGuest) {
+      const gid = guestId(req);
+      if (gid) cart = db.prepare('SELECT * FROM carts WHERE guest_id=?').get(gid);
+    } else {
+      cart = db.prepare('SELECT * FROM carts WHERE user_id=?').get(req.user.id);
+    }
+    if (!cart) throw new Error('Your cart is empty');
   const lines = db.prepare('SELECT ci.id, ci.product_id, ci.quantity, ci.unit_price, ci.unit AS cart_unit, p.name AS product_name, p.unit AS product_unit, p.tax_rate, p.current_stock, p.reserved_stock, p.status, p.selling_price FROM cart_items ci JOIN products p ON p.id=ci.product_id WHERE ci.cart_id=?').all(cart.id);
   if (lines.length === 0) throw new Error('Your cart is empty');
 
@@ -93,8 +150,8 @@ router.post('/', (req, res) => {
   }
   const cleanNotes = notes ? String(notes).slice(0, 500) : null;
 
-  if (method === 'credit') {
-   const outstanding = Number(user.balance) + total;
+  if (method === 'credit' && !isGuest) {
+    const outstanding = Number(user.balance) + total;
    const limit = Number(user.credit_limit) || 0;
    if (limit <= 0) throw new Error('Credit purchases are not available for your account');
    if (outstanding > limit) throw new Error(`Order exceeds your credit limit (${limit})`);
@@ -110,12 +167,12 @@ router.post('/', (req, res) => {
     payment_method, notes)
    VALUES (?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
-   orderNumber, req.user.id,
+   orderNumber, orderUserId,
    initialPayStatus,
    ft, address ? address.id : null,
-   address ? (address.recipient_name || user.name) : null,
-   address ? (address.phone || user.phone) : null,
-   address ? `${address.address}, ${address.city}` : null,
+   address ? (address.recipient_name || user.name) : (isGuest ? gName : null),
+   address ? (address.phone || user.phone) : (isGuest ? gPhone : null),
+   address ? `${address.address}, ${address.city}` : (isGuest && ft === 'delivery' ? `${gAddr}, ${gCity}` : null),
    subtotal, discount, tax, deliveryFee, total, method, cleanNotes
   );
   const orderId = Number(info.lastInsertRowid);
@@ -134,19 +191,19 @@ router.post('/', (req, res) => {
    .run(orderId, method, ref, total, payStatus, payStatus === 'paid' ? new Date().toISOString() : null);
 
   if (method === 'credit') {
-   db.prepare('UPDATE users SET balance = balance + ? WHERE id=?').run(total, req.user.id);
+    db.prepare('UPDATE users SET balance = balance + ? WHERE id=?').run(total, orderUserId);
   }
 
-  audit(req.user.id, 'PLACE_ORDER', 'order', orderId, { order_number: orderNumber, total, method, ft });
-  try { db.prepare(`INSERT INTO order_status_history (order_id, from_status, to_status, action, changed_by, changed_by_name, changed_by_role, office_id, office_name, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(orderId, null, 'pending', 'create', req.user.id, req.user.name, req.user.role, req.user.office_id || null, req.user.office || null, `Order placed ${orderNumber}`); } catch {}
+  audit(orderUserId, 'PLACE_ORDER', 'order', orderId, { order_number: orderNumber, total, method, ft, guest: isGuest });
+  try { db.prepare(`INSERT INTO order_status_history (order_id, from_status, to_status, action, changed_by, changed_by_name, changed_by_role, office_id, office_name, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(orderId, null, 'pending', 'create', orderUserId, isGuest ? gName : req.user.name, isGuest ? 'customer' : req.user.role, isGuest ? null : (req.user.office_id || null), isGuest ? null : (req.user.office || null), `Order placed ${orderNumber}`); } catch {}
   return orderId;
- });
+  });
 
- res.status(201).json(getOrder(created, req.user.id));
+  res.status(201).json(getOrder(created, orderUserId));
 });
 
 // ---- list my orders ----
-router.get('/', (req, res) => {
+router.get('/', requireCustomer, (req, res) => {
  const { status } = req.query;
  const conds = ['user_id = ?'];
  const params = [req.user.id];
@@ -160,14 +217,14 @@ router.get('/', (req, res) => {
 });
 
 // ---- order detail ----
-router.get('/:id', (req, res) => {
+router.get('/:id', requireCustomer, (req, res) => {
  const order = getOrder(req.params.id, req.user.id);
  if (!order) return res.status(404).json({ error: 'Order not found' });
  res.json(order);
 });
 
 // ---- cancel (only while pending) ----
-router.post('/:id/cancel', (req, res) => {
+router.post('/:id/cancel', requireCustomer, (req, res) => {
  const order = db.prepare('SELECT * FROM orders WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
  if (!order) return res.status(404).json({ error: 'Order not found' });
  if (order.order_status !== 'pending') return res.status(400).json({ error: 'Only pending orders can be cancelled' });
@@ -194,7 +251,7 @@ router.post('/:id/cancel', (req, res) => {
 });
 
 // ---- submit payment for an unpaid order (goes to staff verification) ----
-router.post('/:id/pay', (req, res) => {
+router.post('/:id/pay', requireCustomer, (req, res) => {
  const { method, transaction_reference } = req.body;
  const order = db.prepare('SELECT * FROM orders WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
  if (!order) return res.status(404).json({ error: 'Order not found' });
@@ -218,7 +275,7 @@ router.post('/:id/pay', (req, res) => {
 });
 
 // ---- reorder (copy previous items into cart) ----
-router.post('/:id/reorder', (req, res) => {
+router.post('/:id/reorder', requireCustomer, (req, res) => {
  const order = db.prepare('SELECT * FROM orders WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
  if (!order) return res.status(404).json({ error: 'Order not found' });
  const items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(order.id);
@@ -250,7 +307,7 @@ router.post('/:id/reorder', (req, res) => {
 });
 
 // ---- request a return / refund ----
-router.post('/:id/return-request', (req, res) => {
+router.post('/:id/return-request', requireCustomer, (req, res) => {
  const { reason } = req.body;
  const order = db.prepare('SELECT * FROM orders WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
  if (!order) return res.status(404).json({ error: 'Order not found' });

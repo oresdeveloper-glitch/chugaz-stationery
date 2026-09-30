@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { shopApi, fmt } from '../../lib/api';
 import { useShop } from '../../shop/ShopContext';
-import RequireShopAuth from '../../shop/RequireShopAuth';
 import { useToast } from '../../components/Toast';
 import I from '../../components/icons';
 
@@ -37,8 +36,9 @@ function CheckoutInner() {
   const [form, setForm] = useState({ fulfillment: 'delivery', address_id: '', method: 'cash_on_delivery', reference: '', notes: '' });
   const [showNewAddr, setShowNewAddr] = useState(false);
   const [newAddr, setNewAddr] = useState({ address_name: '', recipient_name: '', phone: '', address: '', city: '', postal_code: '' });
-  const [placing, setPlacing] = useState(false);
-  const { refreshCart } = useShop();
+  const [guest, setGuest] = useState({ name: '', phone: '', address: '', city: '' });
+  const [placed, setPlaced] = useState(null);
+  const { user, refreshCart } = useShop();
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -46,7 +46,8 @@ function CheckoutInner() {
     try {
       setCart(await shopApi('/cart'));
       setInfo(await shopApi('/info'));
-      setAddresses(await shopApi('/addresses'));
+      if (user) setAddresses(await shopApi('/addresses'));
+      else setAddresses([]);
     } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, []);
@@ -63,7 +64,13 @@ function CheckoutInner() {
 
   const placeOrder = async () => {
     if (cart.items.length === 0) return toast('Cart is empty', 'error');
-    if (form.fulfillment === 'delivery' && !form.address_id) return toast('Choose a delivery address', 'error');
+    if (!user) {
+      if (!guest.name.trim() || !guest.phone.trim()) return toast('Please enter your name and phone number', 'error');
+      if (form.fulfillment === 'delivery' && (!guest.address.trim() || !guest.city.trim())) {
+        return toast('Please enter your delivery address and city', 'error');
+      }
+    }
+    if (form.fulfillment === 'delivery' && user && !form.address_id) return toast('Choose a delivery address', 'error');
     if (['card', 'mobile_money', 'bank_transfer'].includes(form.method) && (!form.reference || form.reference.trim().length < 4)) {
       return toast('Enter the transaction reference from your payment (min 4 characters)', 'error');
     }
@@ -78,10 +85,20 @@ function CheckoutInner() {
           transaction_reference: form.reference || null,
           notes: form.notes || null,
         };
+        if (!user) {
+          body.guest_name = guest.name.trim();
+          body.guest_phone = guest.phone.trim();
+          body.guest_address = guest.address.trim();
+          body.guest_city = guest.city.trim();
+        }
         const order = await shopApi('/orders', { method: 'POST', body });
         await refreshCart();
         toast(`Order ${order.order_number} placed`);
-        navigate(`/shop/order/${order.id}`);
+        if (user) {
+          navigate(`/shop/order/${order.id}`);
+        } else {
+          setPlaced(order);
+        }
         setPlacing(false);
         return;
       } catch (err) {
@@ -103,7 +120,26 @@ function CheckoutInner() {
   const freeThreshold = Number(info.free_delivery_threshold) || 0;
   const deliveryCharge = form.fulfillment === 'pickup' ? 0 : (freeThreshold > 0 && cart.subtotal >= freeThreshold ? 0 : fee);
   const total = cart.subtotal + deliveryCharge;
-  const methods = Object.keys(METHOD_LABELS);
+  const methods = Object.keys(METHOD_LABELS).filter((m) => user || m !== 'credit');
+
+  if (placed) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '36px 24px' }}>
+        <div style={{ fontSize: 46 }}>✅</div>
+        <h1>Order received!</h1>
+        <p className="muted">Order number</p>
+        <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 1 }}>{placed.order_number}</div>
+        <p className="muted small" style={{ marginTop: 8 }}>
+          {placed.items ? placed.items.length : 0} item(s) · {fmt(placed.total)} {currency} · {placed.fulfillment_type === 'pickup' ? 'Pickup at our shop' : 'Delivery'}
+        </p>
+        <p className="muted small">Save your order number — show it at the shop if you need help with this order.</p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+          <button className="btn primary" onClick={() => navigate('/shop')}>Continue shopping</button>
+          <Link className="btn" to="/login?mode=register">Create account</Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -114,6 +150,20 @@ function CheckoutInner() {
 
       <div className="grid grid-2" style={{ alignItems: 'start', gap: 18 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {!user && (
+            <div className="card ck-card">
+              <div className="ck-head">
+                <div>
+                  <h2 className="ck-title">Checking out as guest</h2>
+                  <div className="muted small">No sign-in needed. <Link to={`/login?next=${encodeURIComponent('/shop/checkout')}`}>Sign in</Link> to save addresses and track orders.</div>
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="field"><label>Your name *</label><input value={guest.name} onChange={(e) => setGuest({ ...guest, name: e.target.value })} placeholder="Full name" /></div>
+                <div className="field"><label>Phone *</label><input value={guest.phone} onChange={(e) => setGuest({ ...guest, phone: e.target.value })} placeholder="07XXXXXXXX" /></div>
+              </div>
+            </div>
+          )}
           <Section n="1" title="Delivery method" sub="How would you like to receive your order?">
             <div className="ck-choices">
               <button type="button" className={`ck-choice ${form.fulfillment === 'delivery' ? 'on' : ''}`} onClick={() => setForm({ ...form, fulfillment: 'delivery' })}>
@@ -139,8 +189,8 @@ function CheckoutInner() {
                     </span>
                   </label>
                 ))}
-                {!addresses.length && <p className="muted small">Add a delivery address to continue.</p>}
-                {showNewAddr ? (
+                {user && !addresses.length && <p className="muted small">Add a delivery address to continue.</p>}
+                {!user ? (<><div className="field"><label>Street address *</label><input value={guest.address} onChange={(e) => setGuest({ ...guest, address: e.target.value })} placeholder="Street, area, landmark" /></div><div className="field"><label>City *</label><input value={guest.city} onChange={(e) => setGuest({ ...guest, city: e.target.value })} placeholder="City" /></div></>) : showNewAddr ? (
                   <div className="card" style={{ marginTop: 10, background: 'var(--panel-2)' }}>
                     <div className="form-row">
                       <div className="field"><label>Address label</label><input value={newAddr.address_name} onChange={(e) => setNewAddr({ ...newAddr, address_name: e.target.value })} placeholder="Home / Office" /></div>
@@ -226,5 +276,5 @@ function CheckoutInner() {
 }
 
 export default function Checkout() {
-  return <RequireShopAuth><CheckoutInner /></RequireShopAuth>;
+  return <CheckoutInner />;
 }

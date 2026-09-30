@@ -56,11 +56,13 @@ function safeRoute(routePath) {
 }
 
 let requireAuth = (req, res, next) => next();
+let optionalAuth = (req, res, next) => next();
 let requireRole = () => (req, res, next) => next();
 let staff = [(req, res, next) => next()];
 try {
   const auth = require('./backend/src/auth');
   requireAuth = auth.requireAuth;
+  optionalAuth = auth.optionalAuth;
   requireRole = auth.requireRole;
   staff = [requireAuth, requireRole('clerk', 'cashier', 'manager', 'admin')];
 } catch (err) {
@@ -76,6 +78,9 @@ try {
 
 app.use('/api/auth', safeRoute('./backend/src/routes/auth'));
 app.use('/api/shop', safeRoute('./backend/src/routes/shop'));
+// Orders BEFORE the protectedRouter mount: its requireAuth would otherwise
+// reject guest checkouts before they reach the guest-aware orders router.
+app.use('/api/shop/orders', optionalAuth, safeRoute('./backend/src/routes/customerOrders'));
 if (customerRoutes) {
   if (customerRoutes.publicRouter) app.use('/api/shop', customerRoutes.publicRouter);
   app.use('/api/shop/cart', safeRoute('./backend/src/routes/cart'));
@@ -83,7 +88,6 @@ if (customerRoutes) {
 } else {
   app.use('/api/shop/cart', safeRoute('./backend/src/routes/cart'));
 }
-app.use('/api/shop/orders', requireAuth, safeRoute('./backend/src/routes/customerOrders'));
 app.use('/api/products', staff, safeRoute('./backend/src/routes/products'));
 app.use('/api/suppliers', staff, safeRoute('./backend/src/routes/suppliers'));
 app.use('/api/customers', staff, safeRoute('./backend/src/routes/customers'));
