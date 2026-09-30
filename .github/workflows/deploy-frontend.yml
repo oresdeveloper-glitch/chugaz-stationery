@@ -22,10 +22,11 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           DID=""
           GH_HDR=()
-          if [ -n "${GITHUB_TOKEN:-}" ]; then GH_HDR=(-H "Authorization: Bearer $GITHUB_TOKEN"); fi
+          if [ -n "${GH_TOKEN:-}" ]; then GH_HDR=(-H "Authorization: Bearer $GH_TOKEN"); fi
           for REF in "$GITHUB_SHA" "$GITHUB_SHA^" "$GITHUB_SHA^^" "$GITHUB_SHA^^^"; do
             TURL="$(curl -sS -m 25 "${GH_HDR[@]}" "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$REF/status" 2>/dev/null | jq -r '[.statuses[] | select(.context | endswith("chugaz-stationery")) | .target_url][0] // empty' 2>/dev/null || echo "")"
             if [ -n "$TURL" ]; then DID="$(echo "$TURL" | grep -o '[^/]*$')"; break; fi
