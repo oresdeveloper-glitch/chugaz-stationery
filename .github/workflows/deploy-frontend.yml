@@ -49,33 +49,37 @@ jobs:
       - name: diag using configured fallback project
         if: env.RESOLVE_FELL_BACK == 'yes'
         run: echo ok
-      - name: Ensure JWT_SECRET on serving project
+      - name: Ensure JWT_SECRET on all team projects
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
-          TARGET_PID: ${{ env.VERCEL_RESOLVED_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          API="https://api.vercel.com"
-          EQ=""
-          if [ -n "${VERCEL_TEAM_ID:-}" ]; then EQ="?teamId=$VERCEL_TEAM_ID"; fi
-          PID="${TARGET_PID:-}"
-          if [ -z "$PID" ]; then echo "ENV-STATUS: FAILED - no target project resolved"; exit 1; fi
-          TEAM="$(curl -sS -m 30 -H "Authorization: Bearer $VERCEL_TOKEN" "$API/v9/projects/$PID" 2>/dev/null | jq -r '.accountId // empty' 2>/dev/null || echo "")"
-          if [ -n "$TEAM" ]; then EQ="?teamId=$TEAM"; fi
-          ENVS="$(curl -sS -m 30 -H "Authorization: Bearer $VERCEL_TOKEN" "$API/v9/projects/$PID/env$EQ" 2>/dev/null || echo "")"
-          [ -n "$ENVS" ] || { echo "ENV-STATUS: FAILED - cannot list env"; exit 1; }
-          if echo "$ENVS" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"'; then
-            echo "ENV-STATUS: OK - JWT_SECRET already present on serving project"
-            exit 0
-          fi
-          echo "JWT_SECRET missing on serving project - generating once and adding encrypted (production + preview)"
-          SECRET="$(openssl rand -hex 64)"
-          RESP="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" -d "{\"key\":\"JWT_SECRET\",\"value\":\"$SECRET\",\"target\":[\"production\",\"preview\"],\"type\":\"encrypted\"}" "$API/v9/projects/$PID/env$EQ" 2>/dev/null || echo "")"
+          SCOPE="orresy-developer"
+          fail() { echo "ENV-STATUS: FAILED - $1"; exit 1; }
+          PLIST1="$(npx vercel projects ls --token="$VERCEL_TOKEN" 2>&1 || true)"
+          PLIST2="$(npx vercel projects ls --scope="$SCOPE" --token="$VERCEL_TOKEN" 2>&1 || true)"
+          echo "--- project list output (names and ids, no secrets) ---"
+          echo "$PLIST1" | head -25 || true
+          echo "$PLIST2" | head -25 || true
+          echo "--- end list ---"
+          IDS="$(printf '%s\n%s' "$PLIST1" "$PLIST2" | grep -oE 'prj_[A-Za-z0-9]+' | sort -u || true)"
+          [ -n "$IDS" ] || fail "no project ids discovered"
+          echo "Discovered projects: $(echo "$IDS" | tr '\n' ' ')"
+          SECRET=""
+          FAILED=0
+          for PID in $IDS; do
+            OUT="$(VERCEL_PROJECT_ID="$PID" npx vercel env ls --token="$VERCEL_TOKEN" 2>&1 || true)"
+            if echo "$OUT" | grep -qi "JWT_SECRET.*production"; then echo "$PID: already present"; continue; fi
+            [ -n "$SECRET" ] || SECRET="$(openssl rand -hex 64)"
+            printf '%s' "$SECRET" | VERCEL_PROJECT_ID="$PID" npx vercel env add JWT_SECRET production --token="$VERCEL_TOKEN" >/dev/null 2>&1 || true
+            printf '%s' "$SECRET" | VERCEL_PROJECT_ID="$PID" npx vercel env add JWT_SECRET preview --token="$VERCEL_TOKEN" >/dev/null 2>&1 || true
+            OUT2="$(VERCEL_PROJECT_ID="$PID" npx vercel env ls --token="$VERCEL_TOKEN" 2>&1 || true)"
+            if echo "$OUT2" | grep -qi "JWT_SECRET.*production"; then echo "$PID: created and verified"; else echo "$PID: MISSING"; FAILED=1; fi
+          done
           unset SECRET
-          echo "$RESP" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"' || { echo "ENV-STATUS: FAILED - create rejected: $(echo "$RESP" | grep -o '\"code\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | head -1)"; exit 1; }
-          ENVS2="$(curl -sS -m 30 -H "Authorization: Bearer $VERCEL_TOKEN" "$API/v9/projects/$PID/env$EQ" 2>/dev/null || echo "")"
-          echo "$ENVS2" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"' || { echo "ENV-STATUS: FAILED - still missing after create"; exit 1; }
-          echo "ENV-STATUS: OK - JWT_SECRET created and verified on serving project"
+          if [ "$FAILED" -ne 0 ]; then echo "ENV-STATUS: FAILED"; exit 1; fi
+          echo "ENV-STATUS: OK on all discovered projects"
       - name: Deploy to Vercel Production
         env:
           VERCEL_PROJECT_ID: ${{ env.VERCEL_RESOLVED_PROJECT_ID }}
