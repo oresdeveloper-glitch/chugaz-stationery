@@ -22,64 +22,45 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          DID=""
-          GH_HDR=()
-          if [ -n "${GH_TOKEN:-}" ]; then GH_HDR=(-H "Authorization: Bearer $GH_TOKEN"); fi
-          for REF in "$GITHUB_SHA" "$GITHUB_SHA^" "$GITHUB_SHA^^" "$GITHUB_SHA^^^"; do
-            TURL="$(curl -sS -m 25 "${GH_HDR[@]}" "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$REF/status" 2>/dev/null | jq -r '[.statuses[] | select(.context | endswith("chugaz-stationery")) | .target_url][0] // empty' 2>/dev/null || echo "")"
-            if [ -n "$TURL" ]; then DID="$(echo "$TURL" | grep -o '[^/]*$')"; break; fi
-          done
-          PID=""
-          if [ -n "$DID" ] && [ "$DID" != "null" ]; then
-            PID="$(curl -sS -m 25 -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v9/deployments/$DID" 2>/dev/null | jq -r '.projectId // empty' 2>/dev/null || echo "")"
+          API="https://api.vercel.com"
+          AUTH="Authorization: Bearer $VERCEL_TOKEN"
+          PID="$(curl -sS -m 25 -H "$AUTH" "$API/v9/projects/chugaz-stationery" 2>/dev/null | jq -r '.id // empty' 2>/dev/null || echo "")"
+          if [ -n "$PID" ]; then echo "Resolved serving project by name"; fi
+          if [ -z "$PID" ]; then
+            PID="$(curl -sS -m 25 -H "$AUTH" "$API/v9/deployments/GSK3xAczRmyZiaNBhRyVjWoYAmbK" 2>/dev/null | jq -r '.projectId // empty' 2>/dev/null || echo "")"
+            if [ -n "$PID" ]; then echo "Resolved serving project via deployment record"; fi
           fi
           if [ -z "$PID" ]; then
-            echo "RESOLVE_FELL_BACK=yes" >> "$GITHUB_ENV"
             echo "WARN: could not resolve serving project - falling back to configured project"
             PID="$VERCEL_PROJECT_ID"
-          else
-            echo "RESOLVE_FELL_BACK=no" >> "$GITHUB_ENV"
           fi
+          echo "Serving project id: $PID"
           echo "VERCEL_RESOLVED_PROJECT_ID=$PID" >> "$GITHUB_ENV"
-      - name: diag serving project resolved by domain
-        if: env.RESOLVE_FELL_BACK == 'no'
-        run: echo ok
-      - name: diag using configured fallback project
-        if: env.RESOLVE_FELL_BACK == 'yes'
-        run: echo ok
-      - name: Ensure JWT_SECRET on all team projects
+      - name: Ensure JWT_SECRET on serving project
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          TARGET_PID: ${{ env.VERCEL_RESOLVED_PROJECT_ID }}
         run: |
+          API="https://api.vercel.com"
+          AUTH="Authorization: Bearer $VERCEL_TOKEN"
           fail() { echo "ENV-STATUS: FAILED - $1"; exit 1; }
-          echo "--- token identity (emails redacted) ---"
-          npx vercel whoami --token="$VERCEL_TOKEN" 2>&1 | grep -vi "email" | head -8 || true
-          echo "--- end identity ---"
-          PLIST="$(npx vercel project ls --token="$VERCEL_TOKEN" 2>&1 || npx vercel projects ls --token="$VERCEL_TOKEN" 2>&1 || true)"
-          echo "--- project list output (names and ids, no secrets) ---"
-          echo "$PLIST" | head -25 || true
-          echo "--- end list ---"
-          IDS="$(printf '%s' "$PLIST" | grep -oE 'prj_[A-Za-z0-9]+' | sort -u || true)"
-          [ -n "$IDS" ] || fail "no project ids discovered"
-          echo "Discovered projects: $(echo "$IDS" | tr '\n' ' ')"
-          SECRET=""
-          FAILED=0
-          for PID in $IDS; do
-            OUT="$(VERCEL_PROJECT_ID="$PID" npx vercel env ls --token="$VERCEL_TOKEN" 2>&1 || true)"
-            if echo "$OUT" | grep -qi "JWT_SECRET.*production"; then echo "$PID: already present"; continue; fi
-            [ -n "$SECRET" ] || SECRET="$(openssl rand -hex 64)"
-            printf '%s' "$SECRET" | VERCEL_PROJECT_ID="$PID" npx vercel env add JWT_SECRET production --token="$VERCEL_TOKEN" >/dev/null 2>&1 || true
-            printf '%s' "$SECRET" | VERCEL_PROJECT_ID="$PID" npx vercel env add JWT_SECRET preview --token="$VERCEL_TOKEN" >/dev/null 2>&1 || true
-            OUT2="$(VERCEL_PROJECT_ID="$PID" npx vercel env ls --token="$VERCEL_TOKEN" 2>&1 || true)"
-            if echo "$OUT2" | grep -qi "JWT_SECRET.*production"; then echo "$PID: created and verified"; else echo "$PID: MISSING"; FAILED=1; fi
-          done
+          PID="${TARGET_PID:-}"
+          [ -n "$PID" ] || fail "no target project resolved"
+          ENVS="$(curl -sS -m 30 -H "$AUTH" "$API/v9/projects/$PID/env" 2>/dev/null || echo "")"
+          [ -n "$ENVS" ] || fail "cannot list env"
+          if echo "$ENVS" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"'; then
+            echo "ENV-STATUS: OK - JWT_SECRET already present on serving project"
+            exit 0
+          fi
+          echo "JWT_SECRET missing on serving project - generating once and adding encrypted (production + preview)"
+          SECRET="$(openssl rand -hex 64)"
+          RESP="$(curl -sS -m 30 -X POST -H "$AUTH" -H "Content-Type: application/json" -d "{\"key\":\"JWT_SECRET\",\"value\":\"$SECRET\",\"target\":[\"production\",\"preview\"],\"type\":\"encrypted\"}" "$API/v9/projects/$PID/env" 2>/dev/null || echo "")"
           unset SECRET
-          if [ "$FAILED" -ne 0 ]; then echo "ENV-STATUS: FAILED"; exit 1; fi
-          echo "ENV-STATUS: OK on all discovered projects"
+          echo "$RESP" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"' || fail "create rejected: $(echo "$RESP" | grep -o '\"code\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | head -1)"
+          ENVS2="$(curl -sS -m 30 -H "$AUTH" "$API/v9/projects/$PID/env" 2>/dev/null || echo "")"
+          echo "$ENVS2" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"' || fail "still missing after create"
+          echo "ENV-STATUS: OK - JWT_SECRET created and verified on serving project"
       - name: Deploy to Vercel Production
         env:
           VERCEL_PROJECT_ID: ${{ env.VERCEL_RESOLVED_PROJECT_ID }}
