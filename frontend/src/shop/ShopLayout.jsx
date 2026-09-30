@@ -53,7 +53,7 @@ export default function ShopLayout() {
               <div className="shop-dropdown">
                 <Link to="/shop/profile">Profile</Link>
                 <Link to="/shop/addresses">Addresses</Link>
-                <button className="btn sm" onClick={() => { logout(); navigate('/shop'); }}>Log out</button>
+                <button className="btn sm" onClick={() => { logout(); navigate('/login'); }}>Log out</button>
               </div>
             </div>
           ) : (
@@ -103,7 +103,7 @@ export default function ShopLayout() {
               <button
                 className="shop-drawer-logout"
                 title="Log out"
-                onClick={() => { logout(); navigate('/shop'); }}
+                onClick={() => { logout(); navigate('/login'); }}
               >
                 <I name="power" size={16} />
               </button>

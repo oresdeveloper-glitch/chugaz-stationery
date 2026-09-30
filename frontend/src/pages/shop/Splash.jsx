@@ -28,7 +28,7 @@ export default function Splash() {
   const next = () => {
     if (last) {
       localStorage.setItem('shop_splash_seen', '1');
-      nav('/shop/login');
+      nav('/login');
     } else setIdx(idx + 1);
   };
   const skip = () => {
@@ -71,8 +71,8 @@ export default function Splash() {
 
           {last ? (
             <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <Link to="/shop/login" onClick={() => localStorage.setItem('shop_splash_seen','1')} className="btn" style={{ justifyContent: 'center', padding: '12px', fontWeight: 600 }}>Sign in</Link>
-              <Link to="/shop/register" onClick={() => localStorage.setItem('shop_splash_seen','1')} className="btn primary" style={{ justifyContent: 'center', padding: '12px', fontWeight: 600 }}>Create account</Link>
+              <Link to="/login" onClick={() => localStorage.setItem('shop_splash_seen','1')} className="btn" style={{ justifyContent: 'center', padding: '12px', fontWeight: 600 }}>Sign in</Link>
+              <Link to="/login?mode=register" onClick={() => localStorage.setItem('shop_splash_seen','1')} className="btn primary" style={{ justifyContent: 'center', padding: '12px', fontWeight: 600 }}>Create account</Link>
             </div>
           ) : (
             <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}><span style={{ width: 16, height: 1, background: 'var(--border)', display: 'inline-block' }} /> Swipe to continue <span style={{ width: 16, height: 1, background: 'var(--border)', display: 'inline-block' }} /></div>
