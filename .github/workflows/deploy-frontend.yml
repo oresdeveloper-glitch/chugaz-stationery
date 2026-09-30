@@ -21,40 +21,26 @@ jobs:
       - name: Resolve serving project and ensure JWT_SECRET
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          API="https://api.vercel.com"
-          AUTH="Authorization: Bearer $VERCEL_TOKEN"
-          DOMAIN="chugaz-stationery.vercel.app"
           fail() { echo "ENV-STATUS: FAILED - $1"; exit 1; }
-          SCOPE_Q=""
-          SERVING=""
-          for QS in "?teamId=orresy-developer" ""; do
-            PLIST="$(curl -sS -m 30 -H "$AUTH" "$API/v9/projects?limit=100$QS" 2>/dev/null || echo "")"
-            [ -n "$PLIST" ] || continue
-            for PID in $(echo "$PLIST" | jq -r '.projects[]?.id' 2>/dev/null || echo ""); do
-              [ -n "$PID" ] || continue
-              DOMS="$(curl -sS -m 25 -H "$AUTH" "$API/v9/projects/$PID/domains$QS" 2>/dev/null || echo "")"
-              if echo "$DOMS" | grep -q "\"name\"[[:space:]]*:[[:space:]]*\"$DOMAIN\""; then SERVING="$PID"; SCOPE_Q="$QS"; break 2; fi
-            done
-          done
-          [ -n "$SERVING" ] || fail "serving project not found (team slug + personal scopes tried)"
-          echo "Serving project id: $SERVING (scope: ${SCOPE_Q:-personal})"
+          INSPECT="$(npx vercel inspect https://vercel.com/orresy-developer/chugaz-stationery/GSK3xAczRmyZiaNBhRyVjWoYAmbK --token="$VERCEL_TOKEN" 2>&1 || true)"
+          echo "--- inspect output (deployment metadata, no secrets) ---"
+          echo "$INSPECT" | head -30 || true
+          echo "--- end inspect ---"
+          SERVING="$(printf '%s' "$INSPECT" | grep -oE 'prj_[A-Za-z0-9]+' | head -1 || true)"
+          [ -n "$SERVING" ] || fail "could not determine serving project id"
+          echo "Serving project id: $SERVING"
           echo "VERCEL_RESOLVED_PROJECT_ID=$SERVING" >> "$GITHUB_ENV"
-          ENVS="$(curl -sS -m 30 -H "$AUTH" "$API/v9/projects/$SERVING/env$SCOPE_Q" 2>/dev/null || echo "")"
-          [ -n "$ENVS" ] || fail "cannot list env"
-          if echo "$ENVS" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"'; then
-            echo "ENV-STATUS: OK - JWT_SECRET already present on serving project"
-            exit 0
-          fi
-          echo "JWT_SECRET missing on serving project - generating once and adding encrypted (production + preview)"
+          OUT="$(VERCEL_PROJECT_ID="$SERVING" npx vercel env ls --token="$VERCEL_TOKEN" 2>&1 || true)"
+          if echo "$OUT" | grep -qi "JWT_SECRET.*production"; then echo "ENV-STATUS: OK - already present"; exit 0; fi
           SECRET="$(openssl rand -hex 64)"
-          RESP="$(curl -sS -m 30 -X POST -H "$AUTH" -H "Content-Type: application/json" -d "{\"key\":\"JWT_SECRET\",\"value\":\"$SECRET\",\"target\":[\"production\",\"preview\"],\"type\":\"encrypted\"}" "$API/v9/projects/$SERVING/env$SCOPE_Q" 2>/dev/null || echo "")"
+          printf '%s' "$SECRET" | VERCEL_PROJECT_ID="$SERVING" npx vercel env add JWT_SECRET production --token="$VERCEL_TOKEN" >/dev/null 2>&1 || true
+          printf '%s' "$SECRET" | VERCEL_PROJECT_ID="$SERVING" npx vercel env add JWT_SECRET preview --token="$VERCEL_TOKEN" >/dev/null 2>&1 || true
           unset SECRET
-          echo "$RESP" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"' || fail "create rejected: $(echo "$RESP" | grep -o '\"code\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | head -1)"
-          ENVS2="$(curl -sS -m 30 -H "$AUTH" "$API/v9/projects/$SERVING/env$SCOPE_Q" 2>/dev/null || echo "")"
-          echo "$ENVS2" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"' || fail "still missing after create"
-          echo "ENV-STATUS: OK - JWT_SECRET created and verified on serving project"
+          OUT2="$(VERCEL_PROJECT_ID="$SERVING" npx vercel env ls --token="$VERCEL_TOKEN" 2>&1 || true)"
+          if echo "$OUT2" | grep -qi "JWT_SECRET.*production"; then echo "ENV-STATUS: OK - created and verified"; else echo "ENV-STATUS: FAILED - still missing"; echo "$OUT2" | head -10 || true; exit 1; fi
       - name: Deploy to Vercel Production
         env:
           VERCEL_PROJECT_ID: ${{ env.VERCEL_RESOLVED_PROJECT_ID }}
