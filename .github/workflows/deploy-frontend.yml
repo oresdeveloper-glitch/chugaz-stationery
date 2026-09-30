@@ -55,15 +55,15 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          SCOPE="orresy-developer"
           fail() { echo "ENV-STATUS: FAILED - $1"; exit 1; }
-          PLIST1="$(npx vercel projects ls --token="$VERCEL_TOKEN" 2>&1 || true)"
-          PLIST2="$(npx vercel projects ls --scope="$SCOPE" --token="$VERCEL_TOKEN" 2>&1 || true)"
+          echo "--- token identity (emails redacted) ---"
+          npx vercel whoami --token="$VERCEL_TOKEN" 2>&1 | grep -vi "email" | head -8 || true
+          echo "--- end identity ---"
+          PLIST="$(npx vercel project ls --token="$VERCEL_TOKEN" 2>&1 || npx vercel projects ls --token="$VERCEL_TOKEN" 2>&1 || true)"
           echo "--- project list output (names and ids, no secrets) ---"
-          echo "$PLIST1" | head -25 || true
-          echo "$PLIST2" | head -25 || true
+          echo "$PLIST" | head -25 || true
           echo "--- end list ---"
-          IDS="$(printf '%s\n%s' "$PLIST1" "$PLIST2" | grep -oE 'prj_[A-Za-z0-9]+' | sort -u || true)"
+          IDS="$(printf '%s' "$PLIST" | grep -oE 'prj_[A-Za-z0-9]+' | sort -u || true)"
           [ -n "$IDS" ] || fail "no project ids discovered"
           echo "Discovered projects: $(echo "$IDS" | tr '\n' ' ')"
           SECRET=""
