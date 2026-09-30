@@ -18,36 +18,30 @@ jobs:
       - run: npm install
       - run: cd frontend && npm install && npm run build
       - run: cd api && npm install
-      - name: Resolve serving project
+      - name: Resolve serving project and ensure JWT_SECRET
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
           API="https://api.vercel.com"
           AUTH="Authorization: Bearer $VERCEL_TOKEN"
-          PID="$(curl -sS -m 25 -H "$AUTH" "$API/v9/projects/chugaz-stationery" 2>/dev/null | jq -r '.id // empty' 2>/dev/null || echo "")"
-          if [ -n "$PID" ]; then echo "Resolved serving project by name"; fi
-          if [ -z "$PID" ]; then
-            PID="$(curl -sS -m 25 -H "$AUTH" "$API/v9/deployments/GSK3xAczRmyZiaNBhRyVjWoYAmbK" 2>/dev/null | jq -r '.projectId // empty' 2>/dev/null || echo "")"
-            if [ -n "$PID" ]; then echo "Resolved serving project via deployment record"; fi
-          fi
-          if [ -z "$PID" ]; then
-            echo "WARN: could not resolve serving project - falling back to configured project"
-            PID="$VERCEL_PROJECT_ID"
-          fi
-          echo "Serving project id: $PID"
-          echo "VERCEL_RESOLVED_PROJECT_ID=$PID" >> "$GITHUB_ENV"
-      - name: Ensure JWT_SECRET on serving project
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          TARGET_PID: ${{ env.VERCEL_RESOLVED_PROJECT_ID }}
-        run: |
-          API="https://api.vercel.com"
-          AUTH="Authorization: Bearer $VERCEL_TOKEN"
+          DOMAIN="chugaz-stationery.vercel.app"
           fail() { echo "ENV-STATUS: FAILED - $1"; exit 1; }
-          PID="${TARGET_PID:-}"
-          [ -n "$PID" ] || fail "no target project resolved"
-          ENVS="$(curl -sS -m 30 -H "$AUTH" "$API/v9/projects/$PID/env" 2>/dev/null || echo "")"
+          SCOPE_Q=""
+          SERVING=""
+          for QS in "?teamId=orresy-developer" ""; do
+            PLIST="$(curl -sS -m 30 -H "$AUTH" "$API/v9/projects?limit=100$QS" 2>/dev/null || echo "")"
+            [ -n "$PLIST" ] || continue
+            for PID in $(echo "$PLIST" | jq -r '.projects[]?.id' 2>/dev/null || echo ""); do
+              [ -n "$PID" ] || continue
+              DOMS="$(curl -sS -m 25 -H "$AUTH" "$API/v9/projects/$PID/domains$QS" 2>/dev/null || echo "")"
+              if echo "$DOMS" | grep -q "\"name\"[[:space:]]*:[[:space:]]*\"$DOMAIN\""; then SERVING="$PID"; SCOPE_Q="$QS"; break 2; fi
+            done
+          done
+          [ -n "$SERVING" ] || fail "serving project not found (team slug + personal scopes tried)"
+          echo "Serving project id: $SERVING (scope: ${SCOPE_Q:-personal})"
+          echo "VERCEL_RESOLVED_PROJECT_ID=$SERVING" >> "$GITHUB_ENV"
+          ENVS="$(curl -sS -m 30 -H "$AUTH" "$API/v9/projects/$SERVING/env$SCOPE_Q" 2>/dev/null || echo "")"
           [ -n "$ENVS" ] || fail "cannot list env"
           if echo "$ENVS" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"'; then
             echo "ENV-STATUS: OK - JWT_SECRET already present on serving project"
@@ -55,10 +49,10 @@ jobs:
           fi
           echo "JWT_SECRET missing on serving project - generating once and adding encrypted (production + preview)"
           SECRET="$(openssl rand -hex 64)"
-          RESP="$(curl -sS -m 30 -X POST -H "$AUTH" -H "Content-Type: application/json" -d "{\"key\":\"JWT_SECRET\",\"value\":\"$SECRET\",\"target\":[\"production\",\"preview\"],\"type\":\"encrypted\"}" "$API/v9/projects/$PID/env" 2>/dev/null || echo "")"
+          RESP="$(curl -sS -m 30 -X POST -H "$AUTH" -H "Content-Type: application/json" -d "{\"key\":\"JWT_SECRET\",\"value\":\"$SECRET\",\"target\":[\"production\",\"preview\"],\"type\":\"encrypted\"}" "$API/v9/projects/$SERVING/env$SCOPE_Q" 2>/dev/null || echo "")"
           unset SECRET
           echo "$RESP" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"' || fail "create rejected: $(echo "$RESP" | grep -o '\"code\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | head -1)"
-          ENVS2="$(curl -sS -m 30 -H "$AUTH" "$API/v9/projects/$PID/env" 2>/dev/null || echo "")"
+          ENVS2="$(curl -sS -m 30 -H "$AUTH" "$API/v9/projects/$SERVING/env$SCOPE_Q" 2>/dev/null || echo "")"
           echo "$ENVS2" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"' || fail "still missing after create"
           echo "ENV-STATUS: OK - JWT_SECRET created and verified on serving project"
       - name: Deploy to Vercel Production
