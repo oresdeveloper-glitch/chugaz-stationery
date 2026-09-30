@@ -1265,13 +1265,39 @@ tbody tr:hover td { background: color-mix(in srgb, var(--primary) 9%, transparen
 .alibaba-add:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px); box-shadow: 0 6px 16px -6px rgba(255, 138, 0, 0.7); }
 .alibaba-add:disabled { background: #fb923c; border-color: #fdba74; color: #431407; opacity: 0.65; cursor: not-allowed; box-shadow: none; }
 
-.auth-wrap { min-height: calc(100vh - 66px); display: flex; align-items: center; justify-content: center; padding: 30px 16px; background: #e8e4d8; }
+.auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 30px 16px; background: #e8e4d8; }
 .auth-card {
   width: 100%;
   max-width: 410px;
   background: #2a1c10;
   border: 1px solid rgba(255, 138, 0, 0.35);
   box-shadow: 0 18px 50px rgba(7, 22, 46, 0.45), 0 0 0 1px rgba(255, 138, 0, 0.12) inset;
+}
+.auth-tabs { display: flex; gap: 6px; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 10px; padding: 4px; margin-bottom: 16px; }
+.auth-tab {
+  flex: 1;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.auth-tab:hover { color: #fff; }
+.auth-tab.active { background: var(--hl); color: #2a1c10; }
+.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--hl);
+  cursor: pointer;
+  text-decoration: underline;
 }
 .auth-card h1 { text-align: center; color: #fff; }
 .auth-card .muted, .auth-card p { color: rgba(255, 255, 255, 0.75); }

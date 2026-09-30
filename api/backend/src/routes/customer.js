@@ -153,7 +153,7 @@ publicRouter.post('/resend-verification', async (req, res) => {
  res.json({ ok: true, message: 'A new code is on its way' });
 });
 
-publicRouter.post('/login', (req, res) => {
+function handleCustomerLogin(req, res) {
  const { email, password } = req.body;
  const ip = clientIp(req);
  const clean = String(email || '').toLowerCase().trim();
@@ -207,7 +207,9 @@ publicRouter.post('/login', (req, res) => {
  audit(user.id, 'LOGIN', 'user', user.id, { email: clean, ip });
  clearFailures(key);
  res.json({ token: signToken(user), user });
-});
+}
+
+publicRouter.post('/login', handleCustomerLogin);
 
 // ---- protected (customer) ----
 
@@ -304,4 +306,4 @@ protectedRouter.delete('/addresses/:id', requireCustomer, (req, res) => {
  res.json({ ok: true });
 });
 
-module.exports = { publicRouter, protectedRouter };
+module.exports = { publicRouter, protectedRouter, handleCustomerLogin };

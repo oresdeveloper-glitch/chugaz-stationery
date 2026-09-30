@@ -110,7 +110,9 @@ async function request(path, options = {}, shop = false) {
   }
   const data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
-    throw new Error((data && data.error) || `Request failed (${res.status})`);
+   const err = new Error((data && data.error) || `Request failed (${res.status})`);
+   if (data && data.code) err.code = data.code;
+   throw err;
   }
   return data;
 }

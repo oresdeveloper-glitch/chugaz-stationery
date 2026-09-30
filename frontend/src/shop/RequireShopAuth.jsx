@@ -8,7 +8,7 @@ export default function RequireShopAuth({ children }) {
     return <div className="card" style={{ textAlign: 'center', padding: 40 }}>Verifying session…</div>;
   }
   if (!user) {
-    return <Navigate to={`/shop/login?next=${encodeURIComponent(location.pathname)}`} replace />;
+    return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;
   }
   return children;
 }

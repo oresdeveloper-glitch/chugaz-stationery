@@ -24,7 +24,7 @@ export default function ShopLayout() {
     }
   }, [user, location.pathname]);
 
-  const hideChrome = ['/shop/welcome', '/shop/login', '/shop/register'].includes(location.pathname);
+  const hideChrome = ['/shop/welcome'].includes(location.pathname);
 
   const search = (e) => {
     e.preventDefault();
@@ -57,7 +57,7 @@ export default function ShopLayout() {
               </div>
             </div>
           ) : (
-            <Link to="/shop/login" className="btn sm primary">Sign in</Link>
+            <Link to="/login" className="btn sm primary">Sign in</Link>
           )}
         </div>
       </div>
@@ -87,8 +87,8 @@ export default function ShopLayout() {
 
           {!user && (
             <div className="shop-side-cta">
-              <Link to="/shop/login" className="btn primary" style={{ width: '100%', justifyContent: 'center' }} onClick={closeMenu}>Sign in</Link>
-              <Link to="/shop/register" className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={closeMenu}>Create account</Link>
+      <Link to="/login" className="btn primary" style={{ width: '100%', justifyContent: 'center' }} onClick={closeMenu}>Sign in</Link>
+      <Link to="/login?mode=register" className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={closeMenu}>Create account</Link>
             </div>
           )}
         </nav>
@@ -132,7 +132,7 @@ export default function ShopLayout() {
           <NavLink to="/shop" end className={({isActive})=> isActive?'active':''}><span className="ico"><I name="store" size={18}/></span><span>Shop</span></NavLink>
           <NavLink to="/shop/cart" className={({isActive})=> isActive?'active':''}><span className="nav-item"><span className="ico"><I name="cart" size={18}/></span>{cartCount>0 && <span className="cart-badge">{cartCount}</span>}</span><span>Cart</span></NavLink>
           <NavLink to="/shop/orders" className={({isActive})=> isActive?'active':''}><span className="ico"><I name="bag" size={18}/></span><span>Orders</span></NavLink>
-          <NavLink to={user?"/shop/profile":"/shop/login"} className={({isActive})=> isActive?'active':''}><span className="ico"><I name="user" size={18}/></span><span>{user?"Account":"Sign in"}</span></NavLink>
+          <NavLink to={user?"/shop/profile":"/login"} className={({isActive})=> isActive?'active':''}><span className="ico"><I name="user" size={18}/></span><span>{user?"Account":"Sign in"}</span></NavLink>
         </div>
       </nav>}
     </div>

@@ -48,8 +48,13 @@ router.post('/login', (req, res) => {
   audit(user ? user.id : null, 'LOGIN_FAIL', 'user', user ? user.id : null, { email: String(email).slice(0, 80), ip });
   return res.status(401).json({ error: 'Invalid email or password' });
  }
+ if (user.role === 'customer') {
+  // Single login page: hand customers to the shop handler so unverified
+  // handling and guest-cart merge still apply. Lazy require avoids a cycle.
+  const { handleCustomerLogin } = require('./customer');
+  return handleCustomerLogin(req, res);
+ }
  if (user.status !== 'active') return res.status(403).json({ error: 'Account is disabled — contact the administrator' });
- if (user.role === 'customer') return res.status(403).json({ error: 'Customer accounts sign in from CHUGAZ STATIONERY' });
 
  clearFailures(key);
  db.prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id=?').run(user.id);

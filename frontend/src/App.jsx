@@ -33,8 +33,6 @@ import Invoice from './pages/shop/Invoice.jsx';
 import Profile from './pages/shop/Profile.jsx';
 import Addresses from './pages/shop/Addresses.jsx';
 import Contact from './pages/shop/Contact.jsx';
-import ShopLogin from './pages/shop/ShopLogin.jsx';
-import ShopRegister from './pages/shop/ShopRegister.jsx';
 import Splash from './pages/shop/Splash.jsx';
 
 function RequireAuth({ children }) {
@@ -90,8 +88,8 @@ export default function App() {
           <Route path="addresses" element={<Addresses />} />
           <Route path="contact" element={<Contact />} />
           <Route path="welcome" element={<Splash />} />
-          <Route path="login" element={<ShopLogin />} />
-          <Route path="register" element={<ShopRegister />} />
+          <Route path="login" element={<Navigate to="/login" replace />} />
+          <Route path="register" element={<Navigate to="/login" replace />} />
           <Route path="*" element={<Navigate to="/shop" replace />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
