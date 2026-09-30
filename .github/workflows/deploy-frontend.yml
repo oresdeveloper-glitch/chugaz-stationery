@@ -19,33 +19,33 @@ jobs:
       - run: cd frontend && npm install && npm run build
       - run: cd api && npm install
       - name: Ensure JWT_SECRET exists on Vercel
-        continue-on-error: true
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
         run: |
-          if npx vercel env ls --token="$VERCEL_TOKEN" 2>/dev/null | grep -q "JWT_SECRET"; then
-            echo "JWT_SECRET already set on Vercel - nothing to do"
-          else
-            echo "JWT_SECRET missing - generating once and adding (production + preview)"
+          SCOPE=""
+          if [ -n "$VERCEL_TEAM_ID" ]; then SCOPE="?teamId=$VERCEL_TEAM_ID"; fi
+          api() { curl -sS -m 25 -H "Authorization: Bearer $VERCEL_TOKEN" "$@"; }
+          for ATTEMPT in 1 2 3; do
+            LIST="$(api "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env$SCOPE")"
+            if echo "$LIST" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"'; then
+              echo "JWT_SECRET already set on Vercel - nothing to do"
+              exit 0
+            fi
+            echo "JWT_SECRET missing (attempt $ATTEMPT) - generating once and adding encrypted (production + preview)"
             SECRET="$(openssl rand -hex 64)"
-            printf '%s' "$SECRET" | npx vercel env add JWT_SECRET production --token="$VERCEL_TOKEN" >/dev/null 2>&1
-            printf '%s' "$SECRET" | npx vercel env add JWT_SECRET preview --token="$VERCEL_TOKEN" >/dev/null 2>&1
+            RESP="$(curl -sS -m 25 -X POST -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" -d "{\"key\":\"JWT_SECRET\",\"value\":\"$SECRET\",\"target\":[\"production\",\"preview\"],\"type\":\"encrypted\"}" "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env$SCOPE")"
             unset SECRET
-            echo "JWT_SECRET added"
-          fi
-      - name: Verify JWT_SECRET present on Vercel
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: |
-          if npx vercel env ls --token="$VERCEL_TOKEN" 2>/dev/null | grep -q "JWT_SECRET"; then
-            echo "VERIFIED: JWT_SECRET exists on Vercel"
-          else
-            echo "VERIFICATION FAILED: JWT_SECRET is still missing - sessions will keep expiring"
-            exit 1
-          fi
+            if echo "$RESP" | grep -q '"key"[[:space:]]*:[[:space:]]*"JWT_SECRET"'; then
+              echo "JWT_SECRET created on Vercel"
+              exit 0
+            fi
+            echo "Attempt $ATTEMPT failed: $(echo "$RESP" | grep -o '\"code\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | head -1)"
+            sleep 10
+          done
+          echo "FAILED to ensure JWT_SECRET after 3 attempts - sessions will keep expiring"
+          exit 1
       - name: Deploy to Vercel Production
         run: npx vercel deploy --prod --force --yes --token=${{ secrets.VERCEL_TOKEN }}
