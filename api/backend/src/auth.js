@@ -7,10 +7,12 @@ const DATA_DIR = process.env.VERCEL === '1' ? '/tmp/stationery-data' : path.join
 
 // Persistent secret: env var wins; otherwise generated once and stored so
 // tokens survive restarts but no weak default is ever used.
+let JWT_SECRET_SOURCE = 'env';
 function loadSecret() {
  if (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 16) {
   return process.env.JWT_SECRET;
  }
+ JWT_SECRET_SOURCE = 'local';
  // Keep the secret next to the database when a custom DB_PATH is set so the
  // two share a lifecycle (e.g. persistent /data volumes); otherwise DATA_DIR.
  // Never throw here — worst case the secret lives only in memory.
@@ -110,4 +112,4 @@ function requireCustomer(req, res, next) {
  next();
 }
 
-module.exports = { signToken, verifyLive, requireAuth, requireRole, requireCustomer, optionalAuth, ROLE_LEVEL, JWT_SECRET };
+module.exports = { signToken, verifyLive, requireAuth, requireRole, requireCustomer, optionalAuth, ROLE_LEVEL, JWT_SECRET, JWT_SECRET_SOURCE };

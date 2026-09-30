@@ -12,17 +12,36 @@ app.use((req, res, next) => {
   next();
 });
 
+// Instance identity for diagnostics (ephemeral on serverless: a changing id
+// across calls proves requests land on different instances).
+const INSTANCE_ID = require('crypto').randomBytes(4).toString('hex');
+const BOOT_TIME = new Date().toISOString();
+
 // Health endpoint FIRST: never depends on DB/routes so the serverless
 // function always responds even if a route module fails to load.
 app.get('/api/health', (req, res) => {
   let dbReady = false;
+  let users = null;
   try {
     // eslint-disable-next-line no-eval
-    dbReady = !!eval('require')('./backend/src/db').dbReady;
+    const m = eval('require')('./backend/src/db');
+    dbReady = !!m.dbReady;
+    if (dbReady) {
+      try { const r = m.db.prepare('SELECT COUNT(*) AS c FROM users').get(); users = r ? r.c : null; } catch (_) { users = null; }
+    }
   } catch (_) {
     dbReady = false;
   }
-  res.json({ ok: true, db: dbReady ? 'connected' : 'degraded', payment_instructions: '356322054 - CHUGAZ STATIONERY' });
+  // 'env' = stable shared secret; 'local' = per-instance generated secret
+  // (sessions die across instances). Never exposes the value itself.
+  let secret = 'unknown';
+  try {
+    // eslint-disable-next-line no-eval
+    secret = eval('require')('./backend/src/auth').JWT_SECRET_SOURCE || 'unknown';
+  } catch (_) {
+    secret = 'unknown';
+  }
+  res.json({ ok: true, db: dbReady ? 'connected' : 'degraded', users, secret, instance: INSTANCE_ID, boot: BOOT_TIME, payment_instructions: '356322054 - CHUGAZ STATIONERY' });
 });
 
 function safeRoute(routePath) {
