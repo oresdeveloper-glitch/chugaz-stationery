@@ -26,10 +26,11 @@ jobs:
           VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
         run: |
           API="https://api.vercel.com"
+          TEAM_ID="${VERCEL_TEAM_ID:-$VERCEL_ORG_ID}"
           TEAM_QS=""
-          if [ -n "${VERCEL_TEAM_ID:-}" ]; then TEAM_QS="&teamId=$VERCEL_TEAM_ID"; fi
+          if [ -n "${TEAM_ID:-}" ]; then TEAM_QS="&teamId=$TEAM_ID"; fi
           EQ=""
-          if [ -n "${VERCEL_TEAM_ID:-}" ]; then EQ="?teamId=$VERCEL_TEAM_ID"; fi
+          if [ -n "${TEAM_ID:-}" ]; then EQ="?teamId=$TEAM_ID"; fi
           DOMAIN="chugaz-stationery.vercel.app"
           fail() { echo "ENV-STATUS: FAILED - $1"; exit 1; }
           PLIST="$(curl -sS -m 30 -H "Authorization: Bearer $VERCEL_TOKEN" "$API/v9/projects?limit=100$TEAM_QS")" || fail "cannot list Vercel projects"
