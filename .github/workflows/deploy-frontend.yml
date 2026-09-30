@@ -1,15 +1,10 @@
-name: Build and Deploy to Vercel
+name: Build Check
 on:
   push:
     branches: [main]
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    env:
-      VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,30 +13,3 @@ jobs:
       - run: npm install
       - run: cd frontend && npm install && npm run build
       - run: cd api && npm install
-      - name: Resolve serving project and ensure JWT_SECRET
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: |
-          fail() { echo "ENV-STATUS: FAILED - $1"; exit 1; }
-          INSPECT="$(npx vercel inspect https://vercel.com/orresy-developer/chugaz-stationery/GSK3xAczRmyZiaNBhRyVjWoYAmbK --token="$VERCEL_TOKEN" 2>&1 || true)"
-          echo "--- inspect output (deployment metadata, no secrets) ---"
-          echo "$INSPECT" | head -30 || true
-          echo "--- end inspect ---"
-          SERVING="$(printf '%s' "$INSPECT" | grep -oE 'prj_[A-Za-z0-9]+' | head -1 || true)"
-          [ -n "$SERVING" ] || fail "could not determine serving project id"
-          echo "Serving project id: $SERVING"
-          echo "VERCEL_RESOLVED_PROJECT_ID=$SERVING" >> "$GITHUB_ENV"
-          OUT="$(VERCEL_PROJECT_ID="$SERVING" npx vercel env ls --token="$VERCEL_TOKEN" 2>&1 || true)"
-          if echo "$OUT" | grep -qi "JWT_SECRET.*production"; then echo "ENV-STATUS: OK - already present"; exit 0; fi
-          SECRET="$(openssl rand -hex 64)"
-          printf '%s' "$SECRET" | VERCEL_PROJECT_ID="$SERVING" npx vercel env add JWT_SECRET production --token="$VERCEL_TOKEN" >/dev/null 2>&1 || true
-          printf '%s' "$SECRET" | VERCEL_PROJECT_ID="$SERVING" npx vercel env add JWT_SECRET preview --token="$VERCEL_TOKEN" >/dev/null 2>&1 || true
-          unset SECRET
-          OUT2="$(VERCEL_PROJECT_ID="$SERVING" npx vercel env ls --token="$VERCEL_TOKEN" 2>&1 || true)"
-          if echo "$OUT2" | grep -qi "JWT_SECRET.*production"; then echo "ENV-STATUS: OK - created and verified"; else echo "ENV-STATUS: FAILED - still missing"; echo "$OUT2" | head -10 || true; exit 1; fi
-      - name: Deploy to Vercel Production
-        env:
-          VERCEL_PROJECT_ID: ${{ env.VERCEL_RESOLVED_PROJECT_ID }}
-        run: npx vercel deploy --prod --force --yes --token=${{ secrets.VERCEL_TOKEN }}
