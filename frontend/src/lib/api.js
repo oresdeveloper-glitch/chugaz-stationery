@@ -94,14 +94,30 @@ async function request(path, options = {}, shop = false) {
   }
 
   const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
-  let res = await fetch(`${base}/api${shop ? '/shop' : ''}${path}`, { ...options, headers });
-  if (res.status === 401 && !path.startsWith('/auth/')) {
+  const url = `${base}/api${shop ? '/shop' : ''}${path}`;
+  // Auth endpoints (login/refresh) must never be retried: a 401 there means
+  // wrong credentials, and retrying would burn rate-limit budget and locks.
+  const recoverable = !path.startsWith('/auth/');
+  const send = () => fetch(url, { ...options, headers });
+
+  let res = await send();
+  if (res.status === 401 && recoverable) {
+    // A lone 401 can be transient on serverless hosting (the request lands on
+    // a cold instance that doesn't know this session yet). The auth gate
+    // returns 401 before any route handler runs, so retrying even POSTs is
+    // safe — nothing was created server-side.
+    for (let attempt = 1; attempt <= 2 && res.status === 401; attempt++) {
+      await new Promise((r) => setTimeout(r, attempt * 700));
+      res = await send();
+    }
+  }
+  if (res.status === 401 && recoverable) {
     const user = getUserFn();
     const nt = token ? await refreshToken(token) : null;
     if (nt && user) {
       setTok(nt, user);
       headers.Authorization = `Bearer ${nt}`;
-      res = await fetch(`${base}/api${shop ? '/shop' : ''}${path}`, { ...options, headers });
+      res = await send();
     } else {
       clearTok();
       if (!shop && !printLocked) window.location.href = '/login';

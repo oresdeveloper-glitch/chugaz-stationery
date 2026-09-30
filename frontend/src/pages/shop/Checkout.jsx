@@ -87,7 +87,6 @@ function CheckoutInner() {
       } catch (err) {
         lastErr = err;
         if (err.message.includes('session') || err.message.includes('Session')) {
-          try { await shopApi('/logout'); } catch {}
           window.location.href = '/login?next=' + encodeURIComponent('/shop/checkout');
           return;
         }

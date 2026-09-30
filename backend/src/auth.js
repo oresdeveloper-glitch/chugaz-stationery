@@ -11,14 +11,26 @@ function loadSecret() {
  if (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 16) {
   return process.env.JWT_SECRET;
  }
- const keyPath = path.join(DATA_DIR, 'secret.key');
- try {
-  const existing = fs.readFileSync(keyPath, 'utf8').trim();
-  if (existing.length >= 32) return existing;
- } catch {}
+ // Keep the secret next to the database when a custom DB_PATH is set so the
+ // two share a lifecycle (e.g. persistent /data volumes); otherwise DATA_DIR.
+ // Never throw here — worst case the secret lives only in memory.
+ const candidates = [];
+ try { if (process.env.DB_PATH) candidates.push(path.join(path.dirname(process.env.DB_PATH), 'secret.key')); } catch {}
+ candidates.push(path.join(DATA_DIR, 'secret.key'));
+ for (const keyPath of candidates) {
+  try {
+   const existing = fs.readFileSync(keyPath, 'utf8').trim();
+   if (existing.length >= 32) return existing;
+  } catch {}
+ }
  const generated = require('crypto').randomBytes(48).toString('hex');
- fs.mkdirSync(DATA_DIR, { recursive: true });
- fs.writeFileSync(keyPath, generated, { mode: 0o600 });
+ for (const keyPath of candidates) {
+  try {
+   fs.mkdirSync(path.dirname(keyPath), { recursive: true });
+   fs.writeFileSync(keyPath, generated, { mode: 0o600 });
+   break;
+  } catch {}
+ }
  return generated;
 }
 
