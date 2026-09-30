@@ -16,6 +16,7 @@ function OrderDetailInner() {
   const { id } = useParams();
   const [order, setOrder] = useState(null);
   const [info, setInfo] = useState(null);
+  const [error, setError] = useState(null);
   const [payOpen, setPayOpen] = useState(false);
   const [payRef, setPayRef] = useState('');
   const [returnReason, setReturnReason] = useState('');
@@ -25,9 +26,10 @@ function OrderDetailInner() {
 
   const load = async () => {
     try {
+      setError(null);
       setOrder(await shopApi(`/orders/${id}`));
       setInfo(await shopApi('/info'));
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) { setError(e.message); toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, [id]);
 
@@ -36,6 +38,18 @@ function OrderDetailInner() {
     catch (e) { toast(e.message, 'error'); }
   };
 
+  if (error && !order) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '36px 24px' }}>
+        <h2>Couldn't load this order</h2>
+        <p className="muted small">{error}</p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+          <button className="btn primary" onClick={load}>Try again</button>
+          <Link to="/shop/orders" className="btn">My orders</Link>
+        </div>
+      </div>
+    );
+  }
   if (!order) return <div className="card">Loading...</div>;
   const currency = info?.currency || 'TSh';
   const isNew = order.order_status === 'pending' && order.payment_status !== 'paid';

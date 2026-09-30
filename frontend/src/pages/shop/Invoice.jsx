@@ -145,13 +145,28 @@ function InvoiceInner() {
   const { id } = useParams();
   const [order, setOrder] = useState(null);
   const [info, setInfo] = useState(null);
+  const [error, setError] = useState(null);
   const toast = useToast();
 
-  useEffect(() => {
-    shopApi(`/orders/${id}`).then(setOrder).catch((e) => toast(e.message, 'error'));
+  const load = () => {
+    setError(null);
+    shopApi(`/orders/${id}`).then(setOrder).catch((e) => { setError(e.message); toast(e.message, 'error'); });
     shopApi('/info').then(setInfo).catch(() => {});
-  }, [id]);
+  };
+  useEffect(() => { load(); }, [id]);
 
+  if (error && !order) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '36px 24px' }}>
+        <h2>Couldn't load the invoice</h2>
+        <p className="muted small">{error}</p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+          <button className="btn primary" onClick={load}>Try again</button>
+          <Link to="/shop/orders" className="btn">My orders</Link>
+        </div>
+      </div>
+    );
+  }
   if (!order || !info) return <div className="card">Loading…</div>;
   const currency = info.currency || 'TSh';
   const method = String(order.payment_method || '').replace(/_/g, ' ');
