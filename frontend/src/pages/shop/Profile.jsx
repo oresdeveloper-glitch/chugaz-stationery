@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { shopApi, setShopAuth, getShopUser } from '../../lib/api';
 import RequireShopAuth from '../../shop/RequireShopAuth';
 import { useToast } from '../../components/Toast';
@@ -6,12 +7,15 @@ import { useToast } from '../../components/Toast';
 function ProfileInner() {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
   const toast = useToast();
 
   const [uploading, setUploading] = useState(false);
-  useEffect(() => {
-    shopApi('/me').then(({ user }) => setForm({ name: user.name, phone: user.phone || '', email: user.email, avatar: user.avatar, avatar_url: user.avatar_url || user.avatar, password: '' })).catch((e) => toast(e.message, 'error'));
-  }, []);
+  const load = () => {
+    setError(null);
+    shopApi('/me').then(({ user }) => setForm({ name: user.name, phone: user.phone || '', email: user.email, avatar: user.avatar, avatar_url: user.avatar_url || user.avatar, password: '' })).catch((e) => { setError(e.message); toast(e.message, 'error'); });
+  };
+  useEffect(() => { load(); }, []);
 
   const onAvatar = async (e) => {
     const file = e.target.files && e.target.files[0];
@@ -46,6 +50,18 @@ function ProfileInner() {
     finally { setSaving(false); }
   };
 
+  if (error && !form) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '36px 24px' }}>
+        <h2>Couldn't load your profile</h2>
+        <p className="muted small">{error}</p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+          <button className="btn primary" onClick={load}>Try again</button>
+          <Link to="/shop" className="btn">Back to shop</Link>
+        </div>
+      </div>
+    );
+  }
   if (!form) return <div className="card">Loading...</div>;
   const initials = (form.name || '?').trim().split(' ').map(n=>n[0]).slice(0,2).join('').toUpperCase();
 

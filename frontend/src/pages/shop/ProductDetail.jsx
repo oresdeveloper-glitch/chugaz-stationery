@@ -14,10 +14,12 @@ export default function ProductDetail() {
   const [variant, setVariant] = useState(null);
   const [info, setInfo] = useState(null);
   const [imgIdx, setImgIdx] = useState(0);
+  const [error, setError] = useState(null);
   const { refreshCart } = useShop();
   const toast = useToast();
 
-  useEffect(() => {
+  const load = () => {
+    setError(null);
     shopApi(`/products/${id}`).then((prod) => {
       setP(prod);
       setImgIdx(0);
@@ -25,9 +27,10 @@ export default function ProductDetail() {
       setVariant(first);
       const eff = first || prod;
       setUnit((eff.units && eff.units[0]) ? eff.units[0].id : 'piece');
-    }).catch((e) => toast(e.message, 'error'));
+    }).catch((e) => { setError(e.message); toast(e.message, 'error'); });
     shopApi('/info').then(setInfo).catch(() => {});
-  }, [id]);
+  };
+  useEffect(() => { load(); }, [id]);
 
   const eff = variant || p;
   const add = async () => {
@@ -40,6 +43,18 @@ export default function ProductDetail() {
     }
   };
 
+  if (error && !p) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '36px 24px' }}>
+        <h2>Couldn't load this product</h2>
+        <p className="muted small">{error}</p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+          <button className="btn primary" onClick={load}>Try again</button>
+          <Link to="/shop" className="btn">Back to shop</Link>
+        </div>
+      </div>
+    );
+  }
   if (!p) return <div className="card">Loading...</div>;
   const currency = info?.currency || 'TSh';
   const units = eff.units && eff.units.length ? eff.units : [{ id: 'piece', label: 'Piece', price: eff.piece_price || eff.selling_price, pieces: 1 }];

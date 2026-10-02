@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { shopApi, fmt } from '../../lib/api';
 import { useShop } from '../../shop/ShopContext';
-import RequireShopAuth from '../../shop/RequireShopAuth';
 import { useToast } from '../../components/Toast';
 import I from '../../components/icons';
 import SafeImg from '../../shop/SafeImg';
@@ -10,15 +9,17 @@ import SafeImg from '../../shop/SafeImg';
 function CartInner() {
   const [cart, setCart] = useState(null);
   const [info, setInfo] = useState(null);
+  const [error, setError] = useState(null);
   const { refreshCart } = useShop();
   const toast = useToast();
   const navigate = useNavigate();
 
   const load = async () => {
     try {
+      setError(null);
       setCart(await shopApi('/cart'));
       setInfo(await shopApi('/info'));
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) { setError(e.message); toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, []);
 
@@ -37,6 +38,18 @@ function CartInner() {
     refreshCart();
   };
 
+  if (error && !cart) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '36px 24px' }}>
+        <h2>Couldn't load your cart</h2>
+        <p className="muted small">{error}</p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+          <button className="btn primary" onClick={load}>Try again</button>
+          <Link to="/shop" className="btn">Continue shopping</Link>
+        </div>
+      </div>
+    );
+  }
   if (!cart) return <div className="card">Loading...</div>;
   const currency = info?.currency || 'TSh';
   const threshold = Number(info?.free_delivery_threshold) || 0;
@@ -99,5 +112,5 @@ function CartInner() {
 }
 
 export default function Cart() {
-  return <RequireShopAuth><CartInner /></RequireShopAuth>;
+  return <CartInner />;
 }

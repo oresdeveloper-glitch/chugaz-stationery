@@ -38,17 +38,19 @@ function CheckoutInner() {
   const [newAddr, setNewAddr] = useState({ address_name: '', recipient_name: '', phone: '', address: '', city: '', postal_code: '' });
   const [guest, setGuest] = useState({ name: '', phone: '', address: '', city: '' });
   const [placed, setPlaced] = useState(null);
+  const [loadError, setLoadError] = useState(null);
   const { user, logout, refreshCart } = useShop();
   const toast = useToast();
   const navigate = useNavigate();
 
   const load = async () => {
     try {
+      setLoadError(null);
       setCart(await shopApi('/cart'));
       setInfo(await shopApi('/info'));
       if (user) setAddresses(await shopApi('/addresses'));
       else setAddresses([]);
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) { setLoadError(e.message); toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, []);
 
@@ -161,7 +163,19 @@ function CheckoutInner() {
     setPlacing(false);
   };
 
-  if (!cart || !info) return <div className="card">Loading…</div>;
+  if (!cart || !info) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '36px 24px' }}>
+        <h2>{loadError ? "Couldn't load checkout" : 'Loading…'}</h2>
+        {loadError && (
+          <>
+            <p className="muted small">{loadError}</p>
+            <button className="btn primary" style={{ marginTop: 14 }} onClick={load}>Try again</button>
+          </>
+        )}
+      </div>
+    );
+  }
   const currency = info.currency || 'TSh';
   const fee = Number(info.delivery_fee) || 0;
   const freeThreshold = Number(info.free_delivery_threshold) || 0;
@@ -209,6 +223,17 @@ function CheckoutInner() {
                 <div className="field"><label>Your name *</label><input value={guest.name} onChange={(e) => setGuest({ ...guest, name: e.target.value })} placeholder="Full name" /></div>
                 <div className="field"><label>Phone *</label><input value={guest.phone} onChange={(e) => setGuest({ ...guest, phone: e.target.value })} placeholder="07XXXXXXXX" /></div>
               </div>
+            </div>
+          )}
+          {user && !user.phone && (
+            <div className="card ck-card">
+              <div className="ck-head">
+                <div>
+                  <h2 className="ck-title">Contact phone</h2>
+                  <div className="muted small">Your account has no phone number — add one so the shop can reach you about this order.</div>
+                </div>
+              </div>
+              <div className="field"><label>Phone *</label><input value={guest.phone} onChange={(e) => setGuest({ ...guest, phone: e.target.value })} placeholder="07XXXXXXXX" /></div>
             </div>
           )}
           <Section n="1" title="Delivery method" sub="How would you like to receive your order?">
