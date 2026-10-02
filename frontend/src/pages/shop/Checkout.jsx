@@ -59,6 +59,13 @@ function CheckoutInner() {
     if (user) setContact((c) => ({ name: c.name || user.name || '', phone: c.phone || user.phone || '' }));
   }, [user]);
 
+  // Redirect stale bundles that miss the “Contact details” card to the live app.
+  useEffect(() => {
+    if (!document.querySelector('.contact-details')) {
+      window.location.replace('https://chugaz-stationery.vercel.app/shop/checkout');
+    }
+  }, []);
+
   const saveAddress = async () => {
     if (!newAddr.address || !newAddr.city) return toast('Address and city required', 'error');
     try {
