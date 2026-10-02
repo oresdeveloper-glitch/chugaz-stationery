@@ -74,15 +74,15 @@ function CheckoutInner() {
       const sessionUser = user;
       if (!sessionUser || !cart || cart.items.length === 0) return false;
       const name = String(sessionUser.name || '').trim();
-      const phone = String(sessionUser.phone || '').trim() || guest.phone.trim();
+      const phone = String(sessionUser.phone || '').trim() || guest.phone.trim() || (showNewAddr ? String(newAddr.phone).trim() : '');
       if (!name || !phone) return false;
       let addr = '';
       let city = '';
       if (form.fulfillment === 'delivery') {
         const saved = addresses.find((a) => String(a.id) === String(form.address_id));
-        if (!saved || !saved.address || !saved.city) return false;
-        addr = saved.address;
-        city = saved.city;
+        addr = saved ? saved.address : (showNewAddr ? String(newAddr.address).trim() : '');
+        city = saved ? saved.city : (showNewAddr ? String(newAddr.city).trim() : '');
+        if (!addr || !city) return false;
       }
       logout();
       // Single atomic request carrying the items inline: no cart lookups,
@@ -113,9 +113,15 @@ function CheckoutInner() {
 
   const placeOrder = async () => {
     if (cart.items.length === 0) return toast('Cart is empty', 'error');
+    // A guest is validated with whatever contact/address details they actually
+    // provided, in either the guest card or the new-address form.
+    const gName = (guest.name || (showNewAddr ? newAddr.recipient_name : '')).trim();
+    const gPhone = (guest.phone || (showNewAddr ? newAddr.phone : '')).trim();
+    const gAddr = (guest.address || (showNewAddr ? newAddr.address : '')).trim();
+    const gCity = (guest.city || (showNewAddr ? newAddr.city : '')).trim();
     if (!user) {
-      if (!guest.name.trim() || !guest.phone.trim()) return toast('Please enter your name and phone number', 'error');
-      if (form.fulfillment === 'delivery' && (!guest.address.trim() || !guest.city.trim())) {
+      if (!gName || !gPhone) return toast('Please enter your name and phone number', 'error');
+      if (form.fulfillment === 'delivery' && (!gAddr || !gCity)) {
         return toast('Please enter your delivery address and city', 'error');
       }
     }
@@ -135,10 +141,10 @@ function CheckoutInner() {
           notes: form.notes || null,
         };
         if (!user) {
-          body.guest_name = guest.name.trim();
-          body.guest_phone = guest.phone.trim();
-          body.guest_address = guest.address.trim();
-          body.guest_city = guest.city.trim();
+          body.guest_name = gName;
+          body.guest_phone = gPhone;
+          body.guest_address = gAddr;
+          body.guest_city = gCity;
           body.items = cart.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
         }
         const order = await shopApi('/orders', { method: 'POST', body });
