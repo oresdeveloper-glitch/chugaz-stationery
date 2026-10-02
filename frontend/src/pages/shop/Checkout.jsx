@@ -39,6 +39,7 @@ function CheckoutInner() {
   const [guest, setGuest] = useState({ name: '', phone: '', address: '', city: '' });
   const [placed, setPlaced] = useState(null);
   const [loadError, setLoadError] = useState(null);
+  const [placing, setPlacing] = useState(false);
   const { user, logout, refreshCart } = useShop();
   const toast = useToast();
   const navigate = useNavigate();
