@@ -38,7 +38,7 @@ function CheckoutInner() {
   const [newAddr, setNewAddr] = useState({ address_name: '', recipient_name: '', phone: '', address: '', city: '', postal_code: '' });
   const [guest, setGuest] = useState({ name: '', phone: '', address: '', city: '' });
   const [placed, setPlaced] = useState(null);
-  const { user, refreshCart } = useShop();
+  const { user, logout, refreshCart } = useShop();
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -60,6 +60,52 @@ function CheckoutInner() {
       setNewAddr({ address_name: '', recipient_name: '', phone: '', address: '', city: '', postal_code: '' });
       setAddresses(await shopApi('/addresses'));
     } catch (e) { toast(e.message, 'error'); }
+  };
+
+  // Last-resort recovery: the signed-in session died server-side (e.g. cold
+  // serverless instance). Rebuild the visible cart as a guest and place the
+  // order without any session, so the customer never loses the sale to a
+  // login redirect. Returns true when the order went through.
+  const recoverAsGuest = async () => {
+    try {
+      const sessionUser = user;
+      if (!sessionUser || !cart || cart.items.length === 0) return false;
+      const name = String(sessionUser.name || '').trim();
+      const phone = String(sessionUser.phone || '').trim() || guest.phone.trim();
+      if (!name || !phone) return false;
+      let addr = '';
+      let city = '';
+      if (form.fulfillment === 'delivery') {
+        const saved = addresses.find((a) => String(a.id) === String(form.address_id));
+        if (!saved || !saved.address || !saved.city) return false;
+        addr = saved.address;
+        city = saved.city;
+      }
+      logout();
+      await shopApi('/cart', { method: 'DELETE' });
+      for (const item of cart.items) {
+        await shopApi('/cart/items', { method: 'POST', body: { product_id: item.product_id, quantity: item.quantity } });
+      }
+      const order = await shopApi('/orders', {
+        method: 'POST',
+        body: {
+          fulfillment_type: form.fulfillment,
+          payment_method: form.method === 'credit' ? 'cash_on_delivery' : form.method,
+          transaction_reference: form.reference || null,
+          notes: form.notes || null,
+          guest_name: name,
+          guest_phone: phone,
+          guest_address: addr,
+          guest_city: city,
+        },
+      });
+      await refreshCart();
+      toast(`Order ${order.order_number} placed`);
+      setPlaced(order);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const placeOrder = async () => {
@@ -104,6 +150,7 @@ function CheckoutInner() {
       } catch (err) {
         lastErr = err;
         if (err.message.includes('session') || err.message.includes('Session')) {
+          if (await recoverAsGuest()) { setPlacing(false); return; }
           window.location.href = '/login?next=' + encodeURIComponent('/shop/checkout');
           return;
         }

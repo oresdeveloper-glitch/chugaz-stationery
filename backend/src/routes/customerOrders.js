@@ -65,6 +65,12 @@ router.post('/', (req, res) => {
   if (req.user && req.user.role !== 'customer') {
     return res.status(403).json({ error: 'Customer account required' });
   }
+  if (isGuest && !!String(req.headers.authorization || '').startsWith('Bearer ')) {
+    // A token was sent but verifies nowhere (e.g. cold serverless instance):
+    // tell the client the session is dead so it can re-authenticate or
+    // fall back to guest checkout, instead of failing contact validation.
+    return res.status(401).json({ error: 'Session expired - please sign in again' });
+  }
   const { fulfillment_type, delivery_address_id, payment_method, transaction_reference, notes,
     guest_name, guest_phone, guest_address, guest_city } = req.body;
   const ft = fulfillment_type === 'pickup' ? 'pickup' : 'delivery';
