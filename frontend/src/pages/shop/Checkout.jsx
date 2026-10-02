@@ -77,15 +77,15 @@ function CheckoutInner() {
     try {
       const sessionUser = user;
       if (!sessionUser || !cart || cart.items.length === 0) return false;
-      const name = String(sessionUser.name || contact.name || '').trim();
-      const phone = String(sessionUser.phone || '').trim() || contact.phone.trim() || guest.phone.trim() || (showNewAddr ? String(newAddr.phone).trim() : '');
+      const name = String(sessionUser.name || contact.name || guest.name || newAddr.recipient_name || '').trim();
+      const phone = String(sessionUser.phone || '').trim() || contact.phone.trim() || guest.phone.trim() || String(newAddr.phone || '').trim();
       if (!name || !phone) return false;
       let addr = '';
       let city = '';
       if (form.fulfillment === 'delivery') {
         const saved = addresses.find((a) => String(a.id) === String(form.address_id));
-        addr = saved ? saved.address : (showNewAddr ? String(newAddr.address).trim() : '');
-        city = saved ? saved.city : (showNewAddr ? String(newAddr.city).trim() : '');
+        addr = saved ? saved.address : String(guest.address || newAddr.address || '').trim();
+        city = saved ? saved.city : String(guest.city || newAddr.city || '').trim();
         if (!addr || !city) return false;
       }
       logout();
@@ -119,10 +119,10 @@ function CheckoutInner() {
     if (cart.items.length === 0) return toast('Cart is empty', 'error');
     // A guest is validated with whatever contact/address details they actually
     // provided, in either the guest card or the new-address form.
-    const gName = (guest.name || (showNewAddr ? newAddr.recipient_name : '')).trim();
-    const gPhone = (guest.phone || (showNewAddr ? newAddr.phone : '')).trim();
-    const gAddr = (guest.address || (showNewAddr ? newAddr.address : '')).trim();
-    const gCity = (guest.city || (showNewAddr ? newAddr.city : '')).trim();
+    const gName = (guest.name || newAddr.recipient_name).trim();
+    const gPhone = (guest.phone || newAddr.phone).trim();
+    const gAddr = (guest.address || newAddr.address).trim();
+    const gCity = (guest.city || newAddr.city).trim();
     if (!user) {
       if (!gName || !gPhone) return toast('Please enter your name and phone number', 'error');
       if (form.fulfillment === 'delivery' && (!gAddr || !gCity)) {
