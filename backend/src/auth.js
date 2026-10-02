@@ -12,28 +12,12 @@ function loadSecret() {
  if (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 16) {
   return process.env.JWT_SECRET;
  }
- JWT_SECRET_SOURCE = 'local';
- // Keep the secret next to the database when a custom DB_PATH is set so the
- // two share a lifecycle (e.g. persistent /data volumes); otherwise DATA_DIR.
- // Never throw here — worst case the secret lives only in memory.
- const candidates = [];
- try { if (process.env.DB_PATH) candidates.push(path.join(path.dirname(process.env.DB_PATH), 'secret.key')); } catch {}
- candidates.push(path.join(DATA_DIR, 'secret.key'));
- for (const keyPath of candidates) {
-  try {
-   const existing = fs.readFileSync(keyPath, 'utf8').trim();
-   if (existing.length >= 32) return existing;
-  } catch {}
- }
- const generated = require('crypto').randomBytes(48).toString('hex');
- for (const keyPath of candidates) {
-  try {
-   fs.mkdirSync(path.dirname(keyPath), { recursive: true });
-   fs.writeFileSync(keyPath, generated, { mode: 0o600 });
-   break;
-  } catch {}
- }
- return generated;
+ JWT_SECRET_SOURCE = 'code-fallback';
+ // Fixed fallback so ALL serverless instances sign tokens with the same secret
+ // even when JWT_SECRET is not configured (Vercel free tier has no persistent
+ // disk). Setting JWT_SECRET in the environment always wins; do not rotate
+ // this value without invalidating all sessions.
+ return 'chugaz-stationery-production-secret-9f8e7d6c5b4a39718f0e1d2c3b4a5f69788123456789';
 }
 
 const JWT_SECRET = loadSecret();
