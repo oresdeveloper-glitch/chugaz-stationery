@@ -178,6 +178,9 @@ router.post('/', (req, res) => {
   }
   const cleanNotes = notes ? String(notes).slice(0, 500) : null;
 
+  const contactName = isGuest ? null : (typeof req.body.contact_name === 'string' ? req.body.contact_name.trim().slice(0, 80) : '');
+  const contactPhone = isGuest ? null : (typeof req.body.contact_phone === 'string' ? req.body.contact_phone.trim().slice(0, 30) : '');
+
   if (method === 'credit' && !isGuest) {
     const outstanding = Number(user.balance) + total;
    const limit = Number(user.credit_limit) || 0;
@@ -198,8 +201,8 @@ router.post('/', (req, res) => {
    orderNumber, orderUserId,
    initialPayStatus,
    ft, address ? address.id : null,
-   address ? (address.recipient_name || user.name) : (isGuest ? gName : null),
-   address ? (address.phone || user.phone) : (isGuest ? gPhone : null),
+   address ? (contactName || address.recipient_name || user.name) : (isGuest ? gName : (contactName || user.name || null)),
+   address ? (contactPhone || address.phone || user.phone) : (isGuest ? gPhone : (contactPhone || user.phone || null)),
    address ? `${address.address}, ${address.city}` : (isGuest && ft === 'delivery' ? `${gAddr}, ${gCity}` : null),
    subtotal, discount, tax, deliveryFee, total, method, cleanNotes
   );

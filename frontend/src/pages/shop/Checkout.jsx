@@ -37,6 +37,7 @@ function CheckoutInner() {
   const [showNewAddr, setShowNewAddr] = useState(false);
   const [newAddr, setNewAddr] = useState({ address_name: '', recipient_name: '', phone: '', address: '', city: '', postal_code: '' });
   const [guest, setGuest] = useState({ name: '', phone: '', address: '', city: '' });
+  const [contact, setContact] = useState({ name: '', phone: '' });
   const [placed, setPlaced] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [placing, setPlacing] = useState(false);
@@ -54,6 +55,9 @@ function CheckoutInner() {
     } catch (e) { setLoadError(e.message); toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (user) setContact((c) => ({ name: c.name || user.name || '', phone: c.phone || user.phone || '' }));
+  }, [user]);
 
   const saveAddress = async () => {
     if (!newAddr.address || !newAddr.city) return toast('Address and city required', 'error');
@@ -73,8 +77,8 @@ function CheckoutInner() {
     try {
       const sessionUser = user;
       if (!sessionUser || !cart || cart.items.length === 0) return false;
-      const name = String(sessionUser.name || '').trim();
-      const phone = String(sessionUser.phone || '').trim() || guest.phone.trim() || (showNewAddr ? String(newAddr.phone).trim() : '');
+      const name = String(sessionUser.name || contact.name || '').trim();
+      const phone = String(sessionUser.phone || '').trim() || contact.phone.trim() || guest.phone.trim() || (showNewAddr ? String(newAddr.phone).trim() : '');
       if (!name || !phone) return false;
       let addr = '';
       let city = '';
@@ -126,6 +130,11 @@ function CheckoutInner() {
       }
     }
     if (form.fulfillment === 'delivery' && user && !form.address_id) return toast('Choose a delivery address', 'error');
+    if (user) {
+      const cName = (contact.name || user.name || '').trim();
+      const cPhone = (contact.phone || user.phone || '').trim();
+      if (!cName || !cPhone) return toast('Please enter your name and phone number for this order', 'error');
+    }
     if (['card', 'mobile_money', 'bank_transfer'].includes(form.method) && (!form.reference || form.reference.trim().length < 4)) {
       return toast('Enter the transaction reference from your payment (min 4 characters)', 'error');
     }
@@ -146,6 +155,10 @@ function CheckoutInner() {
           body.guest_address = gAddr;
           body.guest_city = gCity;
           body.items = cart.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
+        }
+        if (user) {
+          body.contact_name = (contact.name || user.name || '').trim();
+          body.contact_phone = (contact.phone || user.phone || '').trim();
         }
         const order = await shopApi('/orders', { method: 'POST', body });
         if (!user) {
@@ -237,15 +250,18 @@ function CheckoutInner() {
               </div>
             </div>
           )}
-          {user && !user.phone && (
+          {user && (
             <div className="card ck-card">
               <div className="ck-head">
                 <div>
-                  <h2 className="ck-title">Contact phone</h2>
-                  <div className="muted small">Your account has no phone number — add one so the shop can reach you about this order.</div>
+                  <h2 className="ck-title">Contact details</h2>
+                  <div className="muted small">We use these details for this order. Edit below if they differ from your account.</div>
                 </div>
               </div>
-              <div className="field"><label>Phone *</label><input value={guest.phone} onChange={(e) => setGuest({ ...guest, phone: e.target.value })} placeholder="07XXXXXXXX" /></div>
+              <div className="form-row">
+                <div className="field"><label>Name *</label><input value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} placeholder="Full name" /></div>
+                <div className="field"><label>Phone *</label><input value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} placeholder="07XXXXXXXX" /></div>
+              </div>
             </div>
           )}
           <Section n="1" title="Delivery method" sub="How would you like to receive your order?">
