@@ -84,10 +84,8 @@ function CheckoutInner() {
         city = saved.city;
       }
       logout();
-      await shopApi('/cart', { method: 'DELETE' });
-      for (const item of cart.items) {
-        await shopApi('/cart/items', { method: 'POST', body: { product_id: item.product_id, quantity: item.quantity } });
-      }
+      // Single atomic request carrying the items inline: no cart lookups,
+      // so this works on any server instance regardless of session state.
       const order = await shopApi('/orders', {
         method: 'POST',
         body: {
@@ -99,8 +97,10 @@ function CheckoutInner() {
           guest_phone: phone,
           guest_address: addr,
           guest_city: city,
+          items: cart.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
         },
       });
+      await shopApi('/cart', { method: 'DELETE' }).catch(() => {});
       await refreshCart();
       toast(`Order ${order.order_number} placed`);
       setPlaced(order);
@@ -138,8 +138,13 @@ function CheckoutInner() {
           body.guest_phone = guest.phone.trim();
           body.guest_address = guest.address.trim();
           body.guest_city = guest.city.trim();
+          body.items = cart.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
         }
         const order = await shopApi('/orders', { method: 'POST', body });
+        if (!user) {
+          // Inline-items order leaves any guest cart behind: clear it.
+          await shopApi('/cart', { method: 'DELETE' }).catch(() => {});
+        }
         await refreshCart();
         toast(`Order ${order.order_number} placed`);
         if (user) {

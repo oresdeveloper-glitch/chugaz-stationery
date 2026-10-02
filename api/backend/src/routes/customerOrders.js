@@ -91,8 +91,20 @@ router.post('/', (req, res) => {
   } else if (ft === 'delivery' && !delivery_address_id) {
     return res.status(400).json({ error: 'Please select a delivery address' });
   }
+  // Guests may send their items inline so ordering never depends on which
+  // serverless instance holds their cart.
+  let guestItems = null;
+  if (isGuest && Array.isArray(req.body.items) && req.body.items.length > 0) {
+    guestItems = [];
+    for (const it of req.body.items.slice(0, 100)) {
+      const pid = Number(it && it.product_id);
+      const qty = Number(it && it.quantity);
+      if (!pid || !(qty > 0)) return res.status(400).json({ error: 'Invalid items in order' });
+      guestItems.push({ product_id: pid, quantity: qty });
+    }
+  }
 
- const sf = settings();
+  const sf = settings();
 
   let orderUserId;
   const created = transact(() => {
@@ -112,15 +124,25 @@ router.post('/', (req, res) => {
     }
 
     let cart = null;
-    if (isGuest) {
-      const gid = guestId(req);
-      if (gid) cart = db.prepare('SELECT * FROM carts WHERE guest_id=?').get(gid);
+    let lines = [];
+    if (isGuest && guestItems) {
+      for (const it of guestItems) {
+        const pr = db.prepare('SELECT id, name, unit, tax_rate, current_stock, reserved_stock, status, selling_price FROM products WHERE id=?').get(it.product_id);
+        if (!pr || pr.status !== 'active') throw new Error('An item in your order is no longer available');
+        if (!['dozen', 'outer', 'carton'].includes(pr.unit)) throw new Error(`${pr.name} is not available online. Wholesale packs only (dozen, outer, carton).`);
+        lines.push({ product_id: pr.id, quantity: it.quantity, cart_unit: pr.unit, product_name: pr.name, product_unit: pr.unit, tax_rate: pr.tax_rate, current_stock: pr.current_stock, reserved_stock: pr.reserved_stock, status: pr.status, selling_price: pr.selling_price, unit_price: 0 });
+      }
     } else {
-      cart = db.prepare('SELECT * FROM carts WHERE user_id=?').get(req.user.id);
+      if (isGuest) {
+        const gid = guestId(req);
+        if (gid) cart = db.prepare('SELECT * FROM carts WHERE guest_id=?').get(gid);
+      } else {
+        cart = db.prepare('SELECT * FROM carts WHERE user_id=?').get(req.user.id);
+      }
+      if (!cart) throw new Error('Your cart is empty');
+      lines = db.prepare('SELECT ci.id, ci.product_id, ci.quantity, ci.unit_price, ci.unit AS cart_unit, p.name AS product_name, p.unit AS product_unit, p.tax_rate, p.current_stock, p.reserved_stock, p.status, p.selling_price FROM cart_items ci JOIN products p ON p.id=ci.product_id WHERE ci.cart_id=?').all(cart.id);
     }
-    if (!cart) throw new Error('Your cart is empty');
-  const lines = db.prepare('SELECT ci.id, ci.product_id, ci.quantity, ci.unit_price, ci.unit AS cart_unit, p.name AS product_name, p.unit AS product_unit, p.tax_rate, p.current_stock, p.reserved_stock, p.status, p.selling_price FROM cart_items ci JOIN products p ON p.id=ci.product_id WHERE ci.cart_id=?').all(cart.id);
-  if (lines.length === 0) throw new Error('Your cart is empty');
+    if (lines.length === 0) throw new Error('Your cart is empty');
 
   let subtotal = 0;
   let tax = 0;
@@ -190,7 +212,7 @@ router.post('/', (req, res) => {
    reserve.run(p.baseNeeded, p.product_id);
   }
 
-  db.prepare('DELETE FROM cart_items WHERE cart_id=?').run(cart.id);
+  if (cart) db.prepare('DELETE FROM cart_items WHERE cart_id=?').run(cart.id);
 
   const payStatus = payRowStatus;
   db.prepare('INSERT INTO order_payments (order_id, payment_method, transaction_reference, amount, payment_status, paid_at) VALUES (?,?,?,?,?,?)')
