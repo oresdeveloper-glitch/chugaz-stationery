@@ -32,8 +32,11 @@ export default function Login() {
     setBusy(true);
     try {
       const { token, user } = await api('/auth/login', { method: 'POST', body: form });
+      // One connected account system: every sign-in (customer AND staff —
+      // admin, manager, cashier, clerk) also opens a shop session, so the
+      // storefront always shows your profile, contact details and orders.
+      setShopAuth(token, user);
       if (user.role === 'customer') {
-        setShopAuth(token, user);
         toast(`Welcome back, ${user.name}`);
         navigate(params.get('next') || '/shop');
       } else {

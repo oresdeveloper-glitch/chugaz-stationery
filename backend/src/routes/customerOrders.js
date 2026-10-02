@@ -62,7 +62,8 @@ function settings() {
 // ---- place order from cart (signed-in customers AND guests) ----
 router.post('/', (req, res) => {
   const isGuest = !req.user;
-  if (req.user && req.user.role !== 'customer') {
+  // One connected account system: customers AND staff may order online.
+  if (req.user && !['customer', 'admin', 'manager', 'cashier', 'clerk'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Customer account required' });
   }
   if (isGuest && !!String(req.headers.authorization || '').startsWith('Bearer ')) {

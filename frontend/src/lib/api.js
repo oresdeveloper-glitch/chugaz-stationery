@@ -144,10 +144,12 @@ export async function shopApi(path, options = {}) {
 export async function validateShopSession() {
     try {
         const data = await shopApi('/me');
-        return data ? true : false;
+        // Return the fresh account record (name, phone, avatar…) so callers
+        // can replace any stale copy saved at login time.
+        return data && data.user ? data.user : null;
     } catch {
         clearShopAuth();
-        return false;
+        return null;
     }
 }
 

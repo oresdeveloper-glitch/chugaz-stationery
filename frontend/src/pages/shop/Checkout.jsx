@@ -57,14 +57,8 @@ function CheckoutInner() {
   useEffect(() => { load(); }, []);
   useEffect(() => {
     if (user) setContact((c) => ({ name: c.name || user.name || '', phone: c.phone || user.phone || '' }));
+    else setGuest((g) => ({ ...g, name: g.name || contact.name, phone: g.phone || contact.phone }));
   }, [user]);
-
-  // Redirect stale bundles that miss the “Contact details” card to the live app.
-  useEffect(() => {
-    if (!document.querySelector('.contact-details')) {
-      window.location.replace('https://chugaz-stationery.vercel.app/shop/checkout');
-    }
-  }, []);
 
   const saveAddress = async () => {
     if (!newAddr.address || !newAddr.city) return toast('Address and city required', 'error');
@@ -84,8 +78,8 @@ function CheckoutInner() {
     try {
       const sessionUser = user;
       if (!sessionUser || !cart || cart.items.length === 0) return false;
-      const name = String(sessionUser.name || contact.name || guest.name || newAddr.recipient_name || '').trim();
-      const phone = String(sessionUser.phone || '').trim() || contact.phone.trim() || guest.phone.trim() || String(newAddr.phone || '').trim();
+      const name = String(contact.name || sessionUser.name || guest.name || newAddr.recipient_name || '').trim();
+      const phone = String(contact.phone || sessionUser.phone || guest.phone || newAddr.phone || '').trim();
       if (!name || !phone) return false;
       let addr = '';
       let city = '';
@@ -124,24 +118,18 @@ function CheckoutInner() {
 
   const placeOrder = async () => {
     if (cart.items.length === 0) return toast('Cart is empty', 'error');
-    // A guest is validated with whatever contact/address details they actually
-    // provided, in either the guest card or the new-address form.
-    const gName = (guest.name || newAddr.recipient_name).trim();
-    const gPhone = (guest.phone || newAddr.phone).trim();
+    // The buyer's details may have been entered in the contact card, the
+    // guest card or the add-address form — every source counts, for guests
+    // AND signed-in accounts, so the values are never rejected.
+    const gName = (contact.name || (user && user.name) || guest.name || newAddr.recipient_name || '').trim();
+    const gPhone = (contact.phone || (user && user.phone) || guest.phone || newAddr.phone || '').trim();
     const gAddr = (guest.address || newAddr.address).trim();
     const gCity = (guest.city || newAddr.city).trim();
-    if (!user) {
-      if (!gName || !gPhone) return toast('Please enter your name and phone number', 'error');
-      if (form.fulfillment === 'delivery' && (!gAddr || !gCity)) {
-        return toast('Please enter your delivery address and city', 'error');
-      }
+    if (!gName || !gPhone) return toast('Please enter your name and phone number', 'error');
+    if (form.fulfillment === 'delivery' && !user && (!gAddr || !gCity)) {
+      return toast('Please enter your delivery address and city', 'error');
     }
     if (form.fulfillment === 'delivery' && user && !form.address_id) return toast('Choose a delivery address', 'error');
-    if (user) {
-      const cName = (contact.name || user.name || '').trim();
-      const cPhone = (contact.phone || user.phone || '').trim();
-      if (!cName || !cPhone) return toast('Please enter your name and phone number for this order', 'error');
-    }
     if (['card', 'mobile_money', 'bank_transfer'].includes(form.method) && (!form.reference || form.reference.trim().length < 4)) {
       return toast('Enter the transaction reference from your payment (min 4 characters)', 'error');
     }
@@ -164,8 +152,8 @@ function CheckoutInner() {
           body.items = cart.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
         }
         if (user) {
-          body.contact_name = (contact.name || user.name || '').trim();
-          body.contact_phone = (contact.phone || user.phone || '').trim();
+          body.contact_name = gName;
+          body.contact_phone = gPhone;
         }
         const order = await shopApi('/orders', { method: 'POST', body });
         if (!user) {

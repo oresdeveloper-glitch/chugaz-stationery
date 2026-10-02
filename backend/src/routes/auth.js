@@ -13,7 +13,7 @@ function passwordOk(p) {
 
 function findUserByEmail(email) {
  return db.prepare(`
-  SELECT u.id, u.name, u.email, u.password_hash, u.status, u.token_ver, u.failed_attempts, u.locked_until, u.office_id, r.name AS role, o.name AS office
+  SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.status, u.token_ver, u.failed_attempts, u.locked_until, u.office_id, r.name AS role, o.name AS office
   FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN offices o ON o.id = u.office_id WHERE u.email = ?
  `).get(String(email).toLowerCase().trim());
 }
@@ -60,7 +60,7 @@ router.post('/login', (req, res) => {
  db.prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id=?').run(user.id);
  const token = signToken(user);
  audit(user.id, 'LOGIN', 'user', user.id, { email: user.email, ip });
- res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, office: user.office, office_id: user.office_id } });
+ res.json({ token, user: { id: user.id, name: user.name, email: user.email, phone: user.phone || null, role: user.role, office: user.office, office_id: user.office_id } });
 });
 
 router.post('/refresh', requireAuth, (req, res) => {

@@ -89,9 +89,12 @@ function optionalAuth(req, res, next) {
  next();
 }
 
+// Shop endpoints: ONE connected account system — customers AND staff
+// (admin, manager, cashier, clerk) may keep a shop profile, addresses and
+// place storefront orders with their own account.
 function requireCustomer(req, res, next) {
- if (!req.user || req.user.role !== 'customer') {
-  return res.status(403).json({ error: 'Customer account required' });
+ if (!req.user) {
+  return res.status(401).json({ error: 'Sign in to continue' });
  }
  next();
 }

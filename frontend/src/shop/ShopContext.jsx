@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { getShopUser, setShopAuth, clearShopAuth, shopApi, isShopSessionValid, validateShopSession } from '../lib/api';
+import { getShopUser, getShopToken, setShopAuth, clearShopAuth, shopApi, isShopSessionValid, validateShopSession } from '../lib/api';
 
 const ShopCtx = createContext(null);
 
@@ -23,8 +23,12 @@ export function ShopProvider({ children }) {
   useEffect(() => {
     const validate = async () => {
       try {
-        const valid = await validateShopSession();
-        if (!valid) {
+        const fresh = await validateShopSession();
+        if (fresh) {
+          const t = getShopToken();
+          if (t) setShopAuth(t, fresh);
+          setUser(fresh);
+        } else {
           clearShopAuth();
           setUser(null);
         }
