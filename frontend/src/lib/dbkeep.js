@@ -87,36 +87,37 @@ function scheduleBackups() {
   setTimeout(backupNow, 20000);
 }
 
-// The database persisted by the client. Any stored backup is eligible: even a
-// backup from an older lineage is better than an empty bootstrap database.
+// Merge the stored backup into the live database (never replaces it): rows
+// that already exist on the server are kept, backup-only rows are imported,
+// so sales made on both sides of a reset survive together.
 async function restoreFromBackup() {
   try {
     const entry = await idbGet(BACKUP_KEY);
-    if (!entry || !entry.blob) return false;
+    if (!entry || !entry.blob) return 'none';
     const fd = new FormData();
     fd.append('file', entry.blob, 'auto-restore.db');
-    const res = await fetch(`${apiBase()}/api/system/restore`, {
+    const res = await fetch(`${apiBase()}/api/system/restore-merge`, {
       method: 'POST',
       headers: authHeaders(),
       body: fd,
     });
-    if (!res.ok) return false;
+    if (!res.ok) return 'failed';
     const h = await health();
     localStorage.setItem(MARKER_KEY, (h && h.db_marker) || entry.marker);
-    console.info('[dbkeep] restored backup — reloading');
+    console.info('[dbkeep] merged backup — reloading');
     window.location.reload();
-    return true;
+    return 'ok';
   } catch (e) {
     console.warn('[dbkeep] restore failed:', e && e.message ? e.message : e);
-    return false;
+    return 'failed';
   }
 }
 
 // Runs on app mount, on focus and after login. Detects an ephemeral-disk
 // reset by comparing the server's persisted db_marker with the one stored
-// locally; when the fresh server is still empty (no sales/orders) and this
-// is an admin session, the last IndexedDB backup is restored automatically
-// so real data reappears instead of bootstrap/demo state.
+// locally; for admin sessions the last IndexedDB backup is then MERGED into
+// the fresh server (kept and retried until it succeeds), so sales recorded
+// before and after the reset all reappear instead of one replacing the other.
 export async function dbKeepInit() {
   if (checking) return;
   checking = true;
@@ -134,20 +135,16 @@ export async function dbKeepInit() {
     }
     if (stored === h.db_marker) return;
 
-    const virgin = Number(h.sales || 0) === 0 && Number(h.orders || 0) === 0;
-    if (isAdmin && virgin) {
-      const restored = await restoreFromBackup();
-      if (restored) return;
-      // Restore failed (e.g. transient error): adopt the marker so this page
-      // does not retry in a loop, but keep the stored backup untouched — the
-      // next reset will attempt the restore again.
+    if (isAdmin) {
+      const result = await restoreFromBackup();
+      if (result === 'ok') return;
+      if (result === 'failed') return;
       localStorage.setItem(MARKER_KEY, h.db_marker);
+      const virgin = Number(h.sales || 0) === 0 && Number(h.orders || 0) === 0;
+      if (!virgin) backupNow();
       return;
     }
-    // The server already holds data (kept as-is): adopt its marker so this
-    // browser follows the new lineage, then snapshot it as the new backup.
     localStorage.setItem(MARKER_KEY, h.db_marker);
-    if (!virgin) backupNow();
   } catch (e) {
     console.warn('[dbkeep] check failed:', e && e.message ? e.message : e);
   } finally {
