@@ -10,6 +10,8 @@ export default function Reports() {
   const [range, setRange] = useState({ from: new Date(new Date().setDate(1)).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) });
   const toast = useToast();
   const seqRef = useRef(0);
+  const lastTabRef = useRef(tab);
+  const [busy, setBusy] = useState(false);
 
   const [cashierDate, setCashierDate] = useState(new Date().toISOString().slice(0, 10));
   const [cashierId, setCashierId] = useState('');
@@ -18,7 +20,7 @@ export default function Reports() {
 
   const load = async () => {
     const seq = ++seqRef.current;
-    setData(null);
+    setBusy(true);
     try {
       let res;
       if (tab === 'pnl') res = await api(`/reports/profit-loss?from=${range.from}&to=${range.to}`);
@@ -35,21 +37,39 @@ export default function Reports() {
       }
       else if (tab === 'tax') res = await api(`/reports/tax?from=${range.from}&to=${range.to}`);
       else if (tab === 'audit') res = await api('/reports/audit?limit=300');
-      if (seq === seqRef.current) setData(res);
-    } catch (e) { if (seq === seqRef.current) toast(e.message, 'error'); }
-  };
-  useEffect(() => { load(); }, [tab, range.from, range.to, cashierDate, cashierId]);
-  useEffect(() => {
-    if (tab === 'cashierDaily' && cashiersList.length === 0) {
-      api('/reports/cashier-performance').then((rows) => {
-        // also fetch users for filter (cashiers list)
-        api('/users').then((users) => {
-          const cashiers = users.filter((u) => ['cashier','clerk','manager','admin'].includes(u.role));
-          setCashiersList(cashiers);
-        }).catch(() => setCashiersList(rows.map((r) => ({ id: r.id, name: r.name, office: r.office }))));
-      }).catch(()=>{});
+      if (seq === seqRef.current) { setData(res); setBusy(false); }
+    } catch (e) {
+      if (seq === seqRef.current) { toast(e.message, 'error'); setBusy(false); }
     }
-  }, [tab]);
+  };
+  // Keep the previous figures visible while a refetch of the SAME tab runs —
+  // only switching tabs clears the view, so reports never flash empty.
+  useEffect(() => {
+    if (lastTabRef.current !== tab) {
+      lastTabRef.current = tab;
+      setData(null);
+    }
+    load();
+  }, [tab, range.from, range.to, cashierDate, cashierId]);
+  useEffect(() => {
+    let alive = true;
+    const loadList = async () => {
+      try {
+        const users = await api('/users');
+        const cashiers = users.filter((u) => ['cashier', 'clerk', 'manager', 'admin'].includes(u.role));
+        if (alive && cashiers.length) setCashiersList(cashiers);
+      } catch {
+        try {
+          const rows = await api('/reports/cashier-performance');
+          if (alive && rows.length) {
+            setCashiersList((prev) => (prev.length ? prev : rows.map((r) => ({ id: r.id, name: r.name, office: r.office }))));
+          }
+        } catch { /* keep whatever list we already have */ }
+      }
+    };
+    loadList();
+    return () => { alive = false; };
+  }, []);
 
   const tabs = [
     ['pnl', 'Profit & Loss'], ['sales', 'Sales summary'], ['best', 'Best sellers'],
@@ -102,6 +122,12 @@ export default function Reports() {
           </>
         )}
       </div>
+
+      {tab !== 'cashierDaily' && !data && busy && (
+        <div className="card" style={{ padding: 14 }}>
+          <span className="muted small">Loading report…</span>
+        </div>
+      )}
 
       {tab === 'pnl' && data && (
         <>

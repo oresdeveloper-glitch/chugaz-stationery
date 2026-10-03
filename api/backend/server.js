@@ -5,7 +5,7 @@ const express = require('express');
 const cors = require('cors');
 
 const { db } = require('./src/db');
-const { requireAuth, requireRole } = require('./src/auth');
+const { requireAuth, requireRole, optionalAuth } = require('./src/auth');
 
 const app = express();
 const PORT = process.env.PORT || 7860;
@@ -39,10 +39,11 @@ app.use('/api/shop', require('./src/routes/shop'));
 const customerRoutes = require('./src/routes/customer');
 app.use('/api/shop', customerRoutes.publicRouter);
 app.use('/api/shop/cart', require('./src/routes/cart'));
+// Orders BEFORE the protectedRouter mount: its requireAuth would otherwise
+// reject guest checkouts before they reach the guest-aware orders router.
+// Customer orders: signed-in customers AND guests (guest checkout needs no token)
+app.use('/api/shop/orders', optionalAuth, require('./src/routes/customerOrders'));
 app.use('/api/shop', requireAuth, customerRoutes.protectedRouter);
-
-// Customer (requires customer token)
-app.use('/api/shop/orders', requireAuth, require('./src/routes/customerOrders'));
 
 // Staff protected (all staff roles; individual routes may require more)
 const staff = [requireAuth, requireRole('clerk', 'cashier', 'manager', 'admin')];
@@ -58,9 +59,24 @@ app.use('/api/offices', staff, require('./src/routes/offices'));
 app.use('/api/reports', staff, require('./src/routes/reports'));
 app.use('/api/orders', staff, require('./src/routes/orderAdmin'));
 app.use('/api/messages', staff, require('./src/routes/messages'));
+app.use('/api/notifications', staff, require('./src/routes/notifications'));
 app.use('/api/system', staff, require('./src/routes/system'));
 
-app.get('/api/health', (req, res) => res.json({ ok: true, db: 'connected' }));
+app.get('/api/health', (req, res) => {
+  try {
+    const m = require('./src/db');
+    let users = null, db_marker = null, sales = null, orders = null;
+    if (m.dbReady) {
+      try { users = m.db.prepare('SELECT COUNT(*) c FROM users').get().c; } catch (_) {}
+      try { db_marker = m.db.prepare("SELECT value FROM settings WHERE key='db_marker'").get()?.value || null; } catch (_) {}
+      try { sales = m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; } catch (_) {}
+      try { orders = m.db.prepare('SELECT COUNT(*) c FROM orders').get().c; } catch (_) {}
+    }
+    res.json({ ok: true, db: m.dbReady ? 'connected' : 'degraded', users, db_marker, sales, orders });
+  } catch (_) {
+    res.json({ ok: true, db: 'connected', users: null, db_marker: null, sales: null, orders: null });
+  }
+});
 
 // Serve built frontend in production (after `npm run build` in frontend/)
 const dist = path.join(__dirname, '..', 'frontend', 'dist');

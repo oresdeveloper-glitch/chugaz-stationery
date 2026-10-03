@@ -62,7 +62,21 @@ app.use('/api/messages', staff, require('./src/routes/messages'));
 app.use('/api/notifications', staff, require('./src/routes/notifications'));
 app.use('/api/system', staff, require('./src/routes/system'));
 
-app.get('/api/health', (req, res) => res.json({ ok: true, db: 'connected' }));
+app.get('/api/health', (req, res) => {
+  try {
+    const m = require('./src/db');
+    let users = null, db_marker = null, sales = null, orders = null;
+    if (m.dbReady) {
+      try { users = m.db.prepare('SELECT COUNT(*) c FROM users').get().c; } catch (_) {}
+      try { db_marker = m.db.prepare("SELECT value FROM settings WHERE key='db_marker'").get()?.value || null; } catch (_) {}
+      try { sales = m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; } catch (_) {}
+      try { orders = m.db.prepare('SELECT COUNT(*) c FROM orders').get().c; } catch (_) {}
+    }
+    res.json({ ok: true, db: m.dbReady ? 'connected' : 'degraded', users, db_marker, sales, orders });
+  } catch (_) {
+    res.json({ ok: true, db: 'connected', users: null, db_marker: null, sales: null, orders: null });
+  }
+});
 
 // Serve built frontend in production (after `npm run build` in frontend/)
 const dist = path.join(__dirname, '..', 'frontend', 'dist');

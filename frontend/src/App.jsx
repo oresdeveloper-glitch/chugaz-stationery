@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { getUser, clearAuth, isSessionValid } from './lib/api';
+import { dbKeepInit } from './lib/dbkeep';
 import Login from './pages/Login.jsx';
 import Layout from './components/Layout.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -48,6 +49,12 @@ function RequireAuth({ children }) {
 const g = (min, node) => <RequireRole min={min}>{node}</RequireRole>;
 
 export default function App() {
+  useEffect(() => {
+    dbKeepInit();
+    const onFocus = () => dbKeepInit();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
   return (
     <ToastProvider>
       <BrowserRouter>

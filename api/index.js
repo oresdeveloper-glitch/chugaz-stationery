@@ -22,12 +22,18 @@ const BOOT_TIME = new Date().toISOString();
 app.get('/api/health', (req, res) => {
   let dbReady = false;
   let users = null;
+  let db_marker = null;
+  let sales = null;
+  let orders = null;
   try {
     // eslint-disable-next-line no-eval
     const m = eval('require')('./backend/src/db');
     dbReady = !!m.dbReady;
     if (dbReady) {
       try { const r = m.db.prepare('SELECT COUNT(*) AS c FROM users').get(); users = r ? r.c : null; } catch (_) { users = null; }
+      try { const r = m.db.prepare("SELECT value FROM settings WHERE key='db_marker'").get(); db_marker = r ? r.value : null; } catch (_) { db_marker = null; }
+      try { sales = m.db.prepare('SELECT COUNT(*) AS c FROM sales').get().c; } catch (_) { sales = null; }
+      try { orders = m.db.prepare('SELECT COUNT(*) AS c FROM orders').get().c; } catch (_) { orders = null; }
     }
   } catch (_) {
     dbReady = false;
@@ -41,7 +47,7 @@ app.get('/api/health', (req, res) => {
   } catch (_) {
     secret = 'unknown';
   }
-  res.json({ ok: true, db: dbReady ? 'connected' : 'degraded', users, secret, instance: INSTANCE_ID, boot: BOOT_TIME, payment_instructions: '356322054 - CHUGAZ STATIONERY' });
+  res.json({ ok: true, db: dbReady ? 'connected' : 'degraded', users, secret, instance: INSTANCE_ID, boot: BOOT_TIME, db_marker, sales, orders, payment_instructions: '356322054 - CHUGAZ STATIONERY' });
 });
 
 function safeRoute(routePath) {

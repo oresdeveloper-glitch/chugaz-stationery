@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-const { db, DB_PATH, audit } = require('../db');
+const { db, DB_PATH, audit, reopenDb } = require('../db');
 const { requireRole } = require('../auth');
 
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
@@ -41,6 +41,7 @@ router.post('/test-email', requireRole('admin'), async (req, res) => {
 });
 
 router.get('/backup', requireRole('admin'), (req, res) => {
+ try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (_) {}
  const data = fs.readFileSync(DB_PATH);
  res.setHeader('Content-Type', 'application/octet-stream');
  res.setHeader('Content-Disposition', `attachment; filename="stationery-backup-${Date.now()}.db"`);
@@ -48,18 +49,22 @@ router.get('/backup', requireRole('admin'), (req, res) => {
 });
 
 router.post('/restore', requireRole('admin'), uploadMem.single('file'), (req, res) => {
- if (!req.files || !req.files.file) return res.status(400).json({ error: 'No backup file uploaded' });
- const file = req.files.file;
- try {
-  const backup = path.join(path.dirname(DB_PATH), 'stationery-pre-restore.db');
-  fs.copyFileSync(DB_PATH, backup);
-  const data = Buffer.from(file.data);
-  // Validate it's a SQLite database
-  if (data.slice(0, 16).toString() !== 'SQLite format 3\x00') {
-   return res.status(400).json({ error: 'Not a valid SQLite backup file' });
-  }
-  fs.writeFileSync(DB_PATH, data);
-  audit(req.user.id, 'RESTORE', 'database', null, { restored_from: file.name });
+  const file = req.file || (Array.isArray(req.files) ? req.files[0] : null);
+  if (!file) return res.status(400).json({ error: 'No backup file uploaded' });
+  try {
+   const data = Buffer.from(file.buffer || file.data || '');
+   // Validate it's a SQLite database
+   if (data.slice(0, 16).toString() !== 'SQLite format 3\x00') {
+    return res.status(400).json({ error: 'Not a valid SQLite backup file' });
+   }
+   try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (_) {}
+   const backup = path.join(path.dirname(DB_PATH), 'stationery-pre-restore.db');
+   fs.copyFileSync(DB_PATH, backup);
+   fs.writeFileSync(DB_PATH, data);
+   try { fs.unlinkSync(DB_PATH + '-wal'); } catch (_) {}
+   try { fs.unlinkSync(DB_PATH + '-shm'); } catch (_) {}
+   reopenDb();
+   audit(req.user.id, 'RESTORE', 'database', null, { restored_from: file.originalname || file.name || 'upload' });
   res.json({ ok: true, message: 'Database restored. Previous database saved as stationery-pre-restore.db' });
  } catch (e) {
   res.status(500).json({ error: 'Restore failed: ' + e.message });

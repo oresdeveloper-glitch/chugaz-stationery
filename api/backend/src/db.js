@@ -33,10 +33,12 @@ function createStubDb() {
 
 let db = createStubDb();
 let dbReady = false;
+let DatabaseSyncClass = null;
 
 try {
   const DatabaseSync = loadDatabaseSync();
   if (!DatabaseSync) throw new Error('node:sqlite unavailable');
+  DatabaseSyncClass = DatabaseSync;
   const real = new DatabaseSync(DB_PATH);
   real.exec('PRAGMA journal_mode = WAL');
   real.exec('PRAGMA foreign_keys = ON');
@@ -92,6 +94,10 @@ try {
   try {
     real.prepare("UPDATE settings SET value = 'CHUGAZ STATIONERY' WHERE key = 'shop_name' AND value = 'Stationery Shop'").run();
     real.prepare("INSERT INTO settings (key, value) SELECT 'shop_name', 'CHUGAZ STATIONERY' WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = 'shop_name')").run();
+  } catch (_) { /* settings table may not exist yet on fresh stub */ }
+
+  try {
+    real.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('db_marker', ?)").run(require('crypto').randomBytes(16).toString('hex'));
   } catch (_) { /* settings table may not exist yet on fresh stub */ }
 
   // First-run bootstrap: serverless disks (/tmp) start empty and seed.js
@@ -179,6 +185,34 @@ function transact(fn) {
   }
 }
 
+// Live handle indirection: modules capture `db` at require time, so a restore
+// must swap the underlying connection without re-requiring anything. The proxy
+// always forwards to the current handle.
+const dbProxy = new Proxy({}, {
+  get(_, prop) {
+    const target = db;
+    const v = target[prop];
+    return typeof v === 'function' ? v.bind(target) : v;
+  },
+  set(_, prop, value) { db[prop] = value; return true; },
+  has(_, prop) { return prop in db; },
+});
+
+function reopenDb() {
+  if (!DatabaseSyncClass || db.__stub) return false;
+  try { db.close(); } catch (_) {}
+  try {
+    const fresh = new DatabaseSyncClass(DB_PATH);
+    fresh.exec('PRAGMA journal_mode = WAL');
+    fresh.exec('PRAGMA foreign_keys = ON');
+    db = fresh;
+    return true;
+  } catch (e) {
+    console.error('[db] reopen failed:', e && e.message ? e.message : e);
+    return false;
+  }
+}
+
 function audit(userId, action, entity, entityId, details) {
   try {
     db.prepare(
@@ -189,4 +223,4 @@ function audit(userId, action, entity, entityId, details) {
   }
 }
 
-module.exports = { db, DB_PATH, transact, audit, dbReady };
+module.exports = { db: dbProxy, DB_PATH, transact, audit, dbReady, reopenDb };
