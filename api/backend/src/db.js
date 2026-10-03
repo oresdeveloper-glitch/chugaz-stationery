@@ -106,6 +106,24 @@ try {
       add.run('Clerk', 'clerk@shop.com', bcrypt.hashSync('clerk123', 10), 4);
       add.run('Online Customer', 'customer@shop.com', bcrypt.hashSync('cust123', 10), 5);
     }
+
+    // Office cashiers — Cashier A and Cashier B — are part of the full
+    // system, so ensure them on EVERY start. seed.js never runs on Vercel
+    // and the database resets on each deploy; this block is idempotent
+    // (skipped when the accounts already exist), so it also repairs warm
+    // databases that only have the five default logins.
+    real.exec("INSERT OR IGNORE INTO offices (name) VALUES ('Office A'), ('Office B')");
+    const officeA = real.prepare('SELECT id FROM offices WHERE name=?').get('Office A');
+    const officeB = real.prepare('SELECT id FROM offices WHERE name=?').get('Office B');
+    const cashierExists = real.prepare('SELECT id FROM users WHERE email=?');
+    const addCashier = real.prepare("INSERT INTO users (name, email, password_hash, role_id, office_id, status) VALUES (?,?,?,3,?,'active')");
+    const bcryptCash = require('bcryptjs');
+    for (const [n, e, pw, oid] of [
+      ['Cashier - Office A', 'cashier-a@shop.com', 'cashier123', officeA && officeA.id],
+      ['Cashier - Office B', 'cashier-b@shop.com', 'cashier123', officeB && officeB.id],
+    ]) {
+      if (oid && !cashierExists.get(e)) addCashier.run(n, e, bcryptCash.hashSync(pw, 10), oid);
+    }
   } catch (e) {
     console.error('[db] bootstrap seed skipped:', e && e.message ? e.message : e);
   }
