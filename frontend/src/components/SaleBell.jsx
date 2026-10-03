@@ -56,7 +56,10 @@ export default function SaleBell() {
             seen.current.add(n.id);
             toast(`${n.title}${n.body ? ' — ' + n.body : ''}`, 'info');
           });
-          if (fresh.length) beep();
+          if (fresh.length) {
+            beep();
+            try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: fresh.map((n) => n.kind) } })); } catch (e) { /* ignore */ }
+          }
         }
         try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seen.current].slice(-300))); } catch { /* ignore */ }
       } catch (e) { /* ignore */ }

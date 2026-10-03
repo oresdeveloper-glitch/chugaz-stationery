@@ -31,8 +31,13 @@ export default function Sales() {
   };
   useEffect(() => { load(); }, [statusFilter, seller]);
   useEffect(() => {
-    const id = setInterval(load, 60000);
-    return () => clearInterval(id);
+    const onLive = (e) => {
+      const kinds = (e.detail && e.detail.kinds) || [];
+      if (kinds.includes('sale') || kinds.includes('stock')) load();
+    };
+    window.addEventListener('chugaz-live', onLive);
+    const id = setInterval(load, 300000);
+    return () => { window.removeEventListener('chugaz-live', onLive); clearInterval(id); };
   }, [statusFilter, seller]);
   useEffect(() => {
     if (!isSeller) api('/users').then(setStaff).catch(() => {});
