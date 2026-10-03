@@ -183,7 +183,7 @@ function InvoiceInner() {
         <div className="inv-inner">
           <div className="inv-head">
             <div className="inv-brand">
-              <img src="/logo.png" alt="" />
+              <img src="/logo-report.png" alt="" />
               <div>
                 <div className="shop-name">{info.shop_name}</div>
                 <div className="shop-meta">
