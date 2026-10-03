@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, fmt, getUser } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { takeScanned } from '../lib/scanStore';
+import { orderCats, catLabel, catFilterIds } from '../lib/cats';
 import I from '../components/icons';
 import SafeImg from '../shop/SafeImg';
 
@@ -50,6 +51,8 @@ function beep(ok = true) {
 export default function Pos() {
   const [products, setProducts] = useState([]);
   const [q, setQ] = useState('');
+  const [cats, setCats] = useState([]);
+  const [pcat, setPcat] = useState('');
   const [cart, setCart] = useState([]);
   const [customerId, setCustomerId] = useState('');
   const [customers, setCustomers] = useState([]);
@@ -67,6 +70,9 @@ export default function Pos() {
   const me = getUser();
   const isCashier = (me && me.role) === 'cashier';
   const heldKey = `pos_held_${me?.id || 0}`;
+  const orderedCats = orderCats(cats);
+  const catIds = pcat ? catFilterIds(cats, pcat) : null;
+  const visible = catIds ? products.filter((p) => catIds.has(Number(p.category_id))) : products;
 
   const loadHeld = () => {
     try { setHeld(JSON.parse(localStorage.getItem(heldKey) || '[]')); } catch { setHeld([]); }
@@ -113,6 +119,7 @@ export default function Pos() {
     loadProducts();
     api('/customers').then(setCustomers).catch(() => {});
     api('/system/settings').then(setSettings).catch(() => {});
+    api('/products/cats/all').then(setCats).catch(() => {});
     searchRef.current?.focus();
   }, []);
 
@@ -259,25 +266,29 @@ export default function Pos() {
                       placeholder="Scan barcode or search by name…"
                       value={q}
                       onChange={(e) => { setQ(e.target.value); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && products.length > 0) { addToCart(products[0]); } }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && visible.length > 0) { addToCart(visible[0]); } }}
                       autoFocus
                     />
                     {q && <button className="pos-clear" onClick={() => setQ('')}>×</button>}
                   </div>
+                  <select value={pcat} onChange={(e) => setPcat(e.target.value)} style={{ maxWidth: 190 }} aria-label="Filter by category">
+                    <option value="">All categories</option>
+                    {orderedCats.map((c) => <option key={c.id} value={c.id}>{catLabel(cats, c)}</option>)}
+                  </select>
                   <button className="btn primary pos-cam-btn" onClick={() => navigate('/scan')}><I name="camera" size={14} /> Camera</button>
                 </div>
-                {q && products.length > 0 && (
-                  <div className="pos-hint muted small">Press <kbd>Enter</kbd> to add <b>{products[0].name}</b> · {fmt(products[0].selling_price)}</div>
+                {q && visible.length > 0 && (
+                  <div className="pos-hint muted small">Press <kbd>Enter</kbd> to add <b>{visible[0].name}</b> · {fmt(visible[0].selling_price)}</div>
                 )}
               </div>
 
               <div className="pos-cat-head">
                 <span>Products</span>
-                <span className="pos-cat-count">{products.length}</span>
+                <span className="pos-cat-count">{visible.length}</span>
               </div>
               <div className="pos-products">
-                {products.length === 0 && <div className="muted" style={{ padding: 24, textAlign: 'center' }}>No products found.</div>}
-                {products.map((p) => (
+                {visible.length === 0 && <div className="muted" style={{ padding: 24, textAlign: 'center' }}>No products found.</div>}
+                {visible.map((p) => (
                   <button type="button" className="pos-tile" key={p.id} onClick={() => addToCart(p)}>
                     <div className="pimg">{p.image ? <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || "P"} /> : <span style={{fontWeight:700,color:"var(--muted)"}}>{p.name?.[0] || "P"}</span>}</div>
                     <div className="pname">{p.name}</div>

@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
-  description TEXT
+  description TEXT,
+  parent_id INTEGER REFERENCES categories(id)
 );
 
 CREATE TABLE IF NOT EXISTS brands (

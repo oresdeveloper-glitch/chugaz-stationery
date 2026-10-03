@@ -73,6 +73,7 @@ try {
     if (!hasColumn('products', 'specifications')) real.exec('ALTER TABLE products ADD COLUMN specifications TEXT');
     if (!hasColumn('products', 'unit_prices')) real.exec('ALTER TABLE products ADD COLUMN unit_prices TEXT');
     if (!hasColumn('products', 'parent_id')) real.exec('ALTER TABLE products ADD COLUMN parent_id INTEGER REFERENCES products(id)');
+ if (!hasColumn('categories', 'parent_id')) real.exec('ALTER TABLE categories ADD COLUMN parent_id INTEGER REFERENCES categories(id)');
     if (!hasColumn('products', 'office_id')) real.exec('ALTER TABLE products ADD COLUMN office_id INTEGER REFERENCES offices(id)');
     if (!hasColumn('carts', 'guest_id')) {
       real.exec('DROP TABLE IF EXISTS cart_items');

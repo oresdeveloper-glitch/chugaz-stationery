@@ -1,6 +1,7 @@
 ﻿import { useEffect, useState } from 'react';
 import { api, fmt, getUser } from '../lib/api';
 import { canRole } from '../lib/roles';
+import { orderCats, catLabel, catFilterIds } from '../lib/cats';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 import Barcode from '../components/Barcode';
@@ -16,6 +17,7 @@ const EMPTY = {
 
 export default function Products() {
   const isAdmin = canRole(getUser(), 'admin');
+  const canCats = canRole(getUser(), 'manager') || isAdmin;
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
@@ -126,10 +128,10 @@ export default function Products() {
     } catch (err) { toast(err.message, 'error'); }
   };
 
-  const addCat = async () => {
-    const name = prompt('Category name:');
+  const addCat = async (parentId) => {
+    const name = parentId ? prompt('Subcategory name:') : prompt('Category name:');
     if (!name) return;
-    try { await api('/products/cats', { method: 'POST', body: { name } }); load(); toast('Category added'); }
+    try { await api('/products/cats', { method: 'POST', body: { name, parent_id: parentId || null } }); load(); toast(parentId ? 'Subcategory added' : 'Category added'); }
     catch (err) { toast(err.message, 'error'); }
   };
   const addBrand = async () => {
@@ -139,20 +141,22 @@ export default function Products() {
     catch (err) { toast(err.message, 'error'); }
   };
 
-  const filtered = cat ? products.filter((p) => p.category_id == cat) : products;
+  const orderedCats = orderCats(categories);
+  const catIds = cat ? catFilterIds(categories, cat) : null;
+  const filtered = catIds ? products.filter((p) => catIds.has(Number(p.category_id))) : products;
 
   return (
     <div>
       <div className="page-header">
         <h1>Products</h1>
         {isAdmin && tab === 'products' && <button className="btn primary" onClick={() => setModal({ ...EMPTY })}>+ Add product</button>}
-        {isAdmin && tab === 'categories' && <button className="btn primary" onClick={addCat}>+ Add category</button>}
+        {canCats && tab === 'categories' && <button className="btn primary" onClick={() => addCat(null)}>+ Add category</button>}
         {isAdmin && tab === 'brands' && <button className="btn primary" onClick={addBrand}>+ Add brand</button>}
       </div>
 
       <div className="toolbar">
         <div className="btn-group">
-          {(isAdmin ? ['products', 'categories', 'brands'] : ['products']).map((t) => (
+          {(isAdmin ? ['products', 'categories', 'brands'] : canCats ? ['products', 'categories'] : ['products']).map((t) => (
             <button key={t} className={`btn${tab === t ? ' primary' : ''}`} style={{ borderRadius: 0, border: 'none' }} onClick={() => setTab(t)}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>
@@ -164,7 +168,7 @@ export default function Products() {
             <input className="search-input" placeholder="Search by name, SKU or barcode..." value={q} onChange={(e) => setQ(e.target.value)} />
             <select style={{ maxWidth: 220 }} value={cat} onChange={(e) => setCat(e.target.value)}>
               <option value="">All categories</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {orderedCats.map((c) => <option key={c.id} value={c.id}>{catLabel(categories, c)}</option>)}
             </select>
           </>
         )}
@@ -218,11 +222,18 @@ export default function Products() {
             <table>
               <thead><tr><th>Name</th><th>Description</th><th></th></tr></thead>
               <tbody>
-                {categories.map((c) => (
+                {orderedCats.map((c) => (
                   <tr key={c.id}>
-                    <td style={{ fontWeight: 600 }}>{c.name}</td>
-                    <td className="muted">{c.description || ':'}</td>
-                    <td><button className="btn sm danger" onClick={async () => { try { await api(`/products/cats/${c.id}`, { method: 'DELETE' }); load(); } catch (e) { toast(e.message, 'error'); } }}>Delete</button></td>
+                    <td style={{ fontWeight: 600, paddingLeft: c.parent_id ? 30 : 10 }}>
+                      {c.parent_id && <span className="muted" style={{ marginRight: 6 }}>&#9492;</span>}
+                      {c.name}
+                      {c.parent_id && <span className="badge gray" style={{ marginLeft: 8, textTransform: 'none' }}>subcategory</span>}
+                    </td>
+                    <td className="muted">{c.description || '-'}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {!c.parent_id && <button className="btn sm" style={{ marginRight: 6 }} onClick={() => addCat(c.id)}>+ Subcategory</button>}
+                      <button className="btn sm danger" onClick={async () => { try { await api(`/products/cats/${c.id}`, { method: 'DELETE' }); load(); } catch (e) { toast(e.message, 'error'); } }}>Delete</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -277,8 +288,8 @@ export default function Products() {
           <div className="form-row">
             <div className="field"><label>Category</label>
               <select value={modal?.category_id || ''} onChange={(e) => setModal({ ...modal, category_id: e.target.value })}>
-                <option value="">None</option>
-                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <option value="">No category</option>
+                {orderedCats.map((c) => <option key={c.id} value={c.id}>{catLabel(categories, c)}</option>)}
               </select>
             </div>
             <div className="field"><label>Brand</label>

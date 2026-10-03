@@ -340,11 +340,17 @@ router.get('/cats/all', (req, res) => {
  res.json(db.prepare('SELECT * FROM categories ORDER BY name').all());
 });
 
-router.post('/cats', requireRole('admin'), (req, res) => {
- const { name, description } = req.body;
+router.post('/cats', requireRole('admin', 'manager'), (req, res) => {
+ const { name, description, parent_id } = req.body;
  if (!name) return res.status(400).json({ error: 'Name required' });
+ let parent = null;
+ if (parent_id) {
+  parent = db.prepare('SELECT * FROM categories WHERE id=?').get(parent_id);
+  if (!parent) return res.status(400).json({ error: 'Parent category not found' });
+  if (parent.parent_id) return res.status(400).json({ error: 'Subcategories can only be one level deep' });
+ }
  try {
-  const info = db.prepare('INSERT INTO categories (name, description) VALUES (?,?)').run(name, description || null);
+  const info = db.prepare('INSERT INTO categories (name, description, parent_id) VALUES (?,?,?)').run(name, description || null, parent ? parent.id : null);
   res.status(201).json({ id: Number(info.lastInsertRowid) });
  } catch (e) {
   if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Category already exists' });
@@ -357,9 +363,11 @@ router.put('/cats/:id', requireRole('admin'), (req, res) => {
  res.json({ ok: true });
 });
 
-router.delete('/cats/:id', requireRole('admin'), (req, res) => {
+router.delete('/cats/:id', requireRole('admin', 'manager'), (req, res) => {
  const used = db.prepare('SELECT COUNT(*) c FROM products WHERE category_id=?').get(req.params.id).c;
  if (used > 0) return res.status(409).json({ error: 'Category is used by products' });
+ const subs = db.prepare('SELECT COUNT(*) c FROM categories WHERE parent_id=?').get(req.params.id).c;
+ if (subs > 0) return res.status(409).json({ error: 'Delete its subcategories first' });
  db.prepare('DELETE FROM categories WHERE id=?').run(req.params.id);
  res.json({ ok: true });
 });
