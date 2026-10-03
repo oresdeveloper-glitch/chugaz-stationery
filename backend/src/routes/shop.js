@@ -1,6 +1,7 @@
 const express = require('express');
 const { db, audit } = require('../db');
 const u = require('../units');
+const { notifyManagers } = require('../notify');
 
 const router = express.Router();
 
@@ -141,6 +142,11 @@ router.post('/contact', (req, res) => {
  const info = db.prepare('INSERT INTO contact_messages (name, email, phone, subject, message) VALUES (?,?,?,?,?)')
   .run(name, email || null, phone || null, subject || null, message);
  audit(null, 'CONTACT', 'message', Number(info.lastInsertRowid), { name, subject });
+ notifyManagers({
+  kind: 'message',
+  title: `Contact: ${subject || 'New message'}`,
+  body: `${name} - ${message}`,
+ });
  res.status(201).json({ ok: true, id: Number(info.lastInsertRowid) });
 });
 

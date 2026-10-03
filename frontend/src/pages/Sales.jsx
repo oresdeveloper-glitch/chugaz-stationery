@@ -26,6 +26,10 @@ export default function Sales() {
     } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => {
+    const id = setInterval(load, 60000);
+    return () => clearInterval(id);
+  }, [statusFilter]);
 
   const openDetail = async (id) => {
     try { setDetail(await api(`/sales/${id}`)); } catch (e) { toast(e.message, 'error'); }

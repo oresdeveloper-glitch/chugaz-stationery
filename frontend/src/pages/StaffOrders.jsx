@@ -33,6 +33,10 @@ export default function StaffOrders() {
     } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, [filter]);
+  useEffect(() => {
+    const id = setInterval(load, 60000);
+    return () => clearInterval(id);
+  }, [filter, q]);
 
   const refreshSelected = async () => {
     if (selected) setSelected(await api(`/orders/${selected.id}`));

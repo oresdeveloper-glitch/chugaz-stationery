@@ -178,9 +178,17 @@ router.post('/', requireRole('cashier', 'clerk', 'manager', 'admin'), (req, res)
 
   const updStock = db.prepare('UPDATE products SET current_stock = current_stock - ? WHERE id=?');
   const insMove = db.prepare('INSERT INTO stock_movements (product_id, movement_type, quantity, reference_id, notes, created_by) VALUES (?,?,?,?,?,?)');
+  const lowStock = [];
   for (const it of items) {
+   const meta = db.prepare('SELECT name, current_stock, reorder_level FROM products WHERE id=?').get(it.product_id);
    updStock.run(it.quantity, it.product_id);
    insMove.run(it.product_id, 'out', it.quantity, saleId, `Sale #${saleId}`, req.user.id);
+   const reorder = Number(meta && meta.reorder_level) || 0;
+   const before = Number(meta && meta.current_stock) || 0;
+   const after = before - Number(it.quantity || 0);
+   if (meta && reorder > 0 && before > reorder && after <= reorder) {
+    lowStock.push({ name: meta.name, after, reorder });
+   }
   }
 
   if (cust && customer_id) {
@@ -196,10 +204,17 @@ router.post('/', requireRole('cashier', 'clerk', 'manager', 'admin'), (req, res)
 
   audit(req.user.id, 'CREATE', 'sale', saleId, { total, customer_id, invoice_number: invoiceNumber, method });
   notifyManagers({
-   kind: 'sale',
-   title: `Sale ${invoiceNumber}`,
-   body: `${req.user.name} · ${total} · ${prepared.length} item(s) · ${String(method || 'cash').replace('_', ' ')}${cust && cust.name ? ` · ${cust.name}` : ''}`,
+    kind: 'sale',
+    title: `Sale ${invoiceNumber}`,
+    body: `${req.user.name} A� ${total} A� ${prepared.length} item(s) A� ${String(method || 'cash').replace('_', ' ')}${cust && cust.name ? ` A� ${cust.name}` : ''}`,
   });
+  if (lowStock.length) {
+   notifyManagers({
+    kind: 'stock',
+    title: `Low stock after ${invoiceNumber}`,
+    body: lowStock.slice(0, 5).map((s) => `${s.name}: ${s.after} left (reorder at ${s.reorder})`).join(' | ') + (lowStock.length > 5 ? ` | +${lowStock.length - 5} more` : ''),
+   });
+  }
   return { id: saleId, invoice_number: invoiceNumber };
   });
  } catch (e) {
