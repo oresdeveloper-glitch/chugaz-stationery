@@ -169,7 +169,7 @@ function InvoiceInner() {
   }
   if (!order || !info) return <div className="card">Loadingâ€¦</div>;
   const currency = info.currency || 'TSh';
-  const method = String(order.payment_method || '').replace(/_/g, ' ');
+  const method = String(order.payment_method || '').replace(/_/g, ' ') === 'pay at shop' ? 'pay at stationery' : String(order.payment_method || '').replace(/_/g, ' ');
 
   return (
     <div>

@@ -158,6 +158,13 @@ router.put('/:id/status', (req, res) => {
   }
   db.prepare("UPDATE orders SET order_status=?, updated_at=datetime('now') WHERE id=?").run(status, order.id);
   logHistory(order.id, order.order_status, status, 'status_change', req.user, null);
+  // Counter-pay orders ('Pay at stationery'): completing the order means the cash was collected at the counter — verify payment automatically.
+  if (status === 'completed' && order.payment_method === 'pay_at_shop' && !['paid', 'refunded', 'partial_refund'].includes(order.payment_status)) {
+   db.prepare("UPDATE order_payments SET payment_status='paid', paid_at=datetime('now') WHERE order_id=? AND payment_status='pending'").run(order.id);
+   db.prepare("UPDATE orders SET payment_status='paid', updated_at=datetime('now') WHERE id=?").run(order.id);
+   logHistory(order.id, order.payment_status, 'paid', 'verify_pay_at_stationery_auto', req.user, 'Counter payment verified automatically on completion');
+   audit(req.user.id, 'VERIFY_PAY_AT_STATIONERY_AUTO', 'order', Number(order.id), { method: order.payment_method, total: order.total, by: req.user.name, role: req.user.role, office: req.user.office });
+  }
   audit(req.user.id, 'ORDER_STATUS', 'order', Number(order.id), { from: order.order_status, to: status, by: req.user.name, role: req.user.role, office: req.user.office });
  });
  res.json(getOrder(order.id));
@@ -224,28 +231,30 @@ router.post('/:id/returns/:returnId/approve', (req, res) => {
  res.json(getOrder(order.id));
 });
 
-// ---- verify a customer-submitted payment (money confirmed received) — also handles COD ----
+// ---- verify a customer-submitted payment (money confirmed received) — also handles COD and 'Pay at stationery' counter orders ----
 router.post('/:id/verify-payment', requireRole('cashier', 'clerk', 'manager', 'admin'), (req, res) => {
   const order = db.prepare('SELECT * FROM orders WHERE id=?').get(req.params.id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
   const pending = db.prepare("SELECT COUNT(*) c FROM order_payments WHERE order_id=? AND payment_status='pending'").get(order.id).c;
   const isCOD = order.payment_method === 'cash_on_delivery';
-  if (!pending && !(isCOD && order.payment_status === 'unpaid')) return res.status(400).json({ error: 'No payment awaiting verification' });
+  const isCounter = isCOD || order.payment_method === 'pay_at_shop';
+  if (!pending && !(isCounter && order.payment_status === 'unpaid')) return res.status(400).json({ error: 'No payment awaiting verification' });
+  const kind = isCOD ? 'verify_cod' : order.payment_method === 'pay_at_shop' ? 'verify_pay_at_stationery' : 'verify_payment';
   transact(() => {
     if (pending) {
       db.prepare("UPDATE order_payments SET payment_status='paid', paid_at=datetime('now') WHERE order_id=? AND payment_status='pending'").run(order.id);
-    } else if (isCOD) {
-      // COD had no pending row (edge case) — mark existing as paid
+    } else if (isCounter) {
+      // Counter methods may have no pending row (edge case) — mark existing as paid
       db.prepare("UPDATE order_payments SET payment_status='paid', paid_at=datetime('now') WHERE order_id=?").run(order.id);
     }
     db.prepare("UPDATE orders SET payment_status='paid', updated_at=datetime('now') WHERE id=?").run(order.id);
-    // For COD, auto-complete the order when cash is confirmed at pickup/delivery
-    if (isCOD && ['ready_for_pickup','out_for_delivery'].includes(order.order_status)) {
+    // Cash confirmed at pickup/delivery → hand over and auto-complete
+    if (isCounter && ['ready_for_pickup','out_for_delivery'].includes(order.order_status)) {
       db.prepare("UPDATE orders SET order_status='completed', updated_at=datetime('now') WHERE id=?").run(order.id);
-      logHistory(order.id, order.order_status, 'completed', 'verify_cod_complete', req.user, 'COD cash received');
+      logHistory(order.id, order.order_status, 'completed', `${kind}_complete`, req.user, isCOD ? 'COD cash received' : 'Counter payment received');
     }
-    logHistory(order.id, order.payment_status, 'paid', isCOD ? 'verify_cod' : 'verify_payment', req.user, order.payment_method);
-    audit(req.user.id, isCOD ? 'VERIFY_COD' : 'VERIFY_PAYMENT', 'order', Number(order.id), { method: order.payment_method, total: order.total, by: req.user.name, role: req.user.role, office: req.user.office });
+    logHistory(order.id, order.payment_status, 'paid', kind, req.user, order.payment_method);
+    audit(req.user.id, isCOD ? 'VERIFY_COD' : order.payment_method === 'pay_at_shop' ? 'VERIFY_PAY_AT_STATIONERY' : 'VERIFY_PAYMENT', 'order', Number(order.id), { method: order.payment_method, total: order.total, by: req.user.name, role: req.user.role, office: req.user.office });
   });
   res.json(getOrder(order.id));
 });

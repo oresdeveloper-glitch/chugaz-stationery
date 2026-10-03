@@ -104,11 +104,11 @@ function OrderDetailInner() {
             <h2>Shipping & payment</h2>
             <div className="small" style={{ lineHeight: 1.8 }}>
               <div><b>Fulfillment:</b> {order.fulfillment_type} {order.shipping_name && `→ ${order.shipping_name} (${order.shipping_phone}) ${order.shipping_address}`}</div>
-              <div><b>Payment method:</b> {order.payment_method.replace(/_/g, ' ')}</div>
+              <div><b>Payment method:</b> {order.payment_method === 'pay_at_shop' ? 'pay at stationery' : order.payment_method.replace(/_/g, ' ')}</div>
               {order.notes && <div><b>Notes:</b> {order.notes}</div>}
               {order.payments.length > 0 && (
                 <div><b>Payments:</b>
-                  {order.payments.map((p) => <div key={p.id} className="muted small">{fmtDateTime(p.paid_at || p.created_at)} : {fmt(p.amount)} ({p.payment_method}) {p.transaction_reference ? `· ${p.transaction_reference}` : ''}</div>)}
+                  {order.payments.map((p) => <div key={p.id} className="muted small">{fmtDateTime(p.paid_at || p.created_at)} : {fmt(p.amount)} ({p.payment_method === 'pay_at_shop' ? 'pay at stationery' : p.payment_method}) {p.transaction_reference ? `· ${p.transaction_reference}` : ''}</div>)}
                 </div>
               )}
               {order.returns.length > 0 && (

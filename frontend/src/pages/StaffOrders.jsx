@@ -7,6 +7,7 @@ import I from '../components/icons';
 const STATUSES = ['pending', 'confirmed', 'processing', 'ready_for_pickup', 'out_for_delivery', 'completed', 'cancelled', 'rejected', 'returned', 'refunded'];
 const FLOW = ['pending', 'confirmed', 'processing', 'ready_for_pickup', 'out_for_delivery', 'completed'];
 const LABEL = (s) => String(s || '').replace(/_/g, ' ');
+const payName = (m) => (m === 'pay_at_shop' ? 'pay at stationery' : String(m || '').replace(/_/g, ' '));
 const COLOR = (s) => ({ pending: 'amber', verifying: 'amber', confirmed: 'amber', processing: 'amber', ready_for_pickup: 'amber', out_for_delivery: 'amber', completed: 'amber', cancelled: 'red', rejected: 'red', returned: 'gray', refunded: 'gray' }[s] || 'gray');
 
 export default function StaffOrders() {
@@ -208,7 +209,7 @@ export default function StaffOrders() {
         <div class="meta">
           <div><div class="lbl">Customer</div><b>${selected.user_name}</b><br/>${selected.user_phone || selected.user_email || ''}</div>
           <div><div class="lbl">Deliver to</div>${selected.fulfillment_type === 'pickup' ? 'Pickup at stationery' : `${selected.addr_recipient || ''}<br/>${selected.addr_address || ''}, ${selected.addr_city || ''}`}${selected.notes ? `<br/><i>Note: ${selected.notes}</i>` : ''}</div>
-          <div style="text-align:right"><div class="lbl">Payment</div><span style="text-transform:capitalize">${String(selected.payment_method).replace(/_/g, ' ')}</span><br/>${selected.payment_status} Â· Paid ${fmt(selected.paid_amount)} ${cur}</div>
+          <div style="text-align:right"><div class="lbl">Payment</div><span style="text-transform:capitalize">${payName(selected.payment_method)}</span><br/>${selected.payment_status} Â· Paid ${fmt(selected.paid_amount)} ${cur}</div>
         </div>
         <table class="items">
           <thead><tr><th>#</th><th>Product</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit price</th><th style="text-align:right">Amount</th></tr></thead>
@@ -296,7 +297,7 @@ export default function StaffOrders() {
               <span className={`badge ${COLOR(selected.order_status)}`}>{LABEL(selected.order_status)}</span>
               <span className={`badge ${selected.payment_status === 'paid' ? 'amber' : selected.payment_status === 'verifying' ? 'amber' : 'red'}`}>{String(selected.payment_status).replace(/_/g, ' ')}</span>
               <span className="badge gray">{selected.fulfillment_type}</span>
-              <span className="badge gray">{selected.payment_method.replace(/_/g, ' ')}</span>
+              <span className="badge gray">{payName(selected.payment_method)}</span>
               <span className="badge amber">Paid {fmt(selected.paid_amount)}</span>
             </div>
 
@@ -365,7 +366,7 @@ export default function StaffOrders() {
                   {(selected.payments || []).map((p) => (
                     <div key={p.id} className="small" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', padding: '4px 0', gap: 8 }}>
                       <span style={{ minWidth: 0 }}>
-                        {p.payment_method} {p.transaction_reference && `Â· ${p.transaction_reference}`}
+                        {payName(p.payment_method)} {p.transaction_reference && `Â· ${p.transaction_reference}`}
                         {p.payment_status === 'pending' && <span className="badge amber" style={{ marginLeft: 6 }}>awaiting verification</span>}
                       </span>
                       <b style={{ flexShrink: 0 }}>{fmt(p.amount)}</b>
@@ -381,7 +382,12 @@ export default function StaffOrders() {
                       <I name="check" size={14} /> Confirm cash received â€” COD
                     </button>
                   )}
-                  {selected.payment_status !== 'paid' && selected.payment_status !== 'verifying' && selected.payment_method !== 'cash_on_delivery' && (
+                  {selected.payment_method === 'pay_at_shop' && selected.payment_status !== 'paid' && !['cancelled','rejected','refunded'].includes(selected.order_status) && (
+                    <button className="btn primary sm" style={{ marginTop: 8, width: '100%', justifyContent: 'center', background: '#0e6ea8', borderColor: '#0e6ea8' }} onClick={verifyPayment}>
+                      <I name="check" size={14} /> Verify pay at stationery received
+                    </button>
+                  )}
+                  {selected.payment_status !== 'paid' && selected.payment_status !== 'verifying' && selected.payment_method !== 'cash_on_delivery' && selected.payment_method !== 'pay_at_shop' && (
                     <div className="muted small" style={{ marginTop: 6 }}>
                       Outstanding: <b style={{ color: 'var(--danger)' }}>{fmt(Math.max(selected.total - (selected.paid_amount || 0), 0))}</b>
                     </div>
@@ -389,6 +395,11 @@ export default function StaffOrders() {
                   {selected.payment_method === 'cash_on_delivery' && selected.payment_status === 'unpaid' && (
                     <div className="muted small" style={{ marginTop: 6 }}>
                       COD â€” cash to collect: <b style={{ color: '#0e6ea8' }}>{fmt(selected.total)}</b> at {selected.fulfillment_type === 'pickup' ? 'pickup' : 'delivery'}
+                    </div>
+                  )}
+                  {selected.payment_method === 'pay_at_shop' && selected.payment_status === 'unpaid' && (
+                    <div className="muted small" style={{ marginTop: 6 }}>
+                      Pay at stationery - cash at counter: <b style={{ color: '#0e6ea8' }}>{fmt(selected.total)}</b> at {selected.fulfillment_type === 'pickup' ? 'pickup' : 'delivery'}
                     </div>
                   )}
                 </div>
