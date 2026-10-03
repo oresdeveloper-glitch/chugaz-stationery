@@ -312,14 +312,14 @@ router.get('/audit', requireRole('manager', 'admin'), (req, res) => {
  `).all());
 });
 
-router.get('/cashier-performance', (req, res) => {
+router.get('/cashier-performance', requireRole('manager', 'admin'), (req, res) => {
  res.json(db.prepare(`
   SELECT u.id, u.name, o.name AS office, COUNT(s.id) sales_count, COALESCE(SUM(s.total),0) total
   FROM sales s JOIN users u ON u.id = s.created_by LEFT JOIN offices o ON o.id = u.office_id GROUP BY u.id ORDER BY total DESC
  `).all());
 });
 
-router.get('/cashier-daily-detail', (req, res) => {
+router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) => {
  const from = req.query.from || new Date().toISOString().slice(0, 10);
  const to = req.query.to || from;
  const cashierId = req.query.cashier_id ? Number(req.query.cashier_id) : null;
@@ -329,10 +329,15 @@ router.get('/cashier-daily-detail', (req, res) => {
  if (cashierId) { cashierFilter = ' AND s.created_by = ? '; params.push(cashierId); }
 
  const summary = db.prepare(`
-  SELECT COUNT(DISTINCT s.id) sales_count, COALESCE(SUM(s.total),0) total_revenue,
-      COALESCE(SUM(s.paid_amount),0) total_paid, COALESCE(SUM(s.total - s.paid_amount),0) outstanding,
-      COUNT(DISTINCT si.product_id) distinct_products
-  FROM sales s LEFT JOIN sale_items si ON si.sale_id = s.id
+  SELECT COUNT(s.id) sales_count, COALESCE(SUM(s.total),0) total_revenue,
+      COALESCE(SUM(s.paid_amount),0) total_paid, COALESCE(SUM(s.total - s.paid_amount),0) outstanding
+  FROM sales s
+  WHERE date(s.sale_date) BETWEEN date(?) AND date(?) ${cashierFilter}
+ `).get(...params);
+
+ const distinctProducts = db.prepare(`
+  SELECT COUNT(DISTINCT si.product_id) c
+  FROM sale_items si JOIN sales s ON s.id = si.sale_id
   WHERE date(s.sale_date) BETWEEN date(?) AND date(?) ${cashierFilter}
  `).get(...params);
 
@@ -359,15 +364,23 @@ router.get('/cashier-daily-detail', (req, res) => {
   GROUP BY p.id ORDER BY revenue DESC
  `).all(...params);
 
- const perCashier = cashierId ? [] : db.prepare(`
-  SELECT u.id, u.name, o.name AS office, COUNT(DISTINCT s.id) sales_count,
-      COALESCE(SUM(s.total),0) total, COALESCE(SUM(si.quantity),0) qty,
-      COALESCE(SUM(si.total - si.cost_at_sale * si.quantity),0) profit
-  FROM sales s JOIN users u ON u.id = s.created_by
-  LEFT JOIN offices o ON o.id = u.office_id
-  LEFT JOIN sale_items si ON si.sale_id = s.id
-  WHERE date(s.sale_date) BETWEEN date(?) AND date(?) GROUP BY u.id ORDER BY total DESC
- `).all(from, to);
+ const perCashier = cashierId ? [] : (() => {
+  const rows = db.prepare(`
+   SELECT u.id, u.name, o.name AS office, COUNT(s.id) sales_count,
+       COALESCE(SUM(s.total),0) total
+   FROM sales s JOIN users u ON u.id = s.created_by
+   LEFT JOIN offices o ON o.id = u.office_id
+   WHERE date(s.sale_date) BETWEEN date(?) AND date(?) GROUP BY u.id ORDER BY total DESC
+  `).all(from, to);
+  const items = db.prepare(`
+   SELECT s.created_by AS id, COALESCE(SUM(si.quantity),0) qty,
+       COALESCE(SUM(si.total - si.cost_at_sale * si.quantity),0) profit
+   FROM sale_items si JOIN sales s ON s.id = si.sale_id
+   WHERE date(s.sale_date) BETWEEN date(?) AND date(?) GROUP BY s.created_by
+  `).all(from, to);
+  const byId = Object.fromEntries(items.map((r) => [r.id, r]));
+  return rows.map((r) => ({ ...r, qty: Number(byId[r.id]?.qty || 0), profit: Number(byId[r.id]?.profit || 0) }));
+ })();
 
  const salesDetail = db.prepare(`
   SELECT s.id, s.invoice_number, s.sale_date, s.total, s.paid_amount, s.payment_status, s.payment_method,
@@ -402,7 +415,7 @@ router.get('/cashier-daily-detail', (req, res) => {
    total_revenue: summary.total_revenue || 0,
    total_paid: summary.total_paid || 0,
    outstanding: summary.outstanding || 0,
-   distinct_products: summary.distinct_products || 0,
+   distinct_products: distinctProducts.c || 0,
    total_qty: totals.total_qty || 0,
    total_cost: totals.total_cost || 0,
    total_profit: totals.total_profit || 0,

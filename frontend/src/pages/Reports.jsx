@@ -44,9 +44,9 @@ export default function Reports() {
       api('/reports/cashier-performance').then((rows) => {
         // also fetch users for filter (cashiers list)
         api('/users').then((users) => {
-          const cashiers = users.filter((u) => ['cashier','clerk','manager'].includes(u.role));
+          const cashiers = users.filter((u) => ['cashier','clerk','manager','admin'].includes(u.role));
           setCashiersList(cashiers);
-        }).catch(() => setCashiersList(rows.map((r,i)=>({id:i, name:r.name}))));
+        }).catch(() => setCashiersList(rows.map((r) => ({ id: r.id, name: r.name, office: r.office }))));
       }).catch(()=>{});
     }
   }, [tab]);
