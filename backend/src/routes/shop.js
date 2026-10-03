@@ -20,7 +20,7 @@ router.get('/info', (req, res) => {
  const s = {};
  rows.forEach((r) => (s[r.key] = r.value));
  res.json({
-  shop_name: s.shop_name || 'Stationery Shop',
+  shop_name: s.shop_name || 'CHUGAZ STATIONERY',
   shop_address: s.shop_address || '',
   shop_phone: s.shop_phone || '',
   shop_email: s.shop_email || '',

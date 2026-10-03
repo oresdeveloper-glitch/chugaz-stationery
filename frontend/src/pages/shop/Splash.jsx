@@ -6,7 +6,7 @@ const SLIDES = [
   {
     icon: 'store',
     title: 'Welcome to CHUGAZ STATIONERY',
-    desc: 'Your trusted stationery shop in Mbeya — quality products for school, office and business.',
+    desc: 'Your trusted CHUGAZ STATIONERY in Mbeya — quality products for school, office and business.',
   },
   {
     icon: 'box',

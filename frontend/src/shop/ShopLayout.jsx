@@ -123,7 +123,7 @@ export default function ShopLayout() {
         <main className="shop-main" style={{ maxWidth: 900, margin: '0 auto', padding: hideChrome ? 0 : 20 }}>
           <Outlet />
           {!hideChrome && <div style={{ textAlign: 'center', padding: '26px 0 10px', fontSize: 11, color: 'var(--muted-2)', letterSpacing: '0.08em' }}>
-            STATIONERY SHOP · VERSION 3.0
+            CHUGAZ STATIONERY · VERSION 3.0
           </div>}
         </main>
       </div>

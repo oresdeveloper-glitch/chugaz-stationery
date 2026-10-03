@@ -88,7 +88,7 @@ function seed() {
   customers.forEach((c) => insCust.run(c[0], c[1], c[2], c[3]));
 
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES
-   ('shop_name','Stationery Shop'),
+   ('shop_name','CHUGAZ STATIONERY'),
    ('shop_address',''),
    ('shop_phone',''),
    ('shop_email',''),

@@ -1,6 +1,6 @@
 # CHUGAZ STATIONERY - POS & Inventory
 
-A full-stack Point of Sale and Inventory Management System for stationery shops.
+A full-stack Point of Sale and Inventory Management System for CHUGAZ STATIONERY.
 
 ## Features
 - **POS System** - Sales, cart, checkout, receipts

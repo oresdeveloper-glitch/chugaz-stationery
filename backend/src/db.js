@@ -89,6 +89,11 @@ try {
     real.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('payment_instructions', '356322054 - CHUGAZ STATIONERY');
   } catch (_) { /* settings table may not exist yet on fresh stub */ }
 
+  try {
+    real.prepare("UPDATE settings SET value = 'CHUGAZ STATIONERY' WHERE key = 'shop_name' AND value = 'Stationery Shop'").run();
+    real.prepare("INSERT INTO settings (key, value) SELECT 'shop_name', 'CHUGAZ STATIONERY' WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = 'shop_name')").run();
+  } catch (_) { /* settings table may not exist yet on fresh stub */ }
+
   // First-run bootstrap: serverless disks (/tmp) start empty and seed.js
   // never runs there, so create roles + default logins when no users exist.
   // Idempotent — skipped on warm instances that already have users.
