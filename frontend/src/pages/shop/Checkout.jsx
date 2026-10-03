@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { shopApi, fmt } from '../../lib/api';
 import { useShop } from '../../shop/ShopContext';
@@ -7,7 +7,7 @@ import I from '../../components/icons';
 
 const METHOD_LABELS = {
   cash_on_delivery: ['Cash on delivery', 'Pay in cash when your order arrives'],
-  pay_at_shop: ['Pay at shop', 'Collect and pay at our counter'],
+  pay_at_shop: ['Pay at stationery', 'Collect and pay at our counter'],
   card: ['Card', 'Enter the transaction reference after paying'],
   mobile_money: ['Mobile money', 'M-Pesa, Tigo Pesa or Airtel Money reference'],
   bank_transfer: ['Bank transfer', 'Deposit slip or transfer reference'],
@@ -119,7 +119,7 @@ function CheckoutInner() {
   const placeOrder = async () => {
     if (cart.items.length === 0) return toast('Cart is empty', 'error');
     // The buyer's details may have been entered in the contact card, the
-    // guest card or the add-address form — every source counts, for guests
+    // guest card or the add-address form â€” every source counts, for guests
     // AND signed-in accounts, so the values are never rejected.
     const gName = (contact.name || (user && user.name) || guest.name || newAddr.recipient_name || '').trim();
     const gPhone = (contact.phone || (user && user.phone) || guest.phone || newAddr.phone || '').trim();
@@ -145,7 +145,7 @@ function CheckoutInner() {
           notes: form.notes || null,
           // Session-independent: the contact details and the items travel with
           // EVERY order (signed-in or not). If the token dies mid-request the
-          // server can still place the order — it can never come back asking
+          // server can still place the order â€” it can never come back asking
           // for a name/phone that was already entered.
           guest_name: gName,
           guest_phone: gPhone,
@@ -186,7 +186,7 @@ function CheckoutInner() {
   if (!cart || !info) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: '36px 24px' }}>
-        <h2>{loadError ? "Couldn't load checkout" : 'Loading…'}</h2>
+        <h2>{loadError ? "Couldn't load checkout" : 'Loadingâ€¦'}</h2>
         {loadError && (
           <>
             <p className="muted small">{loadError}</p>
@@ -206,14 +206,14 @@ function CheckoutInner() {
   if (placed) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: '36px 24px' }}>
-        <div style={{ fontSize: 46 }}>✅</div>
+        <div style={{ fontSize: 46 }}>âœ…</div>
         <h1>Order received!</h1>
         <p className="muted">Order number</p>
         <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 1 }}>{placed.order_number}</div>
         <p className="muted small" style={{ marginTop: 8 }}>
-          {placed.items ? placed.items.length : 0} item(s) · {fmt(placed.total)} {currency} · {placed.fulfillment_type === 'pickup' ? 'Pickup at our shop' : 'Delivery'}
+          {placed.items ? placed.items.length : 0} item(s) Â· {fmt(placed.total)} {currency} Â· {placed.fulfillment_type === 'pickup' ? 'Pickup at our stationery' : 'Delivery'}
         </p>
-        <p className="muted small">Save your order number — show it at the shop if you need help with this order.</p>
+        <p className="muted small">Save your order number â€” show it at the stationery if you need help with this order.</p>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
           <button className="btn primary" onClick={() => navigate('/shop')}>Continue shopping</button>
           <Link className="btn" to="/login?mode=register">Create account</Link>
@@ -226,7 +226,7 @@ function CheckoutInner() {
     <div>
       <div className="page-header" style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
         <h1>Checkout</h1>
-        <span className="muted small">{cart.items.length} item{cart.items.length === 1 ? '' : 's'} · {fmt(cart.subtotal)} {currency}</span>
+        <span className="muted small">{cart.items.length} item{cart.items.length === 1 ? '' : 's'} Â· {fmt(cart.subtotal)} {currency}</span>
       </div>
 
       <div className="grid grid-2" style={{ alignItems: 'start', gap: 18 }}>
@@ -263,7 +263,7 @@ function CheckoutInner() {
             <div className="ck-choices">
               <button type="button" className={`ck-choice ${form.fulfillment === 'delivery' ? 'on' : ''}`} onClick={() => setForm({ ...form, fulfillment: 'delivery' })}>
                 <I name="truck" size={20} />
-                <span><b>Delivery</b><small>{fee > 0 ? `${fmt(fee)} ${currency}` : 'Free'}{freeThreshold > 0 ? ` · free over ${fmt(freeThreshold)}` : ''}</small></span>
+                <span><b>Delivery</b><small>{fee > 0 ? `${fmt(fee)} ${currency}` : 'Free'}{freeThreshold > 0 ? ` Â· free over ${fmt(freeThreshold)}` : ''}</small></span>
               </button>
               {info.pickup_available && (
                 <button type="button" className={`ck-choice ${form.fulfillment === 'pickup' ? 'on' : ''}`} onClick={() => setForm({ ...form, fulfillment: 'pickup' })}>
@@ -279,7 +279,7 @@ function CheckoutInner() {
                   <label key={a.id} className={`ck-addr ${form.address_id == a.id ? 'on' : ''}`}>
                     <input type="radio" checked={form.address_id == a.id} onChange={() => setForm({ ...form, address_id: a.id })} />
                     <span>
-                      <b>{a.recipient_name}</b> · {a.phone}
+                      <b>{a.recipient_name}</b> Â· {a.phone}
                       <br /><span className="small muted">{a.address}, {a.city} {a.postal_code}</span>
                     </span>
                   </label>
@@ -307,7 +307,7 @@ function CheckoutInner() {
               </>
             )}
             {form.fulfillment === 'pickup' && (
-              <p className="muted small" style={{ marginTop: 10 }}>Pick up at <b>{info.shop_name}</b>, {info.shop_address || 'our shop'}. We will call {info.shop_phone} when your order is ready.</p>
+              <p className="muted small" style={{ marginTop: 10 }}>Pick up at <b>{info.shop_name}</b>, {info.shop_address || 'our stationery'}. We will call {info.shop_phone} when your order is ready.</p>
             )}
           </Section>
 
@@ -339,7 +339,7 @@ function CheckoutInner() {
               value={form.notes}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
               rows={2}
-              placeholder="Delivery instructions, landmark, preferred time…"
+              placeholder="Delivery instructions, landmark, preferred timeâ€¦"
               style={{ width: '100%', resize: 'vertical' }}
             />
           </Section>
@@ -349,7 +349,7 @@ function CheckoutInner() {
           <h2 className="ck-title">Order summary</h2>
           {cart.items.map((i) => (
             <div className="cart-line" key={i.id}>
-              <span className="name">{i.product_name} <span className="muted small">× {fmt(i.quantity)} {i.unit_label || 'piece'}</span></span>
+              <span className="name">{i.product_name} <span className="muted small">Ã— {fmt(i.quantity)} {i.unit_label || 'piece'}</span></span>
               <span className="num">{fmt(i.unit_price * i.quantity)}</span>
             </div>
           ))}
@@ -359,7 +359,7 @@ function CheckoutInner() {
           <div className="cart-total-row"><span>Delivery</span><span className="num">{deliveryCharge > 0 ? fmt(deliveryCharge) : 'Free'}</span></div>
           <div className="cart-total-row cart-grand"><span>Total</span><span className="num">{fmt(total)} {currency}</span></div>
           <button className="btn primary" style={{ width: '100%', justifyContent: 'center', padding: 13, marginTop: 14 }} disabled={placing || cart.items.length === 0} onClick={placeOrder}>
-            {placing ? 'Placing order…' : `Place order · ${fmt(total)} ${currency}`}
+            {placing ? 'Placing orderâ€¦' : `Place order Â· ${fmt(total)} ${currency}`}
           </button>
           <p className="muted small" style={{ textAlign: 'center', marginTop: 10 }}>
             You will receive an invoice right after placing the order.

@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { db, audit, transact } = require('../db');
@@ -78,7 +78,7 @@ router.post('/', (req, res) => {
   const ft = fulfillment_type === 'pickup' ? 'pickup' : 'delivery';
   const method = PAYMENT_METHODS.includes(payment_method) ? payment_method : 'cash_on_delivery';
   if (method === 'credit' && isGuest) {
-    return res.status(400).json({ error: 'Credit purchases require a customer account — please sign in' });
+    return res.status(400).json({ error: 'Credit purchases require a customer account â€” please sign in' });
   }
   let gName = null, gPhone = null, gAddr = null, gCity = null;
   if (isGuest) {
@@ -163,7 +163,7 @@ router.post('/', (req, res) => {
    if (baseNeeded > available) {
     throw new Error(`Insufficient stock for ${l.product_name} (only ${Math.floor(available * u.basePieces(productLike))} pieces available)`);
    }
-   // Price integrity: always recompute from the current product price —
+   // Price integrity: always recompute from the current product price â€”
    // never trust a stored/client-supplied unit price.
    const unitPrice = u.unitPrice(l.cart_unit, productLike);
    const lineSub = Math.round(Number(l.quantity) * unitPrice * 100) / 100;
@@ -236,7 +236,7 @@ router.post('/', (req, res) => {
   notifyManagers({
    kind: 'order',
    title: `Online order ${orderNumber}`,
-   body: `${(isGuest ? gName : (contactName || (user && user.name))) || 'Customer'} · ${total} · ${ft === 'delivery' ? 'Delivery' : 'Pickup'} · ${method}`,
+   body: `${(isGuest ? gName : (contactName || (user && user.name))) || 'Customer'} Â· ${total} Â· ${ft === 'delivery' ? 'Delivery' : 'Pickup'} Â· ${method}`,
   });
   try { db.prepare(`INSERT INTO order_status_history (order_id, from_status, to_status, action, changed_by, changed_by_name, changed_by_role, office_id, office_name, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(orderId, null, 'pending', 'create', orderUserId, isGuest ? gName : req.user.name, isGuest ? 'customer' : req.user.role, isGuest ? null : (req.user.office_id || null), isGuest ? null : (req.user.office || null), `Order placed ${orderNumber}`); } catch {}
   return orderId;
@@ -272,7 +272,7 @@ router.post('/:id/cancel', requireCustomer, (req, res) => {
  if (!order) return res.status(404).json({ error: 'Order not found' });
  if (order.order_status !== 'pending') return res.status(400).json({ error: 'Only pending orders can be cancelled' });
  const paid = db.prepare("SELECT COALESCE(SUM(amount),0) s FROM order_payments WHERE order_id=? AND payment_status='paid'").get(order.id).s;
- if (paid > 0) return res.status(400).json({ error: 'This order has been paid — contact the shop to request a refund' });
+ if (paid > 0) return res.status(400).json({ error: 'This order has been paid â€” contact the stationery to request a refund' });
 
  transact(() => {
   const items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(order.id);

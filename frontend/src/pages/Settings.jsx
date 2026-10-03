@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { THEMES, applyTheme, getTheme } from '../theme';
@@ -94,8 +94,8 @@ export default function Settings() {
         </div>
 
         <div className="card">
-          <h2>Shop details</h2>
-          <div className="field"><label>Shop name</label><input value={settings.shop_name || ''} onChange={(e) => set('shop_name', e.target.value)} /></div>
+          <h2>Stationery details</h2>
+          <div className="field"><label>Stationery name</label><input value={settings.shop_name || ''} onChange={(e) => set('shop_name', e.target.value)} /></div>
           <div className="field"><label>Address</label><input value={settings.shop_address || ''} onChange={(e) => set('shop_address', e.target.value)} /></div>
           <div className="form-row">
             <div className="field"><label>Phone</label><input value={settings.shop_phone || ''} onChange={(e) => set('shop_phone', e.target.value)} /></div>
@@ -157,7 +157,7 @@ export default function Settings() {
                 } catch (err) { toast(err.message, 'error'); }
                 finally { setTesting(false); }
               }}
-            >{testing ? 'Sending…' : 'Send test email'}</button>
+            >{testing ? 'Sendingâ€¦' : 'Send test email'}</button>
             <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="send to (email)" style={{ flex: 1, minWidth: 180 }} />
           </div>
         </div>

@@ -1,4 +1,4 @@
-# CHUGAZ STATIONERY - POS & Inventory
+﻿# CHUGAZ STATIONERY - POS & Inventory
 
 A full-stack Point of Sale and Inventory Management System for CHUGAZ STATIONERY.
 
@@ -50,7 +50,7 @@ docker run -p 7860:7860 -v ./data:/data chugaz-stationery
 ```
 
 ### Hugging Face Spaces
-1. Create new Space → Docker
+1. Create new Space â†’ Docker
 2. Connect this GitHub repo
 3. Set Environment Variables in Space Settings:
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
@@ -74,10 +74,10 @@ docker run -p 7860:7860 -v ./data:/data chugaz-stationery
 - `POST /api/shop/register` - Customer registration
 - `POST /api/shop/verify-email` - Email verification
 - `POST /api/shop/resend-verification` - Resend code
-- `GET /api/shop/info` - Public shop info
+- `GET /api/shop/info` - Public stationery info
 
 ## Lipa Na Mpesa
-Configure payment instructions in **Admin → Settings → Lipa Namba**:
+Configure payment instructions in **Admin â†’ Settings â†’ Lipa Namba**:
 ```
 356322054 - CHUGAZ STATIONERY
 ```

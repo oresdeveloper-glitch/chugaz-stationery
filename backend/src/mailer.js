@@ -1,4 +1,4 @@
-const nodemailer = require('nodemailer');
+﻿const nodemailer = require('nodemailer');
 const dns = require('dns').promises;
 const { db } = require('./db');
 
@@ -24,7 +24,7 @@ async function checkEmailReal(email) {
  if (!EMAIL_RE.test(clean)) return { ok: false, error: 'Enter a valid email address' };
  const domain = clean.split('@')[1];
  if (DISPOSABLE_DOMAINS.has(domain)) {
-  return { ok: false, error: 'Disposable or temporary email addresses are not allowed — use your real email' };
+  return { ok: false, error: 'Disposable or temporary email addresses are not allowed â€” use your real email' };
  }
  try {
   let mx = [];
@@ -35,9 +35,9 @@ async function checkEmailReal(email) {
    const a = await dns.resolve4(domain);
    if (a && a.length) return { ok: true, clean };
   } catch {}
-  return { ok: false, error: 'That email domain cannot receive mail — check the spelling or use another address' };
+  return { ok: false, error: 'That email domain cannot receive mail â€” check the spelling or use another address' };
  } catch {
-  // DNS unavailable on this machine — fall back to format-only check
+  // DNS unavailable on this machine â€” fall back to format-only check
   return { ok: true, clean };
  }
 }
@@ -79,12 +79,12 @@ async function sendMail(to, subject, text, html) {
 }
 
 function shopName() {
- return db.prepare("SELECT value FROM settings WHERE key='shop_name'").get()?.value || 'Our shop';
+ return db.prepare("SELECT value FROM settings WHERE key='shop_name'").get()?.value || 'Our stationery';
 }
 
 async function sendVerificationCode(to, code) {
  const shop = shopName();
- const subject = `${shop} — your verification code: ${code}`;
+ const subject = `${shop} â€” your verification code: ${code}`;
  const text = `Welcome to ${shop}!\n\nYour email verification code is: ${code}\n\nIt expires in 15 minutes. If you did not request this, ignore this email.`;
  const html = `
   <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;border:1px solid #e3e6ea;border-radius:10px;overflow:hidden">
@@ -94,16 +94,16 @@ async function sendVerificationCode(to, code) {
     <p style="font-size:30px;font-weight:800;letter-spacing:8px;text-align:center;background:#f4f6f8;border-radius:8px;padding:14px 0;margin:18px 0">${code}</p>
     <p>This code expires in <b>15 minutes</b>. If you did not try to register, you can safely ignore this email.</p>
    </div>
-   <div style="padding:12px 24px;background:#fafbfc;color:#8a9096;font-size:11px;text-align:center">${shop} · automated message</div>
+   <div style="padding:12px 24px;background:#fafbfc;color:#8a9096;font-size:11px;text-align:center">${shop} Â· automated message</div>
   </div>`;
  return sendMail(to, subject, text, html);
 }
 
 async function sendTestEmail(to) {
- return sendMail(to, `${shopName()} — SMTP test`, 'SMTP is configured correctly. Test email from your point-of-sale system.', '<p>SMTP is configured correctly. Test email from your point-of-sale system.</p>');
+ return sendMail(to, `${shopName()} â€” SMTP test`, 'SMTP is configured correctly. Test email from your point-of-sale system.', '<p>SMTP is configured correctly. Test email from your point-of-sale system.</p>');
 }
 
-// True when SMTP delivery is configured (Settings → smtp_*). Registration
+// True when SMTP delivery is configured (Settings â†’ smtp_*). Registration
 // and sign-in share this policy: when it is false, email verification is
 // skipped because no code can be delivered anyway.
 function smtpReady() {

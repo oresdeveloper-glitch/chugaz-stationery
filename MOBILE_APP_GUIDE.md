@@ -1,16 +1,16 @@
-# CHUGAZ Stationery — Convert to Mobile App
+﻿# CHUGAZ Stationery â€” Convert to Mobile App
 
-Full system (POS, Inventory, Shop, Reports) converted to mobile via **Capacitor** (wraps your existing React web app) + **PWA**. No rewrite needed — reuses `frontend/dist` and `backend` API.
+Full system (POS, Inventory, Stationery, Reports) converted to mobile via **Capacitor** (wraps your existing React web app) + **PWA**. No rewrite needed â€” reuses `frontend/dist` and `backend` API.
 
-## Option 1 — PWA (instant, no store, 2 min)
+## Option 1 â€” PWA (instant, no store, 2 min)
 
 Already added:
-- `frontend/public/manifest.json` — installable, standalone, theme #0e6ea8
-- `frontend/index.html` — manifest + theme-color + apple tags
+- `frontend/public/manifest.json` â€” installable, standalone, theme #0e6ea8
+- `frontend/index.html` â€” manifest + theme-color + apple tags
 
-**Test:** `cd frontend && npm run build && npm run preview` → open `http://localhost:4173` on phone → Chrome menu → **Install app / Add to Home screen** → works offline for UI, API needs network.
+**Test:** `cd frontend && npm run build && npm run preview` â†’ open `http://localhost:4173` on phone â†’ Chrome menu â†’ **Install app / Add to Home screen** â†’ works offline for UI, API needs network.
 
-## Option 2 — Native Android APK (Capacitor, recommended for Play Store)
+## Option 2 â€” Native Android APK (Capacitor, recommended for Play Store)
 
 ### 1. Install (once)
 ```bash
@@ -38,21 +38,21 @@ const API_BASE = import.meta.env.VITE_API_URL || ''
 // fetch(`${API_BASE}/api/...`)
 ```
 
-And allow CORS in `backend/server.js` already `cors()` — add your mobile origin if needed.
+And allow CORS in `backend/server.js` already `cors()` â€” add your mobile origin if needed.
 
 ### 4. Sync + Open in Android Studio
 ```bash
 npx cap sync
 npx cap open android
 ```
-In Android Studio: **Run ▶** on emulator/device. Camera permission for barcode (`@zxing/library`) auto-requests — add to `android/app/src/main/AndroidManifest.xml`:
+In Android Studio: **Run â–¶** on emulator/device. Camera permission for barcode (`@zxing/library`) auto-requests â€” add to `android/app/src/main/AndroidManifest.xml`:
 ```xml
 <uses-permission android:name="android.permission.CAMERA" />
 <uses-permission android:name="android.permission.INTERNET" />
 ```
 
 ### 5. Build APK/AAB for Play Store
-In Android Studio: **Build → Generate Signed Bundle / APK** → choose `Android App Bundle` → create keystore → `app-release.aab` → upload to Play Console.
+In Android Studio: **Build â†’ Generate Signed Bundle / APK** â†’ choose `Android App Bundle` â†’ create keystore â†’ `app-release.aab` â†’ upload to Play Console.
 
 Or CLI:
 ```bash
@@ -66,24 +66,24 @@ npx cap add ios
 npx cap sync
 npx cap open ios
 ```
-In Xcode: select team, **Product → Archive** → upload to App Store.
+In Xcode: select team, **Product â†’ Archive** â†’ upload to App Store.
 
 ## Backend for Mobile
 
 Keep `backend` hosted:
-- Docker: `docker compose up -d --build` (already ready) → expose `4000`
+- Docker: `docker compose up -d --build` (already ready) â†’ expose `4000`
 - Env: `PORT=4000`, `JWT_SECRET=...`, `DB_PATH=...`, `SERVE_FRONTEND=0` (mobile uses API only)
 - Ensure `https` for camera: Capacitor requires `https` or `localhost`; use `https` in production or `http://192.168.x.x` with `androidScheme: http` for local.
 
 ## Features Working Natively
 
 - **POS + Barcode:** `@zxing` camera works in WebView after permission
-- **Printing:** Uses `window.print()` → Android print dialog; for thermal, add `capacitor-plugin-printer` if needed
+- **Printing:** Uses `window.print()` â†’ Android print dialog; for thermal, add `capacitor-plugin-printer` if needed
 - **Offline:** PWA caches UI; for full offline POS, add service worker + local SQLite sync (next phase)
 
 ## Quick Test Without Building
 
-On phone Chrome, open `http://192.168.x.x:5173` (run `npm run dev -- --host` on PC) → **Add to Home screen** → behaves like native app immediately.
+On phone Chrome, open `http://192.168.x.x:5173` (run `npm run dev -- --host` on PC) â†’ **Add to Home screen** â†’ behaves like native app immediately.
 
 ## Need APK Built Now?
 

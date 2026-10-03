@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { Outlet } from 'react-router-dom';
 import { useShop } from './ShopContext';
@@ -69,7 +69,7 @@ export default function ShopLayout() {
           <button className="shop-drawer-close" onClick={closeMenu} aria-label="Close menu"><I name="x" size={18} /></button>
         </div>
         <nav className="shop-side-nav">
-          <div className="shop-side-label">Shop</div>
+          <div className="shop-side-label">Stationery</div>
           <NavLink to="/shop" className="shop-side-link" end onClick={closeMenu}><span className="shop-side-ico"><I name="store" size={17} /></span><span>Catalog</span><span className="shop-side-chev"><I name="chevDown" size={13} style={{ transform: 'rotate(-90deg)' }} /></span></NavLink>
           <NavLink to="/shop/cart" className="shop-side-link" onClick={closeMenu}><span className="shop-side-ico"><I name="cart" size={17} /></span><span>My cart</span>{cartCount > 0 && <span className="shop-side-badge">{cartCount}</span>}<span className="shop-side-chev"><I name="chevDown" size={13} style={{ transform: 'rotate(-90deg)' }} /></span></NavLink>
           <NavLink to="/shop/orders" className="shop-side-link" onClick={closeMenu}><span className="shop-side-ico"><I name="bag" size={17} /></span><span>My orders</span><span className="shop-side-chev"><I name="chevDown" size={13} style={{ transform: 'rotate(-90deg)' }} /></span></NavLink>
@@ -123,13 +123,13 @@ export default function ShopLayout() {
         <main className="shop-main" style={{ maxWidth: 900, margin: '0 auto', padding: hideChrome ? 0 : 20 }}>
           <Outlet />
           {!hideChrome && <div style={{ textAlign: 'center', padding: '26px 0 10px', fontSize: 11, color: 'var(--muted-2)', letterSpacing: '0.08em' }}>
-            CHUGAZ STATIONERY · VERSION 3.0
+            CHUGAZ STATIONERY Â· VERSION 3.0
           </div>}
         </main>
       </div>
-      {!hideChrome && <nav className="shop-bottom-nav" aria-label="Mobile shop navigation">
+      {!hideChrome && <nav className="shop-bottom-nav" aria-label="Mobile stationery navigation">
         <div className="shop-bottom-nav-inner">
-          <NavLink to="/shop" end className={({isActive})=> isActive?'active':''}><span className="ico"><I name="store" size={18}/></span><span>Shop</span></NavLink>
+          <NavLink to="/shop" end className={({isActive})=> isActive?'active':''}><span className="ico"><I name="store" size={18}/></span><span>Stationery</span></NavLink>
           <NavLink to="/shop/cart" className={({isActive})=> isActive?'active':''}><span className="nav-item"><span className="ico"><I name="cart" size={18}/></span>{cartCount>0 && <span className="cart-badge">{cartCount}</span>}</span><span>Cart</span></NavLink>
           <NavLink to="/shop/orders" className={({isActive})=> isActive?'active':''}><span className="ico"><I name="bag" size={18}/></span><span>Orders</span></NavLink>
           <NavLink to={user?"/shop/profile":"/login"} className={({isActive})=> isActive?'active':''}><span className="ico"><I name="user" size={18}/></span><span>{user?"Account":"Sign in"}</span></NavLink>

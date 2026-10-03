@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { api, fmt, fmtDateTime, getUser, lockPrintRedirect, unlockPrintRedirect } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { useToast } from '../components/Toast';
@@ -106,16 +106,16 @@ export default function StaffOrders() {
     const rows = (selected.items || [])
       .map((i, ix) => `<tr><td style="text-align:center;color:#666">${ix + 1}</td><td>${i.product_name}</td><td style="text-align:right">${fmt(i.quantity)}${i.unit ? ` ${i.unit}` : ''}</td><td style="text-align:right">${fmt(i.unit_price)}</td><td style="text-align:right"><b>${fmt(i.total)}</b></td></tr>`)
       .join('');
-    const historyRows = (selected.history || []).map(h => `<tr><td style="font-size:11px">${fmtDateTime(h.created_at)}</td><td style="text-transform:capitalize">${String(h.action||'status_change').replace(/_/g,' ')} </td><td>${h.from_status||'—'} → ${h.to_status||'—'}</td><td>${h.changed_by_name||'System'} <span style="color:#666">(${h.changed_by_role||'—'}${h.office_name? ' · '+h.office_name : ''})</span></td></tr>`).join('');
-    const historySection = historyRows ? `<div style="margin-top:18px"><div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;color:#0a4a6b">Handler trail — who verified / confirmed / processed</div><table class="items"><thead><tr><th>Time</th><th>Action</th><th>Status</th><th>By (Role · Office)</th></tr></thead><tbody>${historyRows}</tbody></table></div>` : '';
+    const historyRows = (selected.history || []).map(h => `<tr><td style="font-size:11px">${fmtDateTime(h.created_at)}</td><td style="text-transform:capitalize">${String(h.action||'status_change').replace(/_/g,' ')} </td><td>${h.from_status||'â€”'} â†’ ${h.to_status||'â€”'}</td><td>${h.changed_by_name||'System'} <span style="color:#666">(${h.changed_by_role||'â€”'}${h.office_name? ' Â· '+h.office_name : ''})</span></td></tr>`).join('');
+    const historySection = historyRows ? `<div style="margin-top:18px"><div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;color:#0a4a6b">Handler trail â€” who verified / confirmed / processed</div><table class="items"><thead><tr><th>Time</th><th>Action</th><th>Status</th><th>By (Role Â· Office)</th></tr></thead><tbody>${historyRows}</tbody></table></div>` : '';
     const payHtml = `<div class="pay">
-          <div class="pay-title">Jinsi ya kufanya malipo — Lipa kwa simu</div>
-          <div class="pay-lipa">Lipa Namba ya Vodacom (M-Pesa): <span class="num">\${(shop.payment_instructions || shop.shop_phone || '— Uliza dukani')}</span> <span style="margin-left:8px;color:#666">Malipo yote yanaenda Vodacom M-Pesa</span></div>
+          <div class="pay-title">Jinsi ya kufanya malipo â€” Lipa kwa simu</div>
+          <div class="pay-lipa">Lipa Namba ya Vodacom (M-Pesa): <span class="num">\${(shop.payment_instructions || shop.shop_phone || 'â€” Uliza dukani')}</span> <span style="margin-left:8px;color:#666">Malipo yote yanaenda Vodacom M-Pesa</span></div>
           <div class="pay-grid">
-            <div class="pay-card"><h4>1. Vodacom — M-Pesa</h4><div>Piga: <span class="ussd">*150*00#</span></div><ol><li>Chagua 4 — Lipa kwa M-Pesa</li><li>Chagua Lipa Namba</li><li>Weka Lipa Namba ya Vodacom</li><li>Weka kiasi: <b>\${fmt(selected.total)} ${cur}</b></li><li>Hakikisha taarifa za mpokeaji ni sahihi</li><li>Weka PIN ya M-Pesa</li><li>Thibitisha malipo</li></ol></div>
-            <div class="pay-card"><h4>2. Yas — Mixx by Yas</h4><div>Piga: <span class="ussd">*150*01#</span></div><ol><li>Chagua Lipa kwa Simu</li><li>Chagua mitandao mingine</li><li>Chagua M-Pesa</li><li>Weka Lipa Namba ya Vodacom</li><li>Weka kiasi: <b>\${fmt(selected.total)} ${cur}</b></li><li>Hakikisha jina la biashara</li><li>Weka PIN ya Mixx</li><li>Thibitisha</li></ol></div>
-            <div class="pay-card"><h4>3. Airtel — Airtel Money</h4><div>Piga: <span class="ussd">*150*60#</span></div><ol><li>Chagua 5 — Lipa Bili</li><li>Chagua Lipa kwa Simu — Mitandao yote</li><li>Chagua M-Pesa</li><li>Weka Lipa Namba ya Vodacom</li><li>Weka kiasi: <b>\${fmt(selected.total)} ${cur}</b></li><li>Hakikisha taarifa za mfanyabiashara</li><li>Weka PIN ya Airtel Money</li><li>Thibitisha</li></ol></div>
-            <div class="pay-card"><h4>4. Halotel — HaloPesa</h4><div>Piga: <span class="ussd">*150*88#</span></div><ol><li>Chagua Lipa</li><li>Chagua Lipa kwa Simu</li><li>Chagua M-Pesa</li><li>Weka Lipa Namba ya Vodacom</li><li>Weka kiasi: <b>\${fmt(selected.total)} ${cur}</b></li><li>Hakikisha jina la M-Pesa</li><li>Weka PIN ya HaloPesa</li><li>Thibitisha</li></ol></div>
+            <div class="pay-card"><h4>1. Vodacom â€” M-Pesa</h4><div>Piga: <span class="ussd">*150*00#</span></div><ol><li>Chagua 4 â€” Lipa kwa M-Pesa</li><li>Chagua Lipa Namba</li><li>Weka Lipa Namba ya Vodacom</li><li>Weka kiasi: <b>\${fmt(selected.total)} ${cur}</b></li><li>Hakikisha taarifa za mpokeaji ni sahihi</li><li>Weka PIN ya M-Pesa</li><li>Thibitisha malipo</li></ol></div>
+            <div class="pay-card"><h4>2. Yas â€” Mixx by Yas</h4><div>Piga: <span class="ussd">*150*01#</span></div><ol><li>Chagua Lipa kwa Simu</li><li>Chagua mitandao mingine</li><li>Chagua M-Pesa</li><li>Weka Lipa Namba ya Vodacom</li><li>Weka kiasi: <b>\${fmt(selected.total)} ${cur}</b></li><li>Hakikisha jina la biashara</li><li>Weka PIN ya Mixx</li><li>Thibitisha</li></ol></div>
+            <div class="pay-card"><h4>3. Airtel â€” Airtel Money</h4><div>Piga: <span class="ussd">*150*60#</span></div><ol><li>Chagua 5 â€” Lipa Bili</li><li>Chagua Lipa kwa Simu â€” Mitandao yote</li><li>Chagua M-Pesa</li><li>Weka Lipa Namba ya Vodacom</li><li>Weka kiasi: <b>\${fmt(selected.total)} ${cur}</b></li><li>Hakikisha taarifa za mfanyabiashara</li><li>Weka PIN ya Airtel Money</li><li>Thibitisha</li></ol></div>
+            <div class="pay-card"><h4>4. Halotel â€” HaloPesa</h4><div>Piga: <span class="ussd">*150*88#</span></div><ol><li>Chagua Lipa</li><li>Chagua Lipa kwa Simu</li><li>Chagua M-Pesa</li><li>Weka Lipa Namba ya Vodacom</li><li>Weka kiasi: <b>\${fmt(selected.total)} ${cur}</b></li><li>Hakikisha jina la M-Pesa</li><li>Weka PIN ya HaloPesa</li><li>Thibitisha</li></ol></div>
           </div>
         </div>`;
      const paySection = selected.order_status === 'pending' ? payHtml : '';
@@ -195,7 +195,7 @@ export default function StaffOrders() {
             <img src="/logo-report.png" />
             <div>
               <div class="nm">${shop.shop_name || ''}</div>
-              <div class="mt">${shop.shop_address || ''}<br/>${shop.shop_phone || ''}${shop.shop_email ? ' · ' + shop.shop_email : ''}</div>
+              <div class="mt">${shop.shop_address || ''}<br/>${shop.shop_phone || ''}${shop.shop_email ? ' Â· ' + shop.shop_email : ''}</div>
             </div>
           </div>
           <div class="doc">
@@ -207,8 +207,8 @@ export default function StaffOrders() {
         <hr/>
         <div class="meta">
           <div><div class="lbl">Customer</div><b>${selected.user_name}</b><br/>${selected.user_phone || selected.user_email || ''}</div>
-          <div><div class="lbl">Deliver to</div>${selected.fulfillment_type === 'pickup' ? 'Pickup at shop' : `${selected.addr_recipient || ''}<br/>${selected.addr_address || ''}, ${selected.addr_city || ''}`}${selected.notes ? `<br/><i>Note: ${selected.notes}</i>` : ''}</div>
-          <div style="text-align:right"><div class="lbl">Payment</div><span style="text-transform:capitalize">${String(selected.payment_method).replace(/_/g, ' ')}</span><br/>${selected.payment_status} · Paid ${fmt(selected.paid_amount)} ${cur}</div>
+          <div><div class="lbl">Deliver to</div>${selected.fulfillment_type === 'pickup' ? 'Pickup at stationery' : `${selected.addr_recipient || ''}<br/>${selected.addr_address || ''}, ${selected.addr_city || ''}`}${selected.notes ? `<br/><i>Note: ${selected.notes}</i>` : ''}</div>
+          <div style="text-align:right"><div class="lbl">Payment</div><span style="text-transform:capitalize">${String(selected.payment_method).replace(/_/g, ' ')}</span><br/>${selected.payment_status} Â· Paid ${fmt(selected.paid_amount)} ${cur}</div>
         </div>
         <table class="items">
           <thead><tr><th>#</th><th>Product</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit price</th><th style="text-align:right">Amount</th></tr></thead>
@@ -222,7 +222,7 @@ export default function StaffOrders() {
         </div></div>
         ${paySection}
         ${historySection}
-        <div class="foot"><b>${shop.shop_name || ''}</b> · ${shop.shop_phone || ''}<br/>This document was generated automatically : no signature required.</div>
+        <div class="foot"><b>${shop.shop_name || ''}</b> Â· ${shop.shop_phone || ''}<br/>This document was generated automatically : no signature required.</div>
         <div class="print-footer"><span>Designed by CHUGAZ ICT SERVICES</span><span class="page-num"></span></div>
       </div>
     </body></html>`);
@@ -265,7 +265,7 @@ export default function StaffOrders() {
                   <td><span className={`badge ${COLOR(o.order_status)}`}>{LABEL(o.order_status)}</span></td>
                   <td><span className={`badge ${o.payment_status === 'paid' ? 'amber' : o.payment_status === 'refunded' || o.payment_status === 'partial_refund' ? 'gray' : 'red'}`}>{o.payment_status}</span></td>
                   <td className="num">{o.return_requests > 0 ? <span className="badge red">{o.return_requests}</span> : ':'}</td>
-                  {isAdminView && <td className="muted small" style={{maxWidth:160, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}} title={o.last_handler || '—'}>{o.last_handler || <span className="muted">—</span>}</td>}
+                  {isAdminView && <td className="muted small" style={{maxWidth:160, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}} title={o.last_handler || 'â€”'}>{o.last_handler || <span className="muted">â€”</span>}</td>}
                   <td><button className="btn sm" onClick={async () => {
                     try {
                       const full = await api(`/orders/${o.id}`);
@@ -287,7 +287,7 @@ export default function StaffOrders() {
             <div className="modal-header">
                 <div>
                   <h3>Order {selected.order_number}</h3>
-                  <div className="muted small">{fmtDateTime(selected.order_date)} · {selected.user_name} ({selected.user_email}) · phone {selected.user_phone || ':'}</div>
+                  <div className="muted small">{fmtDateTime(selected.order_date)} Â· {selected.user_name} ({selected.user_email}) Â· phone {selected.user_phone || ':'}</div>
                 </div>
                 <button className="btn sm" onClick={print}><I name="printer" size={14} /> Print</button>
               </div>
@@ -342,7 +342,7 @@ export default function StaffOrders() {
                   </table>
                 </div>
                 <div className="small" style={{ textAlign: 'right', marginTop: 6, lineHeight: 1.7 }}>
-                  Subtotal {fmt(selected.subtotal)} · Tax {fmt(selected.tax)} · Delivery {fmt(selected.delivery_fee)}<br />
+                  Subtotal {fmt(selected.subtotal)} Â· Tax {fmt(selected.tax)} Â· Delivery {fmt(selected.delivery_fee)}<br />
                   <b>Total {fmt(selected.total)}</b>
                 </div>
               </div>
@@ -350,9 +350,9 @@ export default function StaffOrders() {
                 <div className="card" style={{ marginBottom: 12 }}>
                   <h3 className="small">Shipping</h3>
                   <div className="small muted">
-                    {selected.fulfillment_type === 'pickup' ? 'Pickup at shop' : (
+                    {selected.fulfillment_type === 'pickup' ? 'Pickup at stationery' : (
                       <>
-                        {selected.addr_recipient} · {selected.addr_phone}<br />
+                        {selected.addr_recipient} Â· {selected.addr_phone}<br />
                         {selected.addr_address}, {selected.addr_city}
                       </>
                     )}
@@ -365,7 +365,7 @@ export default function StaffOrders() {
                   {(selected.payments || []).map((p) => (
                     <div key={p.id} className="small" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', padding: '4px 0', gap: 8 }}>
                       <span style={{ minWidth: 0 }}>
-                        {p.payment_method} {p.transaction_reference && `· ${p.transaction_reference}`}
+                        {p.payment_method} {p.transaction_reference && `Â· ${p.transaction_reference}`}
                         {p.payment_status === 'pending' && <span className="badge amber" style={{ marginLeft: 6 }}>awaiting verification</span>}
                       </span>
                       <b style={{ flexShrink: 0 }}>{fmt(p.amount)}</b>
@@ -378,7 +378,7 @@ export default function StaffOrders() {
                   )}
                   {selected.payment_method === 'cash_on_delivery' && selected.payment_status !== 'paid' && !['cancelled','rejected','refunded'].includes(selected.order_status) && (
                     <button className="btn primary sm" style={{ marginTop: 8, width: '100%', justifyContent: 'center', background: '#0e6ea8', borderColor: '#0e6ea8' }} onClick={verifyPayment}>
-                      <I name="check" size={14} /> Confirm cash received — COD
+                      <I name="check" size={14} /> Confirm cash received â€” COD
                     </button>
                   )}
                   {selected.payment_status !== 'paid' && selected.payment_status !== 'verifying' && selected.payment_method !== 'cash_on_delivery' && (
@@ -388,7 +388,7 @@ export default function StaffOrders() {
                   )}
                   {selected.payment_method === 'cash_on_delivery' && selected.payment_status === 'unpaid' && (
                     <div className="muted small" style={{ marginTop: 6 }}>
-                      COD — cash to collect: <b style={{ color: '#0e6ea8' }}>{fmt(selected.total)}</b> at {selected.fulfillment_type === 'pickup' ? 'pickup' : 'delivery'}
+                      COD â€” cash to collect: <b style={{ color: '#0e6ea8' }}>{fmt(selected.total)}</b> at {selected.fulfillment_type === 'pickup' ? 'pickup' : 'delivery'}
                     </div>
                   )}
                 </div>
@@ -406,17 +406,17 @@ export default function StaffOrders() {
                 {(selected.history || []).length > 0 && (
                   <div className="card" style={{ marginTop: 12, border: '1px solid var(--border)' }}>
                     <h3 className="small">Handler trail</h3>
-                    <div className="muted small" style={{marginBottom:8}}>Who confirmed / verified / processed this order — office A/B or Admin</div>
+                    <div className="muted small" style={{marginBottom:8}}>Who confirmed / verified / processed this order â€” office A/B or Admin</div>
                     <div>
                       {(selected.history || []).map((h) => (
                         <div key={h.id} style={{ display:'flex', justifyContent:'space-between', gap:8, padding:'7px 0', borderBottom:'1px solid var(--border)', fontSize:12.5 }}>
                           <div style={{minWidth:0}}>
                             <span style={{fontWeight:700, textTransform:'capitalize'}}>{String(h.action||'status_change').replace(/_/g,' ')}</span>
-                            {h.from_status || h.to_status ? <span className="muted"> — {h.from_status || '—'} → {h.to_status || '—'}</span> : null}
+                            {h.from_status || h.to_status ? <span className="muted"> â€” {h.from_status || 'â€”'} â†’ {h.to_status || 'â€”'}</span> : null}
                             <div className="muted small" style={{marginTop:2}}>
-                              by <b style={{color:'var(--text)'}}>{h.changed_by_name || 'System'}</b> <span className="badge gray" style={{marginLeft:4}}>{h.changed_by_role || '—'}</span>
+                              by <b style={{color:'var(--text)'}}>{h.changed_by_name || 'System'}</b> <span className="badge gray" style={{marginLeft:4}}>{h.changed_by_role || 'â€”'}</span>
                               {h.office_name ? <span className="badge amber" style={{marginLeft:4}}>{h.office_name}</span> : (h.office_id ? <span className="badge amber" style={{marginLeft:4}}>Office {h.office_id}</span> : <span className="badge gray" style={{marginLeft:4}}>HQ / Admin</span>)}
-                              {h.notes ? <span> · {h.notes}</span> : null}
+                              {h.notes ? <span> Â· {h.notes}</span> : null}
                             </div>
                           </div>
                           <span className="muted small" style={{whiteSpace:'nowrap', flexShrink:0}}>{fmtDateTime(h.created_at)}</span>

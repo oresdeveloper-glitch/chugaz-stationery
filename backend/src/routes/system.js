@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
@@ -29,14 +29,14 @@ router.put('/settings', requireRole('admin'), (req, res) => {
 router.post('/test-email', requireRole('admin'), async (req, res) => {
  const { sendTestEmail } = require('../mailer');
  const to = req.body.to || db.prepare("SELECT value FROM settings WHERE key='shop_email'").get()?.value;
- if (!to) return res.status(400).json({ error: 'No recipient — enter an email or set the shop email in settings' });
+ if (!to) return res.status(400).json({ error: 'No recipient â€” enter an email or set the stationery email in settings' });
  const result = await sendTestEmail(String(to).trim());
  if (result.sent) {
   audit(req.user.id, 'TEST_EMAIL', 'settings', null, { to });
   return res.json({ ok: true, message: `Test email sent to ${to}` });
  }
  res.status(400).json({ error: result.reason === 'smtp_not_configured'
-  ? 'SMTP is not configured — fill the host, user and password first'
+  ? 'SMTP is not configured â€” fill the host, user and password first'
   : `Send failed: ${result.reason}` });
 });
 

@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 
 // Catches rendering crashes anywhere below it so a bug shows a message
 // with recovery actions instead of a blank white page.
@@ -30,7 +30,7 @@ export default class ErrorBoundary extends React.Component {
             <p className="muted small">{msg}</p>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
               <button type="button" className="btn primary" onClick={() => window.location.reload()}>Reload page</button>
-              <a className="btn" href="/shop">Back to shop</a>
+              <a className="btn" href="/shop">Back to stationery</a>
             </div>
           </div>
         </div>

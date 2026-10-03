@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { shopApi } from '../../lib/api';
 import { useToast } from '../../components/Toast';
 import I from '../../components/icons';
@@ -59,7 +59,7 @@ export default function Contact() {
           <div><b>Delivery:</b> usually 1:3 working days within town, 2:5 for outlying areas.</div>
           <div><b>Free delivery</b> over {info ? info.free_delivery_threshold : 'a set'} amount.</div>
           <div><b>Returns:</b> within 7 days of delivery for unused items.</div>
-          <div><b>Payments:</b> cash on delivery, at shop, card, mobile money, bank transfer, or on credit account.</div>
+          <div><b>Payments:</b> cash on delivery, at stationery, card, mobile money, bank transfer, or on credit account.</div>
         </div>
       </div>
       </div>

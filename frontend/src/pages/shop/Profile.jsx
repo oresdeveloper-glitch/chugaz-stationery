@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { shopApi, setShopAuth, getShopUser } from '../../lib/api';
 import RequireShopAuth from '../../shop/RequireShopAuth';
@@ -20,7 +20,7 @@ function ProfileInner() {
   const onAvatar = async (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) return toast('Image too large — max 3MB', 'error');
+    if (file.size > 3 * 1024 * 1024) return toast('Image too large â€” max 3MB', 'error');
     const fd = new FormData();
     fd.append('avatar', file);
     setUploading(true);
@@ -57,7 +57,7 @@ function ProfileInner() {
         <p className="muted small">{error}</p>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
           <button className="btn primary" onClick={load}>Try again</button>
-          <Link to="/shop" className="btn">Back to shop</Link>
+          <Link to="/shop" className="btn">Back to stationery</Link>
         </div>
       </div>
     );
@@ -100,12 +100,12 @@ function ProfileInner() {
             <div className="field"><label>Full name</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoComplete="name" /></div>
             <div className="field"><label>Phone</label><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="07XXXXXXXX" autoComplete="tel" /></div>
           </div>
-          <div className="field"><label>Email — cannot change</label><input value={form.email} disabled style={{background:'var(--panel-2)'}} /></div>
+          <div className="field"><label>Email â€” cannot change</label><input value={form.email} disabled style={{background:'var(--panel-2)'}} /></div>
           <div style={{height:1, background:'var(--border)', margin:'16px 0'}} />
           <h3 style={{margin:'0 0 12px', fontSize:14, fontWeight:600}}>Change password</h3>
-          <div className="field"><label>New password (leave blank to keep)</label><input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="••••••••" /></div>
+          <div className="field"><label>New password (leave blank to keep)</label><input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" /></div>
           {form.password && (
-            <div className="field"><label>Current password — required to confirm</label><input type="password" autoComplete="current-password" value={form.currentPassword || ''} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} required /></div>
+            <div className="field"><label>Current password â€” required to confirm</label><input type="password" autoComplete="current-password" value={form.currentPassword || ''} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} required /></div>
           )}
           <p className="small muted" style={{ marginTop: -2, marginBottom:12 }}>Use 8+ characters with letters and numbers.</p>
           <div style={{display:'flex', justifyContent:'flex-end'}}>

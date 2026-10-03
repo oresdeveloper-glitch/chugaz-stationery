@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { shopApi, fmt } from '../../lib/api';
 import RequireShopAuth from '../../shop/RequireShopAuth';
@@ -167,14 +167,14 @@ function InvoiceInner() {
       </div>
     );
   }
-  if (!order || !info) return <div className="card">Loading…</div>;
+  if (!order || !info) return <div className="card">Loadingâ€¦</div>;
   const currency = info.currency || 'TSh';
   const method = String(order.payment_method || '').replace(/_/g, ' ');
 
   return (
     <div>
       <div className="no-print" style={{ maxWidth: 740, margin: '0 auto 16px', display: 'flex', justifyContent: 'space-between' }}>
-        <Link to={`/shop/order/${order.id}`} className="muted small">← Back to order</Link>
+        <Link to={`/shop/order/${order.id}`} className="muted small">â† Back to order</Link>
         <button className="btn primary" onClick={() => window.print()}>Print / Save PDF</button>
       </div>
       <style>{INVOICE_STYLE}</style>
@@ -188,7 +188,7 @@ function InvoiceInner() {
                 <div className="shop-name">{info.shop_name}</div>
                 <div className="shop-meta">
                   {info.shop_address}<br />
-                  {info.shop_phone}{info.shop_email ? ` · ${info.shop_email}` : ''}
+                  {info.shop_phone}{info.shop_email ? ` Â· ${info.shop_email}` : ''}
                 </div>
               </div>
             </div>
@@ -210,7 +210,7 @@ function InvoiceInner() {
               <div className="lbl">Deliver to</div>
               <div className="val">
                 {order.fulfillment_type === 'pickup'
-                  ? <>Pickup at shop</>
+                  ? <>Pickup at stationery</>
                   : <>{order.shipping_name}<br />{order.shipping_address}</>}
               </div>
             </div>
@@ -252,17 +252,17 @@ function InvoiceInner() {
 
           {order.order_status === 'pending' && (
           <div className="inv-pay">
-            <div className="inv-pay-title">Jinsi ya kufanya malipo — Lipa kwa simu</div>
+            <div className="inv-pay-title">Jinsi ya kufanya malipo â€” Lipa kwa simu</div>
             <div className="inv-pay-lipa">
-              Lipa Namba ya Vodacom (M-Pesa): <span className="num">{info.payment_instructions && info.payment_instructions.trim() ? info.payment_instructions : (info.shop_phone || '— Uliza dukani')}</span>
+              Lipa Namba ya Vodacom (M-Pesa): <span className="num">{info.payment_instructions && info.payment_instructions.trim() ? info.payment_instructions : (info.shop_phone || 'â€” Uliza dukani')}</span>
               <span style={{marginLeft:8, color:'#5a7286'}}>Malipo yote yanaenda Vodacom M-Pesa</span>
             </div>
             <div className="inv-pay-grid">
               <div className="inv-pay-card">
-                <h4>1. Vodacom — M-Pesa</h4>
+                <h4>1. Vodacom â€” M-Pesa</h4>
                 <div>Piga: <span className="ussd">*150*00#</span></div>
                 <ol>
-                  <li>Chagua 4 — Lipa kwa M-Pesa</li>
+                  <li>Chagua 4 â€” Lipa kwa M-Pesa</li>
                   <li>Chagua Lipa Namba</li>
                   <li>Weka Lipa Namba ya Vodacom</li>
                   <li>Weka kiasi: <b>{fmt(order.total)} {currency}</b></li>
@@ -272,7 +272,7 @@ function InvoiceInner() {
                 </ol>
               </div>
               <div className="inv-pay-card">
-                <h4>2. Yas — Mixx by Yas</h4>
+                <h4>2. Yas â€” Mixx by Yas</h4>
                 <div>Piga: <span className="ussd">*150*01#</span></div>
                 <ol>
                   <li>Chagua Lipa kwa Simu</li>
@@ -286,11 +286,11 @@ function InvoiceInner() {
                 </ol>
               </div>
               <div className="inv-pay-card">
-                <h4>3. Airtel — Airtel Money</h4>
+                <h4>3. Airtel â€” Airtel Money</h4>
                 <div>Piga: <span className="ussd">*150*60#</span></div>
                 <ol>
-                  <li>Chagua 5 — Lipa Bili</li>
-                  <li>Chagua Lipa kwa Simu — Mitandao yote</li>
+                  <li>Chagua 5 â€” Lipa Bili</li>
+                  <li>Chagua Lipa kwa Simu â€” Mitandao yote</li>
                   <li>Chagua M-Pesa</li>
                   <li>Weka Lipa Namba ya Vodacom</li>
                   <li>Weka kiasi: <b>{fmt(order.total)} {currency}</b></li>
@@ -300,7 +300,7 @@ function InvoiceInner() {
                 </ol>
               </div>
               <div className="inv-pay-card">
-                <h4>4. Halotel — HaloPesa</h4>
+                <h4>4. Halotel â€” HaloPesa</h4>
                 <div>Piga: <span className="ussd">*150*88#</span></div>
                 <ol>
                   <li>Chagua Lipa</li>

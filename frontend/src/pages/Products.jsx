@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { api, fmt, getUser } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { useToast } from '../components/Toast';
@@ -179,7 +179,7 @@ export default function Products() {
               </div>
               <div className="alibaba-card-body">
                 <div className="alibaba-name">{p.name}</div>
-                <div className="alibaba-brand">{p.category_name || 'No category'} · {p.sku}</div>
+                <div className="alibaba-brand">{p.category_name || 'No category'} Â· {p.sku}</div>
                 <div className="alibaba-price">
                   <span className="alibaba-price-cur">{fmt(p.selling_price)}</span>
                   <span className="muted small" style={{ fontSize: 11, fontWeight: 700 }}> /{p.unit || 'piece'}</span>
@@ -265,7 +265,7 @@ export default function Products() {
               <label>Barcode</label>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input value={modal?.barcode || ''} onChange={(e) => setModal({ ...modal, barcode: e.target.value })} placeholder="Generate or type a barcode" />
-                <button type="button" className="btn sm" onClick={genBarcode} disabled={generating}>{generating ? '…' : 'Generate'}</button>
+                <button type="button" className="btn sm" onClick={genBarcode} disabled={generating}>{generating ? 'â€¦' : 'Generate'}</button>
               </div>
             </div>
           </div>
@@ -325,7 +325,7 @@ export default function Products() {
             </div>
           </div>
           <div className="form-row">
-            <div className="field"><label>Description</label><textarea rows="3" value={modal?.description || ''} onChange={(e) => setModal({ ...modal, description: e.target.value })} placeholder="Product overview shown on the shop" /></div>
+            <div className="field"><label>Description</label><textarea rows="3" value={modal?.description || ''} onChange={(e) => setModal({ ...modal, description: e.target.value })} placeholder="Product overview shown on the stationery" /></div>
           </div>
           <div className="form-row">
             <div className="field"><label>Specifications</label><textarea rows="4" value={modal?.specifications || ''} onChange={(e) => setModal({ ...modal, specifications: e.target.value })} placeholder="One per line, e.g.:&#10;Size: A4&#10;Pages: 100&#10;Material: Paper" /></div>
@@ -371,7 +371,7 @@ export default function Products() {
                     style={{ position: 'absolute', top: 4, right: 4, padding: '2px 7px', borderRadius: '50%' }}
                     onClick={() => removeImage(gallery, im.id)}
                     title="Remove photo"
-                  >×</button>
+                  >Ã—</button>
                 </div>
               ))}
               {!gallery.images || !gallery.images.length ? <p className="muted">No photos yet.</p> : null}
