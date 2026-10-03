@@ -27,7 +27,7 @@ export default function Reports() {
       else if (tab === 'valuation') res = await api('/reports/inventory-valuation');
       else if (tab === 'suppliers') res = await api('/reports/supplier-balances');
       else if (tab === 'customers') res = await api('/reports/customer-credit');
-      else if (tab === 'cashiers') res = await api('/reports/cashier-performance');
+      else if (tab === 'cashiers') res = await api(`/reports/cashier-performance?from=${range.from}&to=${range.to}`);
       else if (tab === 'cashierDaily') {
         const q = new URLSearchParams({ from: cashierDate, to: cashierDate });
         if (cashierId) q.set('cashier_id', cashierId);
@@ -61,7 +61,7 @@ export default function Reports() {
     ['cashierDaily', 'Cashier daily (detailed)'],
     ['tax', 'Tax report'], ['audit', 'Audit log'],
   ];
-  const isRange = ['pnl', 'sales', 'best', 'tax'].includes(tab);
+  const isRange = ['pnl', 'sales', 'best', 'tax', 'cashiers'].includes(tab);
   const tabLabel = (tabs.find(([t]) => t === tab) || ['', 'Report'])[1];
   const stamp = new Date().toLocaleString();
   const me = getUser();

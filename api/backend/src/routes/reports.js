@@ -227,7 +227,7 @@ router.get('/dashboard', (req, res) => {
  });
 });
 
-router.get('/sales-summary', (req, res) => {
+router.get('/sales-summary', requireRole('manager', 'admin'), (req, res) => {
  const { from, to, period } = req.query;
  let sql;
  if (period === 'monthly') {
@@ -244,7 +244,7 @@ router.get('/sales-summary', (req, res) => {
  res.json(db.prepare(sql).all(...params));
 });
 
-router.get('/profit-loss', (req, res) => {
+router.get('/profit-loss', requireRole('manager', 'admin'), (req, res) => {
  const { from, to } = req.query;
  const fromDate = from || '1900-01-01';
  const toDate = to || '2999-12-31';
@@ -274,7 +274,7 @@ router.get('/profit-loss', (req, res) => {
  });
 });
 
-router.get('/best-sellers', (req, res) => {
+router.get('/best-sellers', requireRole('manager', 'admin'), (req, res) => {
  const { from, to } = req.query;
  const params = [];
  let cond = '';
@@ -295,7 +295,7 @@ router.get('/inventory-valuation', requireRole('admin'), (req, res) => {
  `).all());
 });
 
-router.get('/tax', (req, res) => {
+router.get('/tax', requireRole('manager', 'admin'), (req, res) => {
  const { from, to } = req.query;
  const fromDate = from || '1900-01-01';
  const toDate = to || '2999-12-31';
@@ -313,10 +313,19 @@ router.get('/audit', requireRole('manager', 'admin'), (req, res) => {
 });
 
 router.get('/cashier-performance', requireRole('manager', 'admin'), (req, res) => {
+ const { from, to } = req.query;
+ let dateCond = '';
+ const dateParams = [];
+ if (from && to) { dateCond = ' AND date(s.sale_date) BETWEEN date(?) AND date(?)'; dateParams.push(from, to); }
  res.json(db.prepare(`
   SELECT u.id, u.name, o.name AS office, COUNT(s.id) sales_count, COALESCE(SUM(s.total),0) total
-  FROM sales s JOIN users u ON u.id = s.created_by LEFT JOIN offices o ON o.id = u.office_id GROUP BY u.id ORDER BY total DESC
- `).all());
+  FROM users u
+  JOIN roles r ON r.id = u.role_id
+  LEFT JOIN sales s ON s.created_by = u.id${dateCond}
+  LEFT JOIN offices o ON o.id = u.office_id
+  WHERE r.name IN ('cashier','clerk','manager','admin')
+  GROUP BY u.id ORDER BY total DESC, u.id
+ `).all(...dateParams));
 });
 
 router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) => {
@@ -368,9 +377,12 @@ router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) 
   const rows = db.prepare(`
    SELECT u.id, u.name, o.name AS office, COUNT(s.id) sales_count,
        COALESCE(SUM(s.total),0) total
-   FROM sales s JOIN users u ON u.id = s.created_by
+   FROM users u
+   JOIN roles r ON r.id = u.role_id
+   LEFT JOIN sales s ON s.created_by = u.id AND date(s.sale_date) BETWEEN date(?) AND date(?)
    LEFT JOIN offices o ON o.id = u.office_id
-   WHERE date(s.sale_date) BETWEEN date(?) AND date(?) GROUP BY u.id ORDER BY total DESC
+   WHERE r.name IN ('cashier','clerk','manager','admin')
+   GROUP BY u.id ORDER BY total DESC, u.id
   `).all(from, to);
   const items = db.prepare(`
    SELECT s.created_by AS id, COALESCE(SUM(si.quantity),0) qty,
@@ -426,7 +438,7 @@ router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) 
  });
 });
 
-router.get('/supplier-balances', (req, res) => {
+router.get('/supplier-balances', requireRole('manager', 'admin'), (req, res) => {
  res.json(db.prepare(`
   SELECT s.id, s.name, s.phone, s.balance,
    (SELECT COALESCE(SUM(pu.total - pu.paid_amount),0) FROM purchases pu WHERE pu.supplier_id=s.id AND pu.payment_status != 'paid') outstanding
@@ -434,7 +446,7 @@ router.get('/supplier-balances', (req, res) => {
  `).all());
 });
 
-router.get('/customer-credit', (req, res) => {
+router.get('/customer-credit', requireRole('manager', 'admin'), (req, res) => {
  res.json(db.prepare(`
   SELECT c.id, c.name, c.phone, c.balance, c.credit_limit,
    (SELECT COALESCE(SUM(s.total - s.paid_amount),0) FROM sales s WHERE s.customer_id=c.id AND s.payment_status != 'paid') outstanding
