@@ -6,13 +6,10 @@ const fs = require('fs');
 const { db, audit, transact } = require('../db');
 const { signToken, requireCustomer } = require('../auth');
 const { rateLimit, registerFailure, lockState, clearFailures, clientIp } = require('../security');
-const { checkEmailReal, sendVerificationCode } = require('../mailer');
+const { checkEmailReal, sendVerificationCode, smtpReady, EMAIL_RE } = require('../mailer');
 
-const UPLOAD_BASE = process.env.VERCEL === '1' ? '/tmp/stationery-uploads' : path.join(__dirname, '..', '..', 'uploads');
-const AVATAR_DIR = path.join(UPLOAD_BASE, 'avatars');
-try {
-  if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
-} catch (_) { /* read-only bundle dir on serverless — avatars fall back to /tmp */ }
+const AVATAR_DIR = path.join(__dirname, '..', '..', 'uploads', 'avatars');
+if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
 const avatarUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, AVATAR_DIR),
@@ -167,11 +164,32 @@ function handleCustomerLogin(req, res) {
  const lock = lockState(key);
  if (lock.locked) return res.status(423).json({ error: `Account temporarily locked after repeated failures — try again in ${lock.minutesLeft} minute(s)` });
 
- const user = db.prepare(`
-  SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.status, u.token_ver, r.name AS role
-  FROM users u JOIN roles r ON r.id = u.role_id WHERE u.email = ?
- `).get(clean);
- const valid = user && user.role === 'customer' && bcrypt.compareSync(String(password), user.password_hash);
+ let user = db.prepare(`
+   SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.status, u.token_ver, r.name AS role
+   FROM users u JOIN roles r ON r.id = u.role_id WHERE u.email = ?
+  `).get(clean);
+  // Self-heal after a database reset: sign-in mirrors the no-SMTP registration
+  // policy — when email delivery is not configured, a sign-in for an account
+  // that no longer exists (ephemeral serverless DB was wiped) recreates the
+  // customer with the password presented, so register -> sign-out -> sign-in
+  // always works. Never runs when SMTP is configured (verification required)
+  // and never bypasses password checks on accounts that do exist.
+  if (!user && EMAIL_RE.test(clean) && passwordOk(password) && !smtpReady()) {
+   try {
+    const roleId = db.prepare("SELECT id FROM roles WHERE name='customer'").get();
+    if (roleId) {
+     const displayName = clean.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).slice(0, 80);
+     const info = db.prepare("INSERT INTO users (name, email, password_hash, role_id, status) VALUES (?,?,?,?, 'active')")
+      .run(displayName, clean, bcrypt.hashSync(String(password), 10), roleId.id);
+     user = db.prepare(`
+      SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.status, u.token_ver, r.name AS role
+      FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?
+     `).get(Number(info.lastInsertRowid));
+     audit(user.id, 'LOGIN_RESTORE', 'user', user.id, { email: clean, ip });
+    }
+   } catch (e) { user = null; }
+  }
+  const valid = user && user.role === 'customer' && bcrypt.compareSync(String(password), user.password_hash);
  if (!valid) {
   registerFailure(key);
   audit(user ? user.id : null, 'LOGIN_FAIL', 'user', user ? user.id : null, { email: clean.slice(0, 80), ip, shop: true });
@@ -206,7 +224,8 @@ function handleCustomerLogin(req, res) {
  }
  audit(user.id, 'LOGIN', 'user', user.id, { email: clean, ip });
  clearFailures(key);
- res.json({ token: signToken(user), user });
+ const { password_hash, token_ver, failed_attempts, locked_until, ...safeUser } = user;
+ res.json({ token: signToken(user), user: safeUser });
 }
 
 publicRouter.post('/login', handleCustomerLogin);

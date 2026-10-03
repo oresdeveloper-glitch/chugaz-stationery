@@ -103,4 +103,13 @@ async function sendTestEmail(to) {
  return sendMail(to, `${shopName()} — SMTP test`, 'SMTP is configured correctly. Test email from your point-of-sale system.', '<p>SMTP is configured correctly. Test email from your point-of-sale system.</p>');
 }
 
-module.exports = { checkEmailReal, sendVerificationCode, sendTestEmail };
+// True when SMTP delivery is configured (Settings → smtp_*). Registration
+// and sign-in share this policy: when it is false, email verification is
+// skipped because no code can be delivered anyway.
+function smtpReady() {
+ const s = {};
+ for (const r of db.prepare("SELECT key, value FROM settings WHERE key LIKE 'smtp_%'").all()) s[r.key] = r.value;
+ return !!(s.smtp_host && s.smtp_user && s.smtp_pass);
+}
+
+module.exports = { checkEmailReal, sendVerificationCode, sendTestEmail, smtpReady, EMAIL_RE };

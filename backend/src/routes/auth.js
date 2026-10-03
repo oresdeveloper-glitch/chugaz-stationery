@@ -41,6 +41,13 @@ router.post('/login', (req, res) => {
  }
 
  const user = findUserByEmail(email);
+ if (!user) {
+  // Account not found: hand off to the customer sign-in handler, which can
+  // restore the account after an ephemeral database reset (and otherwise
+  // returns the same generic 401). Lazy require avoids a cycle.
+  const { handleCustomerLogin } = require('./customer');
+  return handleCustomerLogin(req, res);
+ }
  const valid = user && bcrypt.compareSync(String(password), user.password_hash);
  if (!valid) {
   registerFailure(key);
