@@ -4,6 +4,7 @@ import { clearAuth, api, fmt, setAuth, getToken, getUser, lockPrintRedirect, unl
 import { canRole } from '../lib/roles';
 import Modal from './Modal';
 import { useToast } from './Toast';
+import SaleBell from './SaleBell';
 import I from './icons';
 
 export default function Layout({ user, setUser, children }) {
@@ -185,6 +186,7 @@ export default function Layout({ user, setUser, children }) {
               </span>
             </div>
             <div className="staff-top-right">
+            {canRole(user, 'manager') && <SaleBell />}
             <div className="staff-session">
               <span className="staff-session-role">{roleLabel}</span>
               {user?.office && <span className="staff-session-office">{user.office}</span>}

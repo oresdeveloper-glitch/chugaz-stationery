@@ -100,6 +100,7 @@ app.use('/api/offices', staff, safeRoute('./backend/src/routes/offices'));
 app.use('/api/reports', staff, safeRoute('./backend/src/routes/reports'));
 app.use('/api/orders', staff, safeRoute('./backend/src/routes/orderAdmin'));
 app.use('/api/messages', staff, safeRoute('./backend/src/routes/messages'));
+app.use('/api/notifications', staff, safeRoute('./backend/src/routes/notifications'));
 app.use('/api/system', staff, safeRoute('./backend/src/routes/system'));
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'API endpoint not found' }));

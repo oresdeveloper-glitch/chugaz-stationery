@@ -1821,3 +1821,58 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, .btn:focus-vi
   --hl: #e6c26a; --price: #e6c26a; --badge-green: #4ade80; --badge-red: #f87171; --badge-amber: #e6c26a; --ok: #4ade80;
   --skel-a: #141822; --skel-b: #1b2130; --donut-track: #1b2130;
 }
+
+/* Sales notification bell (manager/admin real-time feed) */
+.staff-bell-wrap { position: relative; }
+.staff-bell-drop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 320px;
+  max-width: 88vw;
+  background: var(--panel-2, #fff);
+  border: 1px solid var(--border-strong, #e2e8f0);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  z-index: 60;
+  overflow: hidden;
+}
+.staff-bell-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  font-weight: 800;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+.staff-bell-clear {
+  background: none;
+  border: none;
+  color: var(--primary-2, #2563eb);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.staff-bell-list { max-height: 320px; overflow-y: auto; }
+.staff-bell-empty { padding: 18px 14px; color: var(--muted, #64748b); font-size: 13px; }
+.staff-bell-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  font-size: 13px;
+}
+.staff-bell-item:last-child { border-bottom: none; }
+.staff-bell-item.unread { background: var(--primary-soft, #eff6ff); }
+.staff-bell-item-title { font-weight: 800; }
+.staff-bell-item-body { color: var(--muted, #64748b); }
+.staff-bell-item-time {
+  position: absolute;
+  top: 9px;
+  right: 12px;
+  font-size: 11px;
+  color: var(--muted, #64748b);
+}

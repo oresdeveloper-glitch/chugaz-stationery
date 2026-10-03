@@ -59,6 +59,7 @@ app.use('/api/offices', staff, require('./src/routes/offices'));
 app.use('/api/reports', staff, require('./src/routes/reports'));
 app.use('/api/orders', staff, require('./src/routes/orderAdmin'));
 app.use('/api/messages', staff, require('./src/routes/messages'));
+app.use('/api/notifications', staff, require('./src/routes/notifications'));
 app.use('/api/system', staff, require('./src/routes/system'));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, db: 'connected' }));

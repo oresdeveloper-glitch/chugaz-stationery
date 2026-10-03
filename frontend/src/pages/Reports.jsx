@@ -56,7 +56,9 @@ export default function Reports() {
     ...(isAdmin ? [['valuation', 'Inventory value']] : []),
     ['suppliers', 'Supplier balances'], ['customers', 'Customer credit'],
     ['cashiers', 'Cashier performance'],
-    ...(isAdmin ? [['cashierDaily', 'Cashier daily (detailed)']] : []),
+    // Manager and admin both get the per-cashier filterable detail report
+    // (the page itself is manager+ only, so every viewer may use it).
+    ['cashierDaily', 'Cashier daily (detailed)'],
     ['tax', 'Tax report'], ['audit', 'Audit log'],
   ];
   const isRange = ['pnl', 'sales', 'best', 'tax'].includes(tab);

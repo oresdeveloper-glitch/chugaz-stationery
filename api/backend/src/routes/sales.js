@@ -1,6 +1,7 @@
 const express = require('express');
 const { db, audit, transact } = require('../db');
 const { requireRole } = require('../auth');
+const { notifyManagers } = require('../notify');
 const u = require('../units');
 
 const router = express.Router();
@@ -194,6 +195,11 @@ router.post('/', requireRole('cashier', 'clerk', 'manager', 'admin'), (req, res)
   }
 
   audit(req.user.id, 'CREATE', 'sale', saleId, { total, customer_id, invoice_number: invoiceNumber, method });
+  notifyManagers({
+   kind: 'sale',
+   title: `Sale ${invoiceNumber}`,
+   body: `${req.user.name} · ${total} · ${prepared.length} item(s) · ${String(method || 'cash').replace('_', ' ')}${cust && cust.name ? ` · ${cust.name}` : ''}`,
+  });
   return { id: saleId, invoice_number: invoiceNumber };
   });
  } catch (e) {
