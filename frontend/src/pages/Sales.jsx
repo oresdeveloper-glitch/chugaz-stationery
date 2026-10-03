@@ -5,7 +5,11 @@ import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
 export default function Sales() {
+  const me = getUser();
+  const isSeller = me && (me.role === 'cashier' || me.role === 'clerk');
   const [sales, setSales] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [seller, setSeller] = useState('');
   const [detail, setDetail] = useState(null);
   const [returning, setReturning] = useState(null);
   const [returnItems, setReturnItems] = useState({});
@@ -18,18 +22,21 @@ export default function Sales() {
   const load = async () => {
     try {
       // Cashiers/clerks only ever see their own sales, scoped explicitly to the logged-in user.
-      const me = getUser();
-      const isSeller = me && (me.role === 'cashier' || me.role === 'clerk');
-      const scope = isSeller ? `created_by=${me.id}` : '';
-      const q = [statusFilter ? `status=${encodeURIComponent(statusFilter)}` : '', scope].filter(Boolean).join('&');
+      const q = [
+        statusFilter ? `status=${encodeURIComponent(statusFilter)}` : '',
+        !isSeller && seller ? `created_by=${encodeURIComponent(seller)}` : '',
+      ].filter(Boolean).join('&');
       setSales(await api(`/sales${q ? '?' + q : ''}`));
     } catch (e) { toast(e.message, 'error'); }
   };
-  useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => { load(); }, [statusFilter, seller]);
   useEffect(() => {
     const id = setInterval(load, 60000);
     return () => clearInterval(id);
-  }, [statusFilter]);
+  }, [statusFilter, seller]);
+  useEffect(() => {
+    if (!isSeller) api('/users').then(setStaff).catch(() => {});
+  }, [isSeller]);
 
   const openDetail = async (id) => {
     try { setDetail(await api(`/sales/${id}`)); } catch (e) { toast(e.message, 'error'); }
@@ -69,18 +76,27 @@ export default function Sales() {
             <button key={f} className={`btn ${statusFilter === f ? 'active' : ''}`} onClick={() => setParams(statusFilter === f ? {} : { status: f })}>{f}</button>
           ))}
           {statusFilter && <button className="btn" onClick={() => setParams({})}>x clear</button>}
+          {!isSeller && (
+            <select value={seller} onChange={(e) => setSeller(e.target.value)} style={{ maxWidth: 240, marginLeft: 8 }} aria-label="Filter by cashier">
+              <option value="">All cashiers</option>
+              {staff.filter((u) => u.role !== 'customer').map((u) => (
+                <option key={u.id} value={u.id}>{u.name}{u.office ? ` - ${u.office}` : ''}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
       <div className="card">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th className="num">Items</th><th className="num">Total</th><th className="num">Paid</th><th>Method</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Cashier</th><th className="num">Items</th><th className="num">Total</th><th className="num">Paid</th><th>Method</th><th>Status</th><th></th></tr></thead>
             <tbody>
               {sales.map((s) => (
                 <tr key={s.id}>
                   <td style={{ fontWeight: 600 }}>{s.invoice_number}</td>
                   <td className="muted">{fmtDateTime(s.sale_date)}</td>
                   <td>{s.customer_name || 'Walk-in'}</td>
+                  <td className="muted">{s.created_by_name || '-'}</td>
                   <td className="num">{s.items ? s.items : <span className="muted">…</span>}</td>
                   <td className="num">{fmt(s.total)}</td>
                   <td className="num">{fmt(s.paid_amount)}</td>
@@ -103,6 +119,7 @@ export default function Sales() {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
               <div>
                 <div><b>Customer:</b> {detail.customer_name || 'Walk-in'}</div>
+                <div><b>Cashier:</b> {detail.created_by_name || '-'}</div>
                 <div><b>Date:</b> {fmtDateTime(detail.sale_date)}</div>
                 <div><b>Status:</b> {paymentBadge(detail)}</div>
               </div>
