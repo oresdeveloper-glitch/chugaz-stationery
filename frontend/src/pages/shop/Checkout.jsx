@@ -143,18 +143,18 @@ function CheckoutInner() {
           payment_method: form.method,
           transaction_reference: form.reference || null,
           notes: form.notes || null,
+          // Session-independent: the contact details and the items travel with
+          // EVERY order (signed-in or not). If the token dies mid-request the
+          // server can still place the order — it can never come back asking
+          // for a name/phone that was already entered.
+          guest_name: gName,
+          guest_phone: gPhone,
+          guest_address: gAddr,
+          guest_city: gCity,
+          contact_name: gName,
+          contact_phone: gPhone,
+          items: cart.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
         };
-        if (!user) {
-          body.guest_name = gName;
-          body.guest_phone = gPhone;
-          body.guest_address = gAddr;
-          body.guest_city = gCity;
-          body.items = cart.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
-        }
-        if (user) {
-          body.contact_name = gName;
-          body.contact_phone = gPhone;
-        }
         const order = await shopApi('/orders', { method: 'POST', body });
         if (!user) {
           // Inline-items order leaves any guest cart behind: clear it.

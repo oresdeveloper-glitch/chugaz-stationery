@@ -81,12 +81,17 @@ router.post('/', (req, res) => {
   }
   let gName = null, gPhone = null, gAddr = null, gCity = null;
   if (isGuest) {
-    gName = String(guest_name || '').trim().slice(0, 80);
-    gPhone = String(guest_phone || '').trim().slice(0, 30);
+    // Accept the details under ANY key the client may have used (guest_* for
+    // the guest card, contact_* for the signed-in contact card) so a request
+    // that carries a name/phone is never rejected asking for it again.
+    const contactName = typeof req.body.contact_name === 'string' ? req.body.contact_name : '';
+    const contactPhone = typeof req.body.contact_phone === 'string' ? req.body.contact_phone : '';
+    gName = String(guest_name || contactName || '').trim().slice(0, 80);
+    gPhone = String(guest_phone || contactPhone || '').trim().slice(0, 30);
     if (!gName || !gPhone) return res.status(400).json({ error: 'Please enter your name and phone number' });
     if (ft === 'delivery') {
-      gAddr = String(guest_address || '').trim().slice(0, 160);
-      gCity = String(guest_city || '').trim().slice(0, 80);
+      gAddr = String(guest_address || req.body.contact_address || '').trim().slice(0, 160);
+      gCity = String(guest_city || req.body.contact_city || '').trim().slice(0, 80);
       if (!gAddr || !gCity) return res.status(400).json({ error: 'Please enter your delivery address and city' });
     }
   } else if (ft === 'delivery' && !delivery_address_id) {

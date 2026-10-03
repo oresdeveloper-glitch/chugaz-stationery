@@ -46,6 +46,15 @@ export function ShopProvider({ children }) {
     refreshCart();
   }, [user, refreshCart]);
 
+  // lib/api clears the token on a dead session (e.g. a 401 on any request).
+  // Mirror that here so `user` flips to null immediately and the checkout
+  // switches to the guest card (with the details you already typed kept).
+  useEffect(() => {
+    const onCleared = () => { setUser(null); };
+    window.addEventListener('shop-auth-cleared', onCleared);
+    return () => window.removeEventListener('shop-auth-cleared', onCleared);
+  }, []);
+
   const login = (token, u) => {
     setShopAuth(token, u);
     setUser(u);

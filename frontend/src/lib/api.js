@@ -37,8 +37,11 @@ export function setShopAuth(token, user) {
   localStorage.setItem(SHOP_USER_KEY, JSON.stringify(user));
 }
 export function clearShopAuth() {
-  localStorage.removeItem(SHOP_TOKEN_KEY);
-  localStorage.removeItem(SHOP_USER_KEY);
+    localStorage.removeItem(SHOP_TOKEN_KEY);
+    localStorage.removeItem(SHOP_USER_KEY);
+    // Announce the dead session so the app drops its signed-in state at once —
+    // the UI must never keep showing a contact card while the token is gone.
+    try { window.dispatchEvent(new Event('shop-auth-cleared')); } catch {}
 }
 
 export async function refreshToken(token) {
