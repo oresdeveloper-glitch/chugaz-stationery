@@ -8,8 +8,10 @@ const { signToken, requireCustomer } = require('../auth');
 const { rateLimit, registerFailure, lockState, clearFailures, clientIp } = require('../security');
 const { checkEmailReal, sendVerificationCode, smtpReady, EMAIL_RE } = require('../mailer');
 
-const AVATAR_DIR = path.join(__dirname, '..', '..', 'uploads', 'avatars');
-if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
+const AVATAR_DIR = process.env.VERCEL === '1' ? '/tmp/stationery-avatars' : path.join(__dirname, '..', '..', 'uploads', 'avatars');
+try {
+  if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
+} catch (_) { /* read-only bundle dir on serverless — avatar uploads fall back to /tmp */ }
 const avatarUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, AVATAR_DIR),

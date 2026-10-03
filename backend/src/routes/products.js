@@ -8,8 +8,10 @@ const u = require('../units');
 
 const router = express.Router();
 
-const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const UPLOAD_DIR = process.env.VERCEL === '1' ? '/tmp/stationery-uploads' : path.join(__dirname, '..', '..', 'uploads');
+try {
+  if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+} catch (_) { /* read-only bundle dir on serverless — uploads fall back to /tmp */ }
 
 // Normalize admin-entered unit_prices: keep only numeric > 0 entries for known units.
 function cleanUnitPrices(raw) {
