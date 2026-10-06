@@ -60,19 +60,51 @@ export default function App() {
   // 'chugaz-live' event whenever it changes, so every open page refetches its
   // own data in place — no page reloads, no per-page intervals. Skipped while
   // the tab is hidden; caught up immediately when it becomes visible again.
+  // On serverless the hash can bounce between instances (A→B→A): the first
+  // change is announced immediately, but once a previously-seen version comes
+  // back we suppress announcements until the version holds for 2 ticks, then
+  // announce one resync — so a flap never turns into an event storm.
   useEffect(() => {
     let last = null;
+    let seen = [];
+    let suppressed = false;
+    let hold = 0;
     let stopped = false;
+    const announce = (v) => {
+      try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'], version: v } })); } catch (e) { /* ignore */ }
+    };
     const tick = async () => {
       if (stopped || document.hidden) return;
       try {
         const s = await api('/sync');
         const v = s && s.version;
         if (v == null) return;
-        if (last !== null && v !== last) {
-          try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'], version: v } })); } catch (e) { /* ignore */ }
+        if (last === null) {
+          last = v;
+          seen = [v];
+          return;
         }
+        if (v === last) {
+          if (suppressed) {
+            hold += 1;
+            if (hold >= 2) {
+              suppressed = false;
+              hold = 0;
+              announce(v);
+            }
+          }
+          return;
+        }
+        const bounced = seen.includes(v);
         last = v;
+        seen.push(v);
+        if (seen.length > 4) seen.shift();
+        if (!suppressed && !bounced) {
+          announce(v);
+        } else {
+          suppressed = true;
+          hold = 1;
+        }
       } catch (e) { /* ignore */ }
     };
     tick();

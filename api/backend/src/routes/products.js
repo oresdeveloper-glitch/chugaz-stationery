@@ -351,6 +351,7 @@ router.post('/cats', requireRole('admin', 'manager'), (req, res) => {
  }
  try {
   const info = db.prepare('INSERT INTO categories (name, description, parent_id) VALUES (?,?,?)').run(name, description || null, parent ? parent.id : null);
+  audit(req.user.id, 'CREATE', 'category', Number(info.lastInsertRowid), { name });
   res.status(201).json({ id: Number(info.lastInsertRowid) });
  } catch (e) {
   if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Category already exists' });
@@ -360,6 +361,7 @@ router.post('/cats', requireRole('admin', 'manager'), (req, res) => {
 
 router.put('/cats/:id', requireRole('admin'), (req, res) => {
  db.prepare('UPDATE categories SET name=?, description=? WHERE id=?').run(req.body.name, req.body.description, req.params.id);
+ audit(req.user.id, 'UPDATE', 'category', Number(req.params.id), { name: req.body.name });
  res.json({ ok: true });
 });
 
@@ -369,6 +371,7 @@ router.delete('/cats/:id', requireRole('admin', 'manager'), (req, res) => {
  const subs = db.prepare('SELECT COUNT(*) c FROM categories WHERE parent_id=?').get(req.params.id).c;
  if (subs > 0) return res.status(409).json({ error: 'Delete its subcategories first' });
  db.prepare('DELETE FROM categories WHERE id=?').run(req.params.id);
+ audit(req.user.id, 'DELETE', 'category', Number(req.params.id));
  res.json({ ok: true });
 });
 
@@ -382,6 +385,7 @@ router.post('/brands', requireRole('admin'), (req, res) => {
  if (!name) return res.status(400).json({ error: 'Name required' });
  try {
   const info = db.prepare('INSERT INTO brands (name) VALUES (?)').run(name);
+  audit(req.user.id, 'CREATE', 'brand', Number(info.lastInsertRowid), { name });
   res.status(201).json({ id: Number(info.lastInsertRowid) });
  } catch (e) {
   if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Brand already exists' });
@@ -391,6 +395,7 @@ router.post('/brands', requireRole('admin'), (req, res) => {
 
 router.put('/brands/:id', requireRole('admin'), (req, res) => {
  db.prepare('UPDATE brands SET name=? WHERE id=?').run(req.body.name, req.params.id);
+ audit(req.user.id, 'UPDATE', 'brand', Number(req.params.id), { name: req.body.name });
  res.json({ ok: true });
 });
 
@@ -398,6 +403,7 @@ router.delete('/brands/:id', requireRole('admin'), (req, res) => {
  const used = db.prepare('SELECT COUNT(*) c FROM products WHERE brand_id=?').get(req.params.id).c;
  if (used > 0) return res.status(409).json({ error: 'Brand is used by products' });
  db.prepare('DELETE FROM brands WHERE id=?').run(req.params.id);
+ audit(req.user.id, 'DELETE', 'brand', Number(req.params.id));
  res.json({ ok: true });
 });
 

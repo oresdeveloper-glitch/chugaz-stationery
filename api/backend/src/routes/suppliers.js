@@ -25,6 +25,7 @@ router.put('/:id', requireRole('manager', 'admin'), (req, res) => {
   UPDATE suppliers SET name=?, phone=?, email=?, address=?, tax_number=? WHERE id=?
  `).run(s.name, s.phone, s.email, s.address, s.tax_number, req.params.id);
  if (info.changes === 0) return res.status(404).json({ error: 'Supplier not found' });
+ audit(req.user.id, 'UPDATE', 'supplier', Number(req.params.id), { name: s.name });
  res.json({ ok: true });
 });
 
@@ -32,6 +33,7 @@ router.delete('/:id', requireRole('admin'), (req, res) => {
  const used = db.prepare('SELECT COUNT(*) c FROM purchases WHERE supplier_id=?').get(req.params.id).c;
  if (used > 0) return res.status(409).json({ error: 'Supplier has purchase history' });
  db.prepare('DELETE FROM suppliers WHERE id=?').run(req.params.id);
+ audit(req.user.id, 'DELETE', 'supplier', Number(req.params.id));
  res.json({ ok: true });
 });
 

@@ -25,6 +25,7 @@ router.put('/:id', requireRole('admin'), (req, res) => {
   UPDATE customers SET name=?, phone=?, email=?, address=?, credit_limit=?, discount_rate=? WHERE id=?
  `).run(c.name, c.phone, c.email, c.address, c.credit_limit || 0, c.discount_rate || 0, req.params.id);
  if (info.changes === 0) return res.status(404).json({ error: 'Customer not found' });
+ audit(req.user.id, 'UPDATE', 'customer', Number(req.params.id), { name: c.name });
  res.json({ ok: true });
 });
 
@@ -32,6 +33,7 @@ router.delete('/:id', requireRole('admin'), (req, res) => {
  const used = db.prepare('SELECT COUNT(*) c FROM sales WHERE customer_id=?').get(req.params.id).c;
  if (used > 0) return res.status(409).json({ error: 'Customer has sales history' });
  db.prepare('DELETE FROM customers WHERE id=?').run(req.params.id);
+ audit(req.user.id, 'DELETE', 'customer', Number(req.params.id));
  res.json({ ok: true });
 });
 
