@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmtDateTime } from '../lib/api';
+import { api, fmtDateTime, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 import { getUser } from '../lib/api';
@@ -20,6 +20,7 @@ export default function Users() {
     } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => onLive(load), []);
 
   const save = async (e) => {
     e.preventDefault();

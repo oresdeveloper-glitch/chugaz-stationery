@@ -78,6 +78,24 @@ app.get('/api/health', (req, res) => {
   }
 });
 
+const SYNC_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT SUM(total) FROM sales),0) || ':' || COALESCE((SELECT SUM(paid_amount) FROM sales),0) || ':' || (SELECT COUNT(*) FROM sale_returns) || '|' || (SELECT COUNT(*) FROM orders) || ':' || COALESCE((SELECT MAX(updated_at) FROM orders),'') || '|' || (SELECT COUNT(*) FROM order_status_history) || '|' || (SELECT COUNT(*) FROM stock_movements) || '|' || (SELECT COUNT(*) FROM products) || ':' || COALESCE((SELECT SUM(selling_price) FROM products),0) || ':' || COALESCE((SELECT SUM(current_stock) FROM products),0) || '|' || (SELECT COUNT(*) FROM purchases) || '|' || (SELECT COUNT(*) FROM expenses) || '|' || (SELECT COUNT(*) FROM customers) || '|' || (SELECT COUNT(*) FROM users) || '|' || (SELECT COUNT(*) FROM payments) || '|' || (SELECT COUNT(*) FROM notifications) || '|' || (SELECT COUNT(*) FROM contact_messages) AS v";
+
+app.get('/api/sync', (req, res) => {
+  let version = null;
+  try {
+    const m = require('./src/db');
+    if (m.dbReady) {
+      try {
+        const r = m.db.prepare(SYNC_SQL).get();
+        version = r && r.v != null ? String(r.v) : null;
+      } catch (_) {
+        try { version = 's' + m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; } catch (__) { version = null; }
+      }
+    }
+  } catch (_) { version = null; }
+  res.json({ ok: true, version });
+});
+
 // Serve built frontend in production (after `npm run build` in frontend/)
 const dist = path.join(__dirname, '..', 'frontend', 'dist');
 let httpsCert = null;

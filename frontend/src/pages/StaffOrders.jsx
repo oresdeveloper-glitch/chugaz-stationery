@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { api, fmt, fmtDateTime, getUser, lockPrintRedirect, unlockPrintRedirect } from '../lib/api';
+import { api, fmt, fmtDateTime, getUser, lockPrintRedirect, unlockPrintRedirect, onLive } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { useToast } from '../components/Toast';
 import I from '../components/icons';
@@ -33,10 +33,7 @@ export default function StaffOrders() {
     } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, [filter]);
-  useEffect(() => {
-    const id = setInterval(load, 60000);
-    return () => clearInterval(id);
-  }, [filter, q]);
+  useEffect(() => onLive(() => { if (selected) refreshSelected(); else load(); }), [filter, q, selected]);
 
   const refreshSelected = async () => {
     if (selected) setSelected(await api(`/orders/${selected.id}`));

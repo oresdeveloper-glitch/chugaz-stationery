@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { getUser, clearAuth, isSessionValid } from './lib/api';
+import { getUser, clearAuth, isSessionValid, api } from './lib/api';
 import { dbKeepInit } from './lib/dbkeep';
 import Login from './pages/Login.jsx';
 import Layout from './components/Layout.jsx';
@@ -54,6 +54,38 @@ export default function App() {
     const onFocus = () => dbKeepInit();
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  // Global live-data poller: fetch a cheap version hash and announce a single
+  // 'chugaz-live' event whenever it changes, so every open page refetches its
+  // own data in place — no page reloads, no per-page intervals. Skipped while
+  // the tab is hidden; caught up immediately when it becomes visible again.
+  useEffect(() => {
+    let last = null;
+    let stopped = false;
+    const tick = async () => {
+      if (stopped || document.hidden) return;
+      try {
+        const s = await api('/sync');
+        const v = s && s.version;
+        if (v == null) return;
+        if (last !== null && v !== last) {
+          try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'], version: v } })); } catch (e) { /* ignore */ }
+        }
+        last = v;
+      } catch (e) { /* ignore */ }
+    };
+    tick();
+    const id = setInterval(tick, 4000);
+    const onVis = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onVis);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onVis);
+    };
   }, []);
   return (
     <ToastProvider>

@@ -162,3 +162,19 @@ export const fmt = (n) => {
 };
 export const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-US') : '');
 export const fmtDateTime = (d) => (d ? new Date(d).toLocaleString('en-US') : '');
+
+// Subscribe to the app-wide live channel ('chugaz-live'). Calls are debounced
+// so a burst of events (sale + notification + version tick) triggers ONE
+// refetch instead of several. Returns the unsubscribe function for useEffect.
+export function onLive(cb, ms = 800) {
+  let t = null;
+  const handler = () => {
+    clearTimeout(t);
+    t = setTimeout(() => cb(), ms);
+  };
+  window.addEventListener('chugaz-live', handler);
+  return () => {
+    clearTimeout(t);
+    window.removeEventListener('chugaz-live', handler);
+  };
+}

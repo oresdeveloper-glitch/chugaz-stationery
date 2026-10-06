@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, fmt, fmtDateTime } from '../lib/api';
+import { api, fmt, fmtDateTime, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
@@ -26,6 +26,7 @@ export default function Purchases() {
     } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => onLive(load), [statusFilter]);
 
   const openDetail = async (id) => {
     try { setDetail(await api(`/purchases/${id}`)); } catch (e) { toast(e.message, 'error'); }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmt, fmtDateTime, getUser } from '../lib/api';
+import { api, fmt, fmtDateTime, getUser, onLive } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
@@ -16,6 +16,7 @@ export default function Customers() {
     try { setCustomers(await api('/customers')); } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => onLive(load), []);
 
   const save = async (e) => {
     e.preventDefault();

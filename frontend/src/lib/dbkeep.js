@@ -104,8 +104,8 @@ async function restoreFromBackup() {
     if (!res.ok) return 'failed';
     const h = await health();
     localStorage.setItem(MARKER_KEY, (h && h.db_marker) || entry.marker);
-    console.info('[dbkeep] merged backup — reloading');
-    window.location.reload();
+    console.info('[dbkeep] merged backup — refreshing open pages in place');
+    try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'] } })); } catch (e) { /* ignore */ }
     return 'ok';
   } catch (e) {
     console.warn('[dbkeep] restore failed:', e && e.message ? e.message : e);

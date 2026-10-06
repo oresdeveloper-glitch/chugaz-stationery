@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmt } from '../lib/api';
+import { api, fmt, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
@@ -13,6 +13,7 @@ export default function Suppliers() {
     try { setSuppliers(await api('/suppliers')); } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => onLive(load), []);
 
   const save = async (e) => {
     e.preventDefault();

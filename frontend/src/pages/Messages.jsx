@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmtDateTime } from '../lib/api';
+import { api, fmtDateTime, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 
 export default function Messages() {
@@ -14,6 +14,7 @@ export default function Messages() {
     } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => onLive(load), []);
 
   const toggleRead = async (m) => {
     try {

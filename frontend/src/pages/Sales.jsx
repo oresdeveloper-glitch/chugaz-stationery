@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, fmt, fmtDateTime, getUser } from '../lib/api';
+import { api, fmt, fmtDateTime, getUser, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
@@ -30,15 +30,7 @@ export default function Sales() {
     } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, [statusFilter, seller]);
-  useEffect(() => {
-    const onLive = (e) => {
-      const kinds = (e.detail && e.detail.kinds) || [];
-      if (kinds.includes('sale') || kinds.includes('stock')) load();
-    };
-    window.addEventListener('chugaz-live', onLive);
-    const id = setInterval(load, 300000);
-    return () => { window.removeEventListener('chugaz-live', onLive); clearInterval(id); };
-  }, [statusFilter, seller]);
+  useEffect(() => onLive(() => { load(); }), [statusFilter, seller]);
   useEffect(() => {
     if (!isSeller) api('/users').then(setStaff).catch(() => {});
   }, [isSeller]);

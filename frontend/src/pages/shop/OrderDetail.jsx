@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { shopApi, fmt, fmtDateTime } from '../../lib/api';
+import { shopApi, fmt, fmtDateTime, onLive } from '../../lib/api';
 import { useShop } from '../../shop/ShopContext';
 import RequireShopAuth from '../../shop/RequireShopAuth';
 import { useToast } from '../../components/Toast';
@@ -32,6 +32,7 @@ function OrderDetailInner() {
     } catch (e) { setError(e.message); toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, [id]);
+  useEffect(() => onLive(load), [id]);
 
   const act = async (fn, msg) => {
     try { await fn(); toast(msg); load(); }

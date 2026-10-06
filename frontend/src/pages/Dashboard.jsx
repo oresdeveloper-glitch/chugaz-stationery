@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, fmt, getUser } from '../lib/api';
+import { api, fmt, getUser, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { LineChart, Donut, SplitBar, HBarList, BarChart, Spark } from '../components/charts';
 import { canRole } from '../lib/roles';
@@ -93,7 +93,6 @@ export default function Dashboard() {
 
   const [data, setData] = useState(null);
   const [range, setRange] = useState(isCashier ? 'today' : 'month');
-  const [auto, setAuto] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [clock, setClock] = useState(new Date());
   const [updated, setUpdated] = useState(null);
@@ -115,15 +114,11 @@ export default function Dashboard() {
   };
 
   useEffect(() => { load(rangeRef.current); }, []);
+  useEffect(() => onLive(() => { load(rangeRef.current); }), []);
   useEffect(() => {
     const id = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
-  useEffect(() => {
-    if (!auto) return;
-    const id = setInterval(() => load(), 60000);
-    return () => clearInterval(id);
-  }, [auto]);
 
   if (!data) return <div className="card">Loading dashboard...</div>;
 

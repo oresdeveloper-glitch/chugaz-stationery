@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmt, fmtDate } from '../lib/api';
+import { api, fmt, fmtDate, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
@@ -13,6 +13,7 @@ export default function Expenses() {
     try { setExpenses(await api('/expenses')); } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => onLive(load), []);
 
   const total = expenses.reduce((s, e) => s + Number(e.amount), 0);
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, fmt, getUser } from '../lib/api';
+import { api, fmt, getUser, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { takeScanned } from '../lib/scanStore';
 import { orderCats, catLabel, catFilterIds } from '../lib/cats';
@@ -127,6 +127,8 @@ export default function Pos() {
     const t = setTimeout(() => loadProducts(q), 300);
     return () => clearTimeout(t);
   }, [q]);
+
+  useEffect(() => onLive(() => { loadShift(); loadProducts(q); }), [q]);
 
   const addToCart = (p) => {
     setCart((c) => {

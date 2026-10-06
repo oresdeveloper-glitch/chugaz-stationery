@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, fmt, fmtDateTime } from '../lib/api';
+import { api, fmt, fmtDateTime, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
@@ -26,6 +26,7 @@ export default function Inventory() {
     } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => onLive(load), []);
 
   const typeBadge = (t) =>
     <span className={`badge ${t === 'in' ? 'amber' : 'red'}`}>{t === 'in' ? 'Stock in' : 'Stock out'}</span>;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, fmt, fmtDate, getUser } from '../lib/api';
+import { api, fmt, fmtDate, getUser, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { canRole } from '../lib/roles';
 
@@ -51,6 +51,7 @@ export default function Reports() {
     }
     load();
   }, [tab, range.from, range.to, cashierDate, cashierId]);
+  useEffect(() => onLive(load), [tab, range.from, range.to, cashierDate, cashierId]);
   useEffect(() => {
     let alive = true;
     const loadList = async () => {

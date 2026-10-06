@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { api, fmt, getUser } from '../lib/api';
+import { api, fmt, getUser, onLive } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { orderCats, catLabel, catFilterIds } from '../lib/cats';
 import { useToast } from '../components/Toast';
@@ -54,6 +54,7 @@ export default function Products() {
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
   }, [q, cat]);
+  useEffect(() => onLive(load), [q, cat]);
 
   const save = async (e) => {
     e.preventDefault();

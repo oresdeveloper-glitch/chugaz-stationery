@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { shopApi, fmt, fmtDateTime } from '../../lib/api';
+import { shopApi, fmt, fmtDateTime, onLive } from '../../lib/api';
 import RequireShopAuth from '../../shop/RequireShopAuth';
 import { useToast } from '../../components/Toast';
 import { STATUS_COLOR, STATUS_LABEL } from './OrderDetail';
@@ -19,6 +19,7 @@ function MyOrdersInner() {
     } catch (e) { toast(e.message, 'error'); }
   };
   useEffect(() => { load(); }, [filter]);
+  useEffect(() => onLive(load), [filter]);
 
   return (
     <div>
