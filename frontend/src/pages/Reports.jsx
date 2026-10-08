@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, fmt, fmtDate, getUser, onLive } from '../lib/api';
+import { api, fmt, fmtDate, fmtDateTime, getUser, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { canRole } from '../lib/roles';
 
@@ -30,6 +30,7 @@ export default function Reports() {
       else if (tab === 'suppliers') res = await api('/reports/supplier-balances');
       else if (tab === 'customers') res = await api('/reports/customer-credit');
       else if (tab === 'cashiers') res = await api(`/reports/cashier-performance?from=${range.from}&to=${range.to}`);
+      else if (tab === 'dailyTasks') res = await api(`/reports/daily-tasks?from=${range.from}&to=${range.to}`);
       else if (tab === 'cashierDaily') {
         const q = new URLSearchParams({ from: cashierDate, to: cashierDate });
         if (cashierId) q.set('cashier_id', cashierId);
@@ -73,6 +74,7 @@ export default function Reports() {
   }, []);
 
   const tabs = [
+    ['dailyTasks', 'Daily tasks'],
     ['pnl', 'Profit & Loss'], ['sales', 'Sales summary'], ['best', 'Best sellers'],
     ...(isAdmin ? [['valuation', 'Inventory value']] : []),
     ['suppliers', 'Supplier balances'], ['customers', 'Customer credit'],
@@ -82,7 +84,7 @@ export default function Reports() {
     ['cashierDaily', 'Cashier daily (detailed)'],
     ['tax', 'Tax report'], ['audit', 'Audit log'],
   ];
-  const isRange = ['pnl', 'sales', 'best', 'tax', 'cashiers'].includes(tab);
+  const isRange = ['pnl', 'sales', 'best', 'tax', 'cashiers', 'dailyTasks'].includes(tab);
   const tabLabel = (tabs.find(([t]) => t === tab) || ['', 'Report'])[1];
   const stamp = new Date().toLocaleString();
   const me = getUser();
@@ -128,6 +130,90 @@ export default function Reports() {
         <div className="card" style={{ padding: 14 }}>
           <span className="muted small">Loading report…</span>
         </div>
+      )}
+
+      {tab === 'dailyTasks' && data && (
+        <>
+          <div className="stats-grid cols-3 print-hide">
+            <div className="card stat-card"><div className="label">Tasks done</div><div className="value">{fmt(data.totals.tasks)}</div><div className="sub">{data.range.from} → {data.range.to}</div></div>
+            <div className="card stat-card"><div className="label">Sales</div><div className="value">{fmt(data.totals.sales_total)}</div><div className="sub">{data.totals.sales_count} receipt{data.totals.sales_count === 1 ? '' : 's'}</div></div>
+            <div className="card stat-card"><div className="label">Online orders</div><div className="value">{fmt(data.totals.orders_total)}</div><div className="sub">{data.totals.orders_count} order{data.totals.orders_count === 1 ? '' : 's'}</div></div>
+            <div className="card stat-card"><div className="label">Money in</div><div className="value" style={{ color: 'var(--primary)' }}>{fmt(data.totals.payments_total)}</div><div className="sub">{data.totals.payments_count} payment{data.totals.payments_count === 1 ? '' : 's'}</div></div>
+            <div className="card stat-card"><div className="label">Expenses</div><div className="value" style={{ color: 'var(--danger)' }}>{fmt(data.totals.expenses_total)}</div><div className="sub">{data.totals.expenses_count} entr{data.totals.expenses_count === 1 ? 'y' : 'ies'}</div></div>
+            <div className="card stat-card"><div className="label">Active days</div><div className="value">{data.days.filter((d) => d.tasks > 0).length}</div><div className="sub">of {data.days.length} day{data.days.length === 1 ? '' : 's'} in range</div></div>
+          </div>
+
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="card-head"><h2>Tasks made per day</h2><span className="muted small">{data.range.from} → {data.range.to}</span></div>
+            <div className="table-wrap"><table>
+              <thead><tr><th>Date</th><th className="num">Tasks</th><th className="num">Sales</th><th className="num">Sales amount</th><th className="num">Orders</th><th className="num">Order amount</th><th className="num">Payments</th><th className="num">Expenses</th></tr></thead>
+              <tbody>
+                {data.days.length === 0 && <tr><td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 20 }}>No days in range.</td></tr>}
+                {data.days.map((d) => (
+                  <tr key={d.day}>
+                    <td style={{ fontWeight: 600 }}>{d.day}</td>
+                    <td className="num">{d.tasks}</td>
+                    <td className="num">{d.sales_count}</td>
+                    <td className="num">{fmt(d.sales_total)}</td>
+                    <td className="num">{d.orders_count}</td>
+                    <td className="num">{fmt(d.orders_total)}</td>
+                    <td className="num">{fmt(d.payments_total)}</td>
+                    <td className="num">{fmt(d.expenses_total)}</td>
+                  </tr>
+                ))}
+                <tr style={{ fontWeight: 700, borderTop: '2px solid var(--border-strong)' }}>
+                  <td>Total</td>
+                  <td className="num">{fmt(data.totals.tasks)}</td>
+                  <td className="num">{fmt(data.totals.sales_count)}</td>
+                  <td className="num">{fmt(data.totals.sales_total)}</td>
+                  <td className="num">{fmt(data.totals.orders_count)}</td>
+                  <td className="num">{fmt(data.totals.orders_total)}</td>
+                  <td className="num">{fmt(data.totals.payments_total)}</td>
+                  <td className="num">{fmt(data.totals.expenses_total)}</td>
+                </tr>
+              </tbody>
+            </table></div>
+          </div>
+
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="card-head"><h2>Who did what, per day</h2><span className="muted small">{data.breakdown.length} task group{data.breakdown.length === 1 ? '' : 's'}</span></div>
+            <div className="table-wrap"><table>
+              <thead><tr><th>Date</th><th>User</th><th>Action</th><th>Entity</th><th className="num">Count</th></tr></thead>
+              <tbody>
+                {data.breakdown.length === 0 && <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 20 }}>No tasks recorded in this period.</td></tr>}
+                {data.breakdown.map((b, i) => (
+                  <tr key={i}>
+                    <td className="muted">{b.day}</td>
+                    <td>{b.user_name || 'System'}</td>
+                    <td><span className="badge blue">{b.action}</span></td>
+                    <td>{b.entity || ':'}</td>
+                    <td className="num">{b.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h2>Task log</h2><span className="muted small">latest {data.task_detail.length} task{data.task_detail.length === 1 ? '' : 's'}</span></div>
+            <div className="table-wrap"><table>
+              <thead><tr><th>Date</th><th>User</th><th>Action</th><th>Entity</th><th className="num">ID</th><th>Details</th></tr></thead>
+              <tbody>
+                {data.task_detail.length === 0 && <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 20 }}>No tasks recorded in this period.</td></tr>}
+                {data.task_detail.map((t) => (
+                  <tr key={t.id}>
+                    <td className="muted">{fmtDateTime(t.created_at)}</td>
+                    <td>{t.user_name || 'System'}{t.user_role && <span className="muted small"> · {t.user_role}</span>}</td>
+                    <td><span className="badge blue">{t.action}</span></td>
+                    <td>{t.entity || ':'}</td>
+                    <td className="num">{t.entity_id ?? ':'}</td>
+                    <td className="muted small">{t.details ? (() => { try { return JSON.stringify(JSON.parse(t.details)); } catch { return t.details; } })() : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+          </div>
+        </>
       )}
 
       {tab === 'pnl' && data && (

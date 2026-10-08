@@ -195,6 +195,9 @@ export default function Dashboard() {
             <KpiCard label="Cash received" value={k.received} currency={cur} color="amber"
               spark={trendData} sparkKey="inflow" trend={data.kpi.trend.received}
               sub={`${k.recv_count} receipt${k.recv_count === 1 ? '' : 's'}`} />
+            <KpiCard label="Orders today" value={data.kpi.orders_today.total} currency={cur} color="amber"
+              trend={data.kpi.trend.orders}
+              sub={`${data.kpi.orders_today.count} order${data.kpi.orders_today.count === 1 ? '' : 's'} today`} />
             {isAdmin && <KpiCard label="Low / out of stock" value={data.kpi.low_stock.count} color={data.kpi.low_stock.count > 0 ? 'amber' : 'amber'}
               sub={`${data.kpi.low_stock.out_count} out of stock · ${data.kpi.inventory.product_count} products`} />}
             <KpiCard label="Online orders" value={data.kpi.pending_orders.count} color={data.kpi.pending_orders.count > 0 ? 'amber' : 'amber'}
@@ -277,6 +280,9 @@ export default function Dashboard() {
       {isClerk && (
         <>
           <div className="stats-grid">
+            <KpiCard label="Orders today" value={data.kpi.orders_today.total} currency={cur} color="amber"
+              trend={data.kpi.trend.orders}
+              sub={`${data.kpi.orders_today.count} order${data.kpi.orders_today.count === 1 ? '' : 's'} today`} />
             <KpiCard label="Pending orders" value={data.kpi.pending_orders.count} color={data.kpi.pending_orders.count > 0 ? 'amber' : 'amber'}
               sub={`${fmt(data.kpi.pending_orders.total)} ${cur}`} />
             {isAdmin && <KpiCard label="Low / out of stock" value={data.kpi.low_stock.count} color={data.kpi.low_stock.count > 0 ? 'amber' : 'amber'}
@@ -396,6 +402,9 @@ export default function Dashboard() {
             <KpiCard label={`Expenses · ${data.range.label}`} value={k.expenses} currency={cur} color="red"
               spark={trendData} sparkKey="expenses"
               sub={`${k.expense_count} entry${k.expense_count === 1 ? '' : 's'} · supplier payments ${fmt(k.out)}`} />
+            <KpiCard label="Orders today" value={data.kpi.orders_today.total} currency={cur} color="amber"
+              trend={data.kpi.trend.orders}
+              sub={`${data.kpi.orders_today.count} order${data.kpi.orders_today.count === 1 ? '' : 's'} today · ${data.kpi.pending_orders.count} pending`} />
           </div>
 
           {/* Row 2 : balances & inventory (always current) */}

@@ -55,6 +55,10 @@ router.get('/dashboard', (req, res) => {
  const ar = q(`SELECT COUNT(*) count, COALESCE(SUM(total - paid_amount),0) total FROM sales WHERE payment_status != 'paid' AND total > 0${sellerPlain}`);
  const ap = q(`SELECT COUNT(*) count, COALESCE(SUM(total - paid_amount),0) total FROM purchases WHERE payment_status != 'paid'`);
  const pendingOrders = q(`SELECT COUNT(*) count, COALESCE(SUM(total),0) total FROM orders WHERE order_status='pending'`);
+ const ordersToday = q(`SELECT COUNT(*) count, COALESCE(SUM(total),0) total FROM orders
+   WHERE date(order_date)=date('now') AND order_status NOT IN ('cancelled','rejected')`);
+ const ordersTodayPrev = q(`SELECT COUNT(*) count, COALESCE(SUM(total),0) total FROM orders
+   WHERE date(order_date)=date('now','-1 day') AND order_status NOT IN ('cancelled','rejected')`);
 
  // ---- Daily series ----
  const dailySales = qa(`SELECT date(sale_date) day, COALESCE(SUM(total),0) sales, COALESCE(SUM(paid_amount),0) received, COUNT(*) count
@@ -186,12 +190,13 @@ router.get('/dashboard', (req, res) => {
  const kpi = {
   cur: { sales: num(curSales.sales), received: num(curSales.received), count: num(curSales.count), tax: num(curSales.tax), profit: num(curProfit.profit), expenses: num(curExpenses.total), expense_count: num(curExpenses.count), out: num(curOut.total), margin, recv_count: num(curReceived.count) },
   prev: { sales: num(prevSales.sales), received: num(prevSales.received), profit: num(prevProfit.profit) },
-  trend: { sales: pct(curSales.sales, prevSales.sales), received: pct(curSales.received, prevSales.received), profit: pct(curProfit.profit, prevProfit.profit) },
+  trend: { sales: pct(curSales.sales, prevSales.sales), received: pct(curSales.received, prevSales.received), profit: pct(curProfit.profit, prevProfit.profit), orders: pct(ordersToday.total, ordersTodayPrev.total) },
   inventory: isAdmin ? inventory : { product_count: inventory.product_count, stock_units: 0, cost: 0, retail: 0 },
   low_stock: isAdmin ? { count: lowStockCount, out_count: outStockCount } : { count: 0, out_count: 0 },
   receivables: ar,
   payables: ap,
   pending_orders: pendingOrders,
+  orders_today: { count: num(ordersToday.count), total: num(ordersToday.total) },
   currency,
  };
 
@@ -205,6 +210,8 @@ router.get('/dashboard', (req, res) => {
   pending_customer_balance: ar.total,
   pending_supplier_balance: ap.total,
   pending_orders: pendingOrders.count,
+  orders_today_count: num(ordersToday.count),
+  orders_today_total: num(ordersToday.total),
   range_expenses: num(curExpenses.total),
   range_sales: num(curSales.sales),
   range_profit: num(curProfit.profit),
@@ -307,9 +314,91 @@ router.get('/tax', requireRole('manager', 'admin'), (req, res) => {
 router.get('/audit', requireRole('manager', 'admin'), (req, res) => {
  const { limit } = req.query;
  res.json(db.prepare(`
-  SELECT al.*, u.name AS user_name FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id
-  ORDER BY al.created_at DESC, al.id DESC LIMIT ${Math.min(Number(limit) || 200, 1000)}
+   SELECT al.*, u.name AS user_name FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id
+   ORDER BY al.created_at DESC, al.id DESC LIMIT ${Math.min(Number(limit) || 200, 1000)}
  `).all());
+});
+
+// ---- Daily tasks report: every task made per day (activity + work done) ----
+router.get('/daily-tasks', requireRole('manager', 'admin'), (req, res) => {
+ const pad = (n) => String(n).padStart(2, '0');
+ const iso = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+ const today = iso(new Date());
+ const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : today;
+ const fromInput = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : to;
+ const spanDays = Math.round((Date.parse(to + 'T00:00:00Z') - Date.parse(fromInput + 'T00:00:00Z')) / 864e5);
+ const from = spanDays > 366 ? iso(new Date(Date.parse(to + 'T00:00:00Z') - 365 * 864e5)) : fromInput;
+ const qa = (sql, ...p) => db.prepare(sql).all(...p);
+ const num = (v) => Number(v) || 0;
+
+ // Task counts per day straight out of the audit trail (real work done by users),
+ // dropping login/read noise so "tasks" means actions on the business data.
+ const taskRows = qa(`
+   SELECT date(al.created_at) day, al.action, al.entity, u.name AS user_name, COUNT(*) count
+   FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id
+   WHERE date(al.created_at) BETWEEN date(?) AND date(?)
+     AND al.action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ')
+   GROUP BY day, al.action, al.entity, al.user_id
+   ORDER BY day, count DESC`, from, to);
+ const taskTotals = qa(`
+   SELECT date(created_at) day, COUNT(*) count
+   FROM audit_logs
+   WHERE date(created_at) BETWEEN date(?) AND date(?)
+     AND action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ')
+   GROUP BY day`, from, to);
+
+ const salesRows = qa(`SELECT date(sale_date) day, COUNT(*) count, COALESCE(SUM(total),0) total
+   FROM sales WHERE date(sale_date) BETWEEN date(?) AND date(?) GROUP BY day`, from, to);
+ const orderRows = qa(`SELECT date(order_date) day, COUNT(*) count, COALESCE(SUM(total),0) total
+   FROM orders WHERE date(order_date) BETWEEN date(?) AND date(?) AND order_status NOT IN ('cancelled','rejected') GROUP BY day`, from, to);
+ const payRows = qa(`SELECT date(payment_date) day, COUNT(*) count, COALESCE(SUM(amount),0) total
+   FROM payments WHERE date(payment_date) BETWEEN date(?) AND date(?) AND amount > 0 GROUP BY day`, from, to);
+ const expRows = qa(`SELECT date(expense_date) day, COUNT(*) count, COALESCE(SUM(amount),0) total
+   FROM expenses WHERE date(expense_date) BETWEEN date(?) AND date(?) GROUP BY day`, from, to);
+
+ // Dense day list so days with no activity still show up as rows of zeros.
+ const days = [];
+ const endMs = Date.parse(to + 'T00:00:00Z');
+ const startMs = Date.parse(from + 'T00:00:00Z');
+ for (let ms = startMs; ms <= endMs; ms += 864e5) days.push(iso(new Date(ms)));
+
+ const byDay = {};
+ const slot = (d) => (byDay[d] = byDay[d] || { day: d, tasks: 0, sales_count: 0, sales_total: 0, orders_count: 0, orders_total: 0, payments_count: 0, payments_total: 0, expenses_count: 0, expenses_total: 0 });
+ days.forEach((d) => slot(d));
+ taskTotals.forEach((r) => { if (byDay[r.day]) byDay[r.day].tasks = num(r.count); });
+ salesRows.forEach((r) => { if (byDay[r.day]) { byDay[r.day].sales_count = num(r.count); byDay[r.day].sales_total = num(r.total); } });
+ orderRows.forEach((r) => { if (byDay[r.day]) { byDay[r.day].orders_count = num(r.count); byDay[r.day].orders_total = num(r.total); } });
+ payRows.forEach((r) => { if (byDay[r.day]) { byDay[r.day].payments_count = num(r.count); byDay[r.day].payments_total = num(r.total); } });
+ expRows.forEach((r) => { if (byDay[r.day]) { byDay[r.day].expenses_count = num(r.count); byDay[r.day].expenses_total = num(r.total); } });
+
+ const rows = days.map((d) => byDay[d]);
+ const totals = rows.reduce((a, r) => ({
+   tasks: a.tasks + r.tasks,
+   sales_count: a.sales_count + r.sales_count,
+   sales_total: a.sales_total + r.sales_total,
+   orders_count: a.orders_count + r.orders_count,
+   orders_total: a.orders_total + r.orders_total,
+   payments_count: a.payments_count + r.payments_count,
+   payments_total: a.payments_total + r.payments_total,
+   expenses_count: a.expenses_count + r.expenses_count,
+   expenses_total: a.expenses_total + r.expenses_total,
+ }), { tasks: 0, sales_count: 0, sales_total: 0, orders_count: 0, orders_total: 0, payments_count: 0, payments_total: 0, expenses_count: 0, expenses_total: 0 });
+
+ const taskDetail = qa(`
+   SELECT al.id, al.action, al.entity, al.entity_id, al.details, al.created_at,
+          date(al.created_at) day, u.name AS user_name, r.name AS user_role
+   FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id LEFT JOIN roles r ON r.id = u.role_id
+   WHERE date(al.created_at) BETWEEN date(?) AND date(?)
+     AND al.action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ')
+   ORDER BY al.created_at DESC, al.id DESC LIMIT 500`, from, to);
+
+ res.json({
+  range: { from, to },
+  days: rows,
+  breakdown: taskRows,
+  task_detail: taskDetail,
+  totals,
+ });
 });
 
 router.get('/cashier-performance', requireRole('manager', 'admin'), (req, res) => {
