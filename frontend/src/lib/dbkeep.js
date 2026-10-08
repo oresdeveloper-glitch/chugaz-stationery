@@ -1,4 +1,4 @@
-import { getToken, getUser } from './api';
+import { getToken, getUser, getDbPin, setDbPin, api } from './api';
 
 const MARKER_KEY = 'sst_db_marker';
 const DB_NAME = 'sst-keep';
@@ -8,6 +8,9 @@ const BACKUP_INTERVAL_MS = 10 * 60 * 1000;
 
 let scheduled = false;
 let checking = false;
+let backing = false;
+let converging = false;
+let liveBackupTimer = null;
 
 function apiBase() {
   return (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
@@ -58,22 +61,52 @@ function authHeaders() {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+// Talk to one specific database instance: X-Expect-Db-Marker makes the server
+// answer 409 (before running any handler) when the request round-robined to a
+// different instance, so retrying here is always safe and eventually lands on
+// the instance we asked for. Returns null when it never did.
+async function fetchPinned(url, opts, expect, tries = 6) {
+  for (let i = 0; i < tries; i++) {
+    let res;
+    try {
+      res = await fetch(url, {
+        ...opts,
+        headers: { ...(opts.headers || {}), ...(expect ? { 'X-Expect-Db-Marker': expect } : {}) },
+      });
+    } catch (e) {
+      return null;
+    }
+    if (res.status !== 409) return res;
+    const b = await res.json().catch(() => null);
+    if (!b || b.code !== 'instance_mismatch') return res;
+    await new Promise((r) => setTimeout(r, 60 + Math.random() * 140));
+  }
+  return null;
+}
+
 // Snapshot the live database into IndexedDB, tagged with the db_marker of the
 // server it came from. Runs only for admin sessions (they can download the
-// backup and can restore it again).
+// backup and can restore it again). The marker comes from the backup
+// response itself — a separate health() call could round-robin to ANOTHER
+// instance and mislabel the snapshot.
 async function backupNow() {
   const user = getUser();
   if (!user || user.role !== 'admin' || !getToken()) return;
+  if (backing) return;
+  backing = true;
   try {
-    const res = await fetch(`${apiBase()}/api/system/backup`, { headers: authHeaders() });
-    if (!res.ok) return;
+    const pin = getDbPin();
+    const res = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, pin);
+    if (!res || !res.ok) return;
+    const marker = res.headers.get('X-Db-Marker') || pin;
+    if (!marker) return;
     const blob = await res.blob();
-    const h = await health();
-    if (!h || !h.db_marker) return;
-    await idbPut(BACKUP_KEY, { blob, marker: h.db_marker, at: Date.now() });
-    localStorage.setItem(MARKER_KEY, h.db_marker);
+    await idbPut(BACKUP_KEY, { blob, marker, at: Date.now() });
+    localStorage.setItem(MARKER_KEY, marker);
   } catch (e) {
     console.warn('[dbkeep] backup failed:', e && e.message ? e.message : e);
+  } finally {
+    backing = false;
   }
 }
 
@@ -85,31 +118,87 @@ function scheduleBackups() {
     if (document.visibilityState === 'hidden') backupNow();
   });
   setTimeout(backupNow, 20000);
+  window.addEventListener('chugaz-live', () => {
+    clearTimeout(liveBackupTimer);
+    liveBackupTimer = setTimeout(backupNow, 1500);
+  });
 }
 
 // Merge the stored backup into the live database (never replaces it): rows
 // that already exist on the server are kept, backup-only rows are imported,
-// so sales made on both sides of a reset survive together.
-async function restoreFromBackup() {
+// so sales made on both sides of a reset survive together. `target` pins the
+// merge to one specific instance.
+async function restoreFromBackup(target) {
   try {
     const entry = await idbGet(BACKUP_KEY);
     if (!entry || !entry.blob) return 'none';
     const fd = new FormData();
     fd.append('file', entry.blob, 'auto-restore.db');
-    const res = await fetch(`${apiBase()}/api/system/restore-merge`, {
+    const res = await fetchPinned(`${apiBase()}/api/system/restore-merge`, {
       method: 'POST',
       headers: authHeaders(),
       body: fd,
-    });
-    if (!res.ok) return 'failed';
-    const h = await health();
-    localStorage.setItem(MARKER_KEY, (h && h.db_marker) || entry.marker);
+    }, target);
+    if (!res || !res.ok) return 'failed';
+    const marker = res.headers.get('X-Db-Marker') || target;
+    if (marker) {
+      localStorage.setItem(MARKER_KEY, marker);
+      setDbPin(marker);
+    }
     console.info('[dbkeep] merged backup — refreshing open pages in place');
     try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'] } })); } catch (e) { /* ignore */ }
     return 'ok';
   } catch (e) {
     console.warn('[dbkeep] restore failed:', e && e.message ? e.message : e);
     return 'failed';
+  }
+}
+
+// Bring every live instance to the same data. Called by the app poller when
+// its pinned instance and another instance report different versions: first
+// push the pinned instance's rows over there, then push everything back, so
+// both sides hold the union — after that it no longer matters which instance
+// a request lands on, and the dashboard stops flipping between two numbers.
+export async function convergeInstances() {
+  try {
+    const user = getUser();
+    if (!user || user.role !== 'admin' || !getToken()) return 'skip';
+    if (converging) return 'busy';
+    converging = true;
+    try {
+      const pin = getDbPin();
+      if (!pin) return 'nopin';
+      const pinned = await api('/sync');
+      if (!pinned || !pinned.version || !pinned.data_version) return 'fail';
+      let other = null;
+      for (let i = 0; i < 8 && !other; i++) {
+        const p = await api('/sync', { anyInstance: true });
+        if (p && p.db_marker && p.db_marker !== pin) other = p;
+      }
+      if (!other || !other.db_marker || other.db_marker === pin) return 'same';
+      if (!other.data_version || other.data_version === pinned.data_version) return 'same';
+      const fwd = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, pin);
+      if (!fwd || !fwd.ok) return 'fail';
+      const fd1 = new FormData();
+      fd1.append('file', await fwd.blob(), 'converge-a.db');
+      const m1 = await fetchPinned(`${apiBase()}/api/system/restore-merge`, { method: 'POST', headers: authHeaders(), body: fd1 }, other.db_marker);
+      if (!m1 || !m1.ok) return 'fail';
+      const back = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, other.db_marker);
+      if (!back || !back.ok) return 'fail';
+      const fd2 = new FormData();
+      fd2.append('file', await back.blob(), 'converge-b.db');
+      const m2 = await fetchPinned(`${apiBase()}/api/system/restore-merge`, { method: 'POST', headers: authHeaders(), body: fd2 }, pin);
+      if (!m2 || !m2.ok) return 'fail';
+      await backupNow();
+      console.info('[dbkeep] instances converged — both sides hold all data');
+      try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'] } })); } catch (e) { /* ignore */ }
+      return 'ok';
+    } finally {
+      converging = false;
+    }
+  } catch (e) {
+    console.warn('[dbkeep] converge failed:', e && e.message ? e.message : e);
+    return 'fail';
   }
 }
 
@@ -127,6 +216,7 @@ export async function dbKeepInit() {
     const user = getUser();
     const isAdmin = !!user && user.role === 'admin' && !!getToken();
     if (isAdmin) scheduleBackups();
+    if (!getDbPin()) setDbPin(h.db_marker);
 
     const stored = localStorage.getItem(MARKER_KEY);
     if (!stored) {
@@ -136,7 +226,7 @@ export async function dbKeepInit() {
     if (stored === h.db_marker) return;
 
     if (isAdmin) {
-      const result = await restoreFromBackup();
+      const result = await restoreFromBackup(h.db_marker);
       if (result === 'ok') return;
       if (result === 'failed') return;
       localStorage.setItem(MARKER_KEY, h.db_marker);

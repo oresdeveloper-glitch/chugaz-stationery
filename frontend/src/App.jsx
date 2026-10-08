@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { getUser, clearAuth, isSessionValid, api } from './lib/api';
-import { dbKeepInit } from './lib/dbkeep';
+import { getUser, clearAuth, isSessionValid, api, getDbPin } from './lib/api';
+import { dbKeepInit, convergeInstances } from './lib/dbkeep';
 import Login from './pages/Login.jsx';
 import Layout from './components/Layout.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -69,6 +69,7 @@ export default function App() {
     let seen = [];
     let suppressed = false;
     let hold = 0;
+    let ticks = 0;
     let stopped = false;
     const announce = (v) => {
       try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'], version: v } })); } catch (e) { /* ignore */ }
@@ -79,6 +80,22 @@ export default function App() {
         const s = await api('/sync');
         const v = s && s.version;
         if (v == null) return;
+        ticks += 1;
+        // Every 4th tick, ask a random instance how its DATA version differs
+        // from our pinned one (data_version ignores per-instance audit noise);
+        // a mismatch means the two disks drifted apart, and (admin sessions)
+        // the backup/merge cycle brings them back to the same data so the
+        // dashboard can never flip between two numbers again.
+        if (ticks % 4 === 0) {
+          try {
+            const u = getUser();
+            const p = await api('/sync', { anyInstance: true });
+            const pin = getDbPin();
+            if (u && u.role === 'admin' && p && p.db_marker && p.data_version && pin && p.db_marker !== pin && p.data_version !== s.data_version) {
+              convergeInstances().catch(() => {});
+            }
+          } catch (e) { /* ignore */ }
+        }
         if (last === null) {
           last = v;
           seen = [v];

@@ -78,6 +78,18 @@ let printLocked = false;
 export function lockPrintRedirect() { printLocked = true; }
 export function unlockPrintRedirect() { printLocked = false; }
 
+// Database instance this session is pinned to. Serverless hosting can run
+// several API instances on diverged ephemeral disks; pinning makes every
+// request target one instance (the server 409s a request that lands
+// elsewhere, before any handler runs, so retrying is always safe). Dashboard
+// numbers then only move when data really changes on that instance — never
+// because a round-robin request hit a stale twin.
+let dbPin = null;
+export function getDbPin() { return dbPin; }
+export function setDbPin(m) { dbPin = m || null; }
+
+const AFFINITY_TRIES = 5;
+
 async function request(path, options = {}, shop = false) {
   const headers = { ...(options.headers || {}) };
   const getTok = shop ? getShopToken : getToken;
@@ -101,9 +113,38 @@ async function request(path, options = {}, shop = false) {
   // Auth endpoints (login/refresh) must never be retried: a 401 there means
   // wrong credentials, and retrying would burn rate-limit budget and locks.
   const recoverable = !path.startsWith('/auth/');
-  const send = () => fetch(url, { ...options, headers });
+  const affinity = recoverable && !options.anyInstance;
+  const idempotent = !options.method || options.method === 'GET' || options.method === 'HEAD';
+  const send = () => {
+    const h = { ...headers };
+    if (dbPin && affinity) h['X-Expect-Db-Marker'] = dbPin;
+    return fetch(url, { ...options, headers: h });
+  };
 
   let res = await send();
+  let data = null;
+  // 409 instance_mismatch: the request hit another instance and nothing ran
+  // server-side, so retrying until we are back on the pinned one is safe.
+  if (affinity) {
+    for (let attempt = 0; attempt <= AFFINITY_TRIES; attempt++) {
+      if (res.status !== 409) break;
+      data = await res.json().catch(() => null);
+      if (!data || data.code !== 'instance_mismatch') break;
+      data = null;
+      if (attempt === AFFINITY_TRIES) {
+        dbPin = null;
+        res = await send();
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 60 + Math.random() * 140));
+      res = await send();
+    }
+  }
+  const answered = res.headers.get('X-Db-Marker');
+  if (answered && !options.anyInstance) {
+    if (!dbPin) dbPin = answered;
+    else if (answered !== dbPin && affinity && !idempotent) dbPin = answered;
+  }
   if (res.status === 401 && recoverable) {
     // A lone 401 can be transient on serverless hosting (the request lands on
     // a cold instance that doesn't know this session yet). The auth gate
@@ -127,7 +168,7 @@ async function request(path, options = {}, shop = false) {
       throw new Error(shop ? 'Session expired' : 'Your session expired. Please sign in again.');
     }
   }
-  const data = res.status === 204 ? null : await res.json().catch(() => null);
+  if (data === null) data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
    const err = new Error((data && data.error) || `Request failed (${res.status})`);
    if (data && data.code) err.code = data.code;

@@ -12,6 +12,29 @@ app.use((req, res, next) => {
   next();
 });
 
+// Instance affinity for diverged serverless databases: every response carries
+// X-Db-Marker (which instance answered), and a request carrying
+// X-Expect-Db-Marker that landed elsewhere is rejected with a 409 BEFORE any
+// handler runs — so the client can safely retry until it is back on its own
+// instance. That keeps reads and writes pinned to one database: the dashboard
+// numbers only move when data really changes, never because a round-robin
+// request hit a stale instance.
+app.use((req, res, next) => {
+  try {
+    // eslint-disable-next-line no-eval
+    const m = eval('require')('./backend/src/db');
+    if (!m || !m.dbReady) return next();
+    const row = m.db.prepare("SELECT value FROM settings WHERE key='db_marker'").get();
+    const marker = row && row.value ? row.value : null;
+    if (marker) res.setHeader('X-Db-Marker', marker);
+    const expect = req.get('X-Expect-Db-Marker');
+    if (marker && expect && expect !== marker) {
+      return res.status(409).json({ error: 'instance_mismatch', code: 'instance_mismatch', db_marker: marker });
+    }
+  } catch (_) { /* affinity bookkeeping must never block a request */ }
+  next();
+});
+
 // Instance identity for diagnostics (ephemeral on serverless: a changing id
 // across calls proves requests land on different instances).
 const INSTANCE_ID = require('crypto').randomBytes(4).toString('hex');
@@ -50,10 +73,11 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, db: dbReady ? 'connected' : 'degraded', users, secret, instance: INSTANCE_ID, boot: BOOT_TIME, db_marker, sales, orders, payment_instructions: '356322054 - CHUGAZ STATIONERY' });
 });
 
-const SYNC_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT SUM(total) FROM sales),0) || ':' || COALESCE((SELECT SUM(paid_amount) FROM sales),0) || ':' || (SELECT COUNT(*) FROM sale_returns) || '|' || (SELECT COUNT(*) FROM orders) || ':' || COALESCE((SELECT MAX(updated_at) FROM orders),'') || '|' || (SELECT COUNT(*) FROM order_status_history) || '|' || (SELECT COUNT(*) FROM stock_movements) || '|' || (SELECT COUNT(*) FROM products) || ':' || COALESCE((SELECT SUM(selling_price) FROM products),0) || ':' || COALESCE((SELECT SUM(current_stock) FROM products),0) || '|' || (SELECT COUNT(*) FROM purchases) || '|' || (SELECT COUNT(*) FROM expenses) || '|' || (SELECT COUNT(*) FROM customers) || '|' || (SELECT COUNT(*) FROM users) || '|' || (SELECT COUNT(*) FROM payments) || '|' || (SELECT COUNT(*) FROM notifications) || '|' || (SELECT COUNT(*) FROM contact_messages) || '|' || (SELECT COUNT(*) FROM order_returns) || ':' || COALESCE((SELECT MAX(processed_at) FROM order_returns),'') || '|' || (SELECT COUNT(*) FROM audit_logs WHERE action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ')) || '|' || (SELECT COUNT(*) FROM categories) || ':' || (SELECT COUNT(*) FROM brands) || ':' || (SELECT COUNT(*) FROM suppliers) AS v";
+const SYNC_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT SUM(total) FROM sales),0) || ':' || COALESCE((SELECT SUM(paid_amount) FROM sales),0) || ':' || (SELECT COUNT(*) FROM sale_returns) || '|' || (SELECT COUNT(*) FROM orders) || ':' || COALESCE((SELECT MAX(updated_at) FROM orders),'') || '|' || (SELECT COUNT(*) FROM order_status_history) || '|' || (SELECT COUNT(*) FROM stock_movements) || '|' || (SELECT COUNT(*) FROM products) || ':' || COALESCE((SELECT SUM(selling_price) FROM products),0) || ':' || COALESCE((SELECT SUM(current_stock) FROM products),0) || '|' || (SELECT COUNT(*) FROM purchases) || '|' || (SELECT COUNT(*) FROM expenses) || '|' || (SELECT COUNT(*) FROM customers) || '|' || (SELECT COUNT(*) FROM users) || '|' || (SELECT COUNT(*) FROM payments) || '|' || (SELECT COUNT(*) FROM notifications) || '|' || (SELECT COUNT(*) FROM contact_messages) || '|' || (SELECT COUNT(*) FROM order_returns) || ':' || COALESCE((SELECT MAX(processed_at) FROM order_returns),'') || '|' || (SELECT COUNT(*) FROM audit_logs WHERE action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ','RESTORE','RESTORE_MERGE')) || '|' || (SELECT COUNT(*) FROM categories) || ':' || (SELECT COUNT(*) FROM brands) || ':' || (SELECT COUNT(*) FROM suppliers) || '|' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(sku,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(image,''))+LENGTH(COALESCE(description,''))+LENGTH(COALESCE(unit,''))),0) FROM products) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(phone,''))+LENGTH(COALESCE(email,''))),0) FROM customers) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(email,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(avatar,''))),0) FROM users) AS v";
+const SYNC_DATA_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT SUM(total) FROM sales),0) || ':' || COALESCE((SELECT SUM(paid_amount) FROM sales),0) || ':' || (SELECT COUNT(*) FROM sale_returns) || '|' || (SELECT COUNT(*) FROM orders) || ':' || COALESCE((SELECT MAX(updated_at) FROM orders),'') || '|' || (SELECT COUNT(*) FROM order_status_history) || '|' || (SELECT COUNT(*) FROM stock_movements) || '|' || (SELECT COUNT(*) FROM products) || ':' || COALESCE((SELECT SUM(selling_price) FROM products),0) || ':' || COALESCE((SELECT SUM(current_stock) FROM products),0) || '|' || (SELECT COUNT(*) FROM purchases) || '|' || (SELECT COUNT(*) FROM expenses) || '|' || (SELECT COUNT(*) FROM customers) || '|' || (SELECT COUNT(*) FROM users) || '|' || (SELECT COUNT(*) FROM payments) || '|' || (SELECT COUNT(*) FROM notifications) || '|' || (SELECT COUNT(*) FROM contact_messages) || '|' || (SELECT COUNT(*) FROM order_returns) || ':' || COALESCE((SELECT MAX(processed_at) FROM order_returns),'') || '|' || '0' || '|' || (SELECT COUNT(*) FROM categories) || ':' || (SELECT COUNT(*) FROM brands) || ':' || (SELECT COUNT(*) FROM suppliers) || '|' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(sku,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(image,''))+LENGTH(COALESCE(description,''))+LENGTH(COALESCE(unit,''))),0) FROM products) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(phone,''))+LENGTH(COALESCE(email,''))),0) FROM customers) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(email,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(avatar,''))),0) FROM users) AS v";
 
 app.get('/api/sync', (req, res) => {
-  let version = null;
+  let version = null, dataVersion = null;
   try {
     // eslint-disable-next-line no-eval
     const m = eval('require')('./backend/src/db');
@@ -62,11 +86,15 @@ app.get('/api/sync', (req, res) => {
         const r = m.db.prepare(SYNC_SQL).get();
         version = r && r.v != null ? String(r.v) : null;
       } catch (_) {
-        try { version = 's' + m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; } catch (__) { version = null; }
+        try { version = 's' + m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; dataVersion = version; } catch (__) { version = null; }
       }
+      try {
+        const d = m.db.prepare(SYNC_DATA_SQL).get();
+        dataVersion = d && d.v != null ? String(d.v) : null;
+      } catch (_) {}
     }
   } catch (_) { version = null; }
-  res.json({ ok: true, version });
+  res.json({ ok: true, version, data_version: dataVersion, db_marker: res.getHeader('X-Db-Marker') || null });
 });
 
 function safeRoute(routePath) {
