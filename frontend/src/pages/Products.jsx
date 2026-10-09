@@ -27,6 +27,7 @@ export default function Products() {
   const [tab, setTab] = useState('products');
   const [modal, setModal] = useState(null);
   const [catModal, setCatModal] = useState(null);
+  const [catItems, setCatItems] = useState([]);
   const [gallery, setGallery] = useState(null);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -131,12 +132,38 @@ export default function Products() {
     } catch (err) { toast(err.message, 'error'); }
   };
 
-  const openCat = (c, parentId = null) => setCatModal({
-    id: c ? c.id : null,
-    name: c ? c.name : '',
-    description: c ? (c.description || '') : '',
-    parent_id: c ? (c.parent_id || null) : parentId,
-  });
+  const openCat = (c, parentId = null) => {
+    setCatModal({
+      id: c ? c.id : null,
+      name: c ? c.name : '',
+      description: c ? (c.description || '') : '',
+      parent_id: c ? (c.parent_id || null) : parentId,
+    });
+    // Item types are picked from the products already inside the category.
+    if (c && c.id) {
+      api(`/products?category_id=${c.id}`)
+        .then((rows) => setCatItems((rows || []).filter((p) => p.status === 'active')))
+        .catch(() => setCatItems([]));
+    } else {
+      setCatItems([]);
+    }
+  };
+
+  const catTypes = (catModal?.description || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const toggleItemType = (name) => {
+    const has = catTypes.some((t) => t.toLowerCase() === String(name).toLowerCase());
+    const next = has
+      ? catTypes.filter((t) => t.toLowerCase() !== String(name).toLowerCase())
+      : [...catTypes, name];
+    setCatModal({ ...catModal, description: next.join(', ') });
+  };
+  const useAllCatItems = () => {
+    const merged = [...catTypes];
+    for (const it of catItems) {
+      if (!merged.some((t) => t.toLowerCase() === String(it.name).toLowerCase())) merged.push(it.name);
+    }
+    setCatModal({ ...catModal, description: merged.join(', ') });
+  };
 
   const saveCat = async (e) => {
     e.preventDefault();
@@ -438,12 +465,50 @@ export default function Products() {
           </div>
           <div className="field">
             <label>Item types <span className="muted small">(optional)</span></label>
-            <textarea
-              rows="3"
-              value={catModal?.description || ''}
-              onChange={(e) => setCatModal({ ...catModal, description: e.target.value })}
-              placeholder="Comma-separated item types shown to cashiers when this category's barcode is scanned, e.g.: A4 box file, A4 spring file, A4 clear file"
-            />
+            {catModal?.id ? (
+              catItems.length > 0 ? (
+                <>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {catItems.map((it) => {
+                      const on = catTypes.some((t) => t.toLowerCase() === String(it.name).toLowerCase());
+                      return (
+                        <button
+                          type="button"
+                          key={it.id}
+                          className={`btn sm${on ? ' primary' : ''}`}
+                          onClick={() => toggleItemType(it.name)}
+                        >
+                          {on ? '✓ ' : '+ '}{it.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <button type="button" className="btn sm" onClick={useAllCatItems}>Use all items</button>
+                    {catTypes.length > 0 && (
+                      <button type="button" className="btn sm" onClick={() => setCatModal({ ...catModal, description: '' })}>Clear</button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="muted small">No items in this category yet. Add items from the Products tab and they will appear here to pick as item types.</p>
+              )
+            ) : (
+              <textarea
+                rows="3"
+                value={catModal?.description || ''}
+                onChange={(e) => setCatModal({ ...catModal, description: e.target.value })}
+                placeholder="Comma-separated item types shown to cashiers when this category's barcode is scanned, e.g.: A4 box file, A4 spring file, A4 clear file"
+              />
+            )}
+            {catModal?.id && catTypes.length > 0 && (
+              <textarea
+                rows="2"
+                style={{ marginTop: 8 }}
+                value={catModal?.description || ''}
+                onChange={(e) => setCatModal({ ...catModal, description: e.target.value })}
+              />
+            )}
             <p className="muted small" style={{ marginTop: 4 }}>
               When several items share this category's barcode, the scanner shows these item types so the cashier can pick the exact product.
             </p>
