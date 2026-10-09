@@ -129,7 +129,12 @@ export default function ScanScreen() {
       const active = exact.filter((p) => p.status === 'active');
       if (active.length === 1) { add(active[0]); return; }
       if (active.length > 1) {
-        setPicker({ barcode: raw, matches: active, q: '', size: null, qty: null, item: null, itemIdx: null, step: 1, touched: {} });
+        // Categories without a comma-separated item-types description have nothing to
+        // narrow by: jump straight to the item list instead of an empty dropdown.
+        const hasTypes = String(active[0].category_description || '').split(',').some((s) => s.trim());
+        setPicker(hasTypes
+          ? { barcode: raw, matches: active, q: '', size: null, qty: null, item: null, itemIdx: null, step: 1, touched: {} }
+          : { barcode: raw, matches: active, q: '', size: null, qty: null, item: 'All items', itemIdx: '__all__', step: 2, touched: {} });
         return;
       }
     } catch (e) { /* fall through */ }

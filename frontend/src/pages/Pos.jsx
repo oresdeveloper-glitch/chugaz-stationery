@@ -73,6 +73,11 @@ export default function Pos() {
   const orderedCats = orderCats(cats);
   const catIds = pcat ? catFilterIds(cats, pcat) : null;
   const visible = catIds ? products.filter((p) => catIds.has(Number(p.category_id))) : products;
+  // A shared category barcode matches several products at once. Show them as a
+  // category choice instead of letting Enter add an arbitrary first item.
+  const bq = q.trim();
+  const shared = bq && visible.filter((p) => String(p.barcode || '') === bq);
+  const sharedPick = shared && shared.length > 1 ? shared : null;
 
   const loadHeld = () => {
     try { setHeld(JSON.parse(localStorage.getItem(heldKey) || '[]')); } catch { setHeld([]); }
@@ -269,7 +274,7 @@ export default function Pos() {
                       placeholder="Scan barcode or search by name…"
                       value={q}
                       onChange={(e) => { setQ(e.target.value); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && visible.length > 0) { addToCart(visible[0]); } }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !sharedPick && visible.length > 0) { addToCart(visible[0]); } }}
                       autoFocus
                     />
                     {q && <button className="pos-clear" onClick={() => setQ('')}>×</button>}
@@ -280,7 +285,20 @@ export default function Pos() {
                   </select>
                   <button className="btn primary pos-cam-btn" onClick={() => navigate('/scan')}><I name="camera" size={14} /> Camera</button>
                 </div>
-                {q && visible.length > 0 && (
+                {sharedPick && (
+                  <div className="pos-hint" style={{ display: 'block', padding: '10px 12px', background: 'var(--panel-2)', border: '1px solid var(--border-strong)', borderRadius: 10, marginTop: 10 }}>
+                    <b>{sharedPick[0].category_name || 'Shared barcode'}</b>
+                    <span className="muted small"> · barcode {bq} covers {sharedPick.length} items — tap the one being sold</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                      {sharedPick.map((p) => (
+                        <button key={p.id} className="btn sm" onClick={() => addToCart(p)}>
+                          {p.name} · {fmt(p.selling_price)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {q && !sharedPick && visible.length > 0 && (
                   <div className="pos-hint muted small">Press <kbd>Enter</kbd> to add <b>{visible[0].name}</b> · {fmt(visible[0].selling_price)}</div>
                 )}
               </div>

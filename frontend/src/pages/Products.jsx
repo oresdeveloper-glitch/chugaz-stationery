@@ -17,7 +17,8 @@ const EMPTY = {
 
 export default function Products() {
   const isAdmin = canRole(getUser(), 'admin');
-  const canCats = canRole(getUser(), 'manager') || isAdmin;
+  // Managers (and admins) maintain categories AND the items inside them.
+  const canManage = canRole(getUser(), 'manager');
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
@@ -25,6 +26,7 @@ export default function Products() {
   const [cat, setCat] = useState('');
   const [tab, setTab] = useState('products');
   const [modal, setModal] = useState(null);
+  const [catModal, setCatModal] = useState(null);
   const [gallery, setGallery] = useState(null);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -129,12 +131,31 @@ export default function Products() {
     } catch (err) { toast(err.message, 'error'); }
   };
 
-  const addCat = async (parentId) => {
-    const name = parentId ? prompt('Subcategory name:') : prompt('Category name:');
-    if (!name) return;
-    try { await api('/products/cats', { method: 'POST', body: { name, parent_id: parentId || null } }); load(); toast(parentId ? 'Subcategory added' : 'Category added'); }
-    catch (err) { toast(err.message, 'error'); }
+  const openCat = (c, parentId = null) => setCatModal({
+    id: c ? c.id : null,
+    name: c ? c.name : '',
+    description: c ? (c.description || '') : '',
+    parent_id: c ? (c.parent_id || null) : parentId,
+  });
+
+  const saveCat = async (e) => {
+    e.preventDefault();
+    if (!catModal.name.trim()) return toast('Category name is required', 'error');
+    setSaving(true);
+    try {
+      if (catModal.id) {
+        await api(`/products/cats/${catModal.id}`, { method: 'PUT', body: { name: catModal.name.trim(), description: catModal.description } });
+        toast('Category updated');
+      } else {
+        await api('/products/cats', { method: 'POST', body: { name: catModal.name.trim(), description: catModal.description || null, parent_id: catModal.parent_id || null } });
+        toast(catModal.parent_id ? 'Subcategory added' : 'Category added');
+      }
+      setCatModal(null);
+      load();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setSaving(false); }
   };
+
   const addBrand = async () => {
     const name = prompt('Brand name:');
     if (!name) return;
@@ -150,14 +171,14 @@ export default function Products() {
     <div>
       <div className="page-header">
         <h1>Products</h1>
-        {isAdmin && tab === 'products' && <button className="btn primary" onClick={() => setModal({ ...EMPTY })}>+ Add product</button>}
-        {canCats && tab === 'categories' && <button className="btn primary" onClick={() => addCat(null)}>+ Add category</button>}
+        {canManage && tab === 'products' && <button className="btn primary" onClick={() => setModal({ ...EMPTY })}>+ Add item</button>}
+        {canManage && tab === 'categories' && <button className="btn primary" onClick={() => openCat(null)}>+ Add category</button>}
         {isAdmin && tab === 'brands' && <button className="btn primary" onClick={addBrand}>+ Add brand</button>}
       </div>
 
       <div className="toolbar">
         <div className="btn-group">
-          {(isAdmin ? ['products', 'categories', 'brands'] : canCats ? ['products', 'categories'] : ['products']).map((t) => (
+          {(isAdmin ? ['products', 'categories', 'brands'] : canManage ? ['products', 'categories'] : ['products']).map((t) => (
             <button key={t} className={`btn${tab === t ? ' primary' : ''}`} style={{ borderRadius: 0, border: 'none' }} onClick={() => setTab(t)}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>
@@ -191,11 +212,17 @@ export default function Products() {
                 </div>
                 <div className="alibaba-meta">
                   <span>Cost: {fmt(p.purchase_price)}</span>
-                  <span style={{ fontWeight: 750, color: p.current_stock <= p.reorder_level ? 'var(--danger)' : 'var(--primary)' }}>
-                    Stock: {fmt(p.current_stock)}
-                  </span>
+                  {p.current_stock !== undefined ? (
+                    <span style={{ fontWeight: 750, color: p.current_stock <= p.reorder_level ? 'var(--danger)' : 'var(--primary)' }}>
+                      Stock: {fmt(p.current_stock)}
+                    </span>
+                  ) : (
+                    <span style={{ fontWeight: 750, color: p.in_stock ? 'var(--primary)' : 'var(--danger)' }}>
+                      {p.in_stock ? 'In stock' : 'Out of stock'}
+                    </span>
+                  )}
                 </div>
-                {isAdmin && (
+                {(canManage || isAdmin) && (
                   <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
                     <button className="btn sm primary" style={{ flex: 1 }} onClick={async () => {
                       try {
@@ -203,11 +230,15 @@ export default function Products() {
                         setModal({ ...full, unit_prices: full.unit_prices || {}, variants: full.variants || [] });
                       } catch (err) { toast(err.message, 'error'); }
                     }}>Edit</button>
-                    <label className="btn sm" style={{ cursor: 'pointer' }} title="Add photos"><I name="camera" size={14} />
-                      <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => { uploadImages(p, e.target.files); e.target.value = ''; }} />
-                    </label>
-                    <button className="btn sm" onClick={() => openGallery(p)} title="Manage photo gallery"><I name="image" size={14} /></button>
-                    <button className="btn sm danger" onClick={() => remove(p)} title="Delete product"><I name="x" size={14} /></button>
+                    {isAdmin && (
+                      <>
+                        <label className="btn sm" style={{ cursor: 'pointer' }} title="Add photos"><I name="camera" size={14} />
+                          <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => { uploadImages(p, e.target.files); e.target.value = ''; }} />
+                        </label>
+                        <button className="btn sm" onClick={() => openGallery(p)} title="Manage photo gallery"><I name="image" size={14} /></button>
+                        <button className="btn sm danger" onClick={() => remove(p)} title="Delete product"><I name="x" size={14} /></button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -232,7 +263,8 @@ export default function Products() {
                     </td>
                     <td className="muted">{c.description || '-'}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      {!c.parent_id && <button className="btn sm" style={{ marginRight: 6 }} onClick={() => addCat(c.id)}>+ Subcategory</button>}
+                      {!c.parent_id && <button className="btn sm" style={{ marginRight: 6 }} onClick={() => openCat(null, c.id)}>+ Subcategory</button>}
+                      <button className="btn sm" style={{ marginRight: 6 }} onClick={() => openCat(c)}>Edit</button>
                       <button className="btn sm danger" onClick={async () => { try { await api(`/products/cats/${c.id}`, { method: 'DELETE' }); load(); } catch (e) { toast(e.message, 'error'); } }}>Delete</button>
                     </td>
                   </tr>
@@ -261,7 +293,7 @@ export default function Products() {
         </div>
       )}
 
-      <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.id ? 'Edit product' : 'Add product'} wide>
+      <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.id ? 'Edit item' : 'Add item'} wide>
         <form onSubmit={save}>
           <div className="form-row">
             <div className="field"><label>Name *</label><input required value={modal?.name || ''} onChange={(e) => setModal({ ...modal, name: e.target.value })} /></div>
@@ -396,6 +428,31 @@ export default function Products() {
             <p className="muted small" style={{ marginTop: 8 }}>First photo is used as the main image on the storefront.</p>
           </div>
         )}
+      </Modal>
+
+      <Modal open={!!catModal} onClose={() => setCatModal(null)} title={catModal?.id ? 'Edit category' : catModal?.parent_id ? 'Add subcategory' : 'Add category'}>
+        <form onSubmit={saveCat}>
+          <div className="field">
+            <label>Name <em>*</em></label>
+            <input value={catModal?.name || ''} onChange={(e) => setCatModal({ ...catModal, name: e.target.value })} placeholder="e.g. A4 Files" autoFocus />
+          </div>
+          <div className="field">
+            <label>Item types <span className="muted small">(optional)</span></label>
+            <textarea
+              rows="3"
+              value={catModal?.description || ''}
+              onChange={(e) => setCatModal({ ...catModal, description: e.target.value })}
+              placeholder="Comma-separated item types shown to cashiers when this category's barcode is scanned, e.g.: A4 box file, A4 spring file, A4 clear file"
+            />
+            <p className="muted small" style={{ marginTop: 4 }}>
+              When several items share this category's barcode, the scanner shows these item types so the cashier can pick the exact product.
+            </p>
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="btn" onClick={() => setCatModal(null)}>Cancel</button>
+            <button type="submit" className="btn primary" disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

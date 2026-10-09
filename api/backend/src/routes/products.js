@@ -115,9 +115,11 @@ router.get('/', (req, res) => {
   r.variant_count = db.prepare("SELECT COUNT(*) c FROM products WHERE parent_id = ? AND status='active'").get(r.id).c;
   return withUnits(r);
  });
- if (req.user.role !== 'admin') {
-  for (const r of withCount) {
-   r.in_stock = Number(r.current_stock) > 0;
+ // Admin and managers work with real stock numbers; cashiers/clerk only see a yes/no flag.
+ const hideStock = !['admin', 'manager'].includes(req.user.role);
+ for (const r of withCount) {
+  r.in_stock = Number(r.current_stock) > 0;
+  if (hideStock) {
    delete r.current_stock;
    delete r.reorder_level;
    delete r.reserved_stock;
@@ -151,7 +153,7 @@ function barcodeForCategory(categoryId) {
 // Shared category barcode: when creating/editing a product in a category, reuse that
 // category's single barcode so every product in the category scans the same.
 // GET /barcode/generate?category_id= returns the category's shared barcode, otherwise a fresh unique one.
-router.get('/barcode/generate', requireRole('admin'), (req, res) => {
+router.get('/barcode/generate', requireRole('admin', 'manager'), (req, res) => {
  const catId = req.query.category_id;
  if (catId) {
   const shared = db.prepare("SELECT barcode FROM products WHERE category_id = ? AND barcode IS NOT NULL AND barcode != '' LIMIT 1").get(catId);
@@ -174,13 +176,16 @@ router.get('/:id', (req, res) => {
  withUnits(row);
  row.variants = variantsOf(row.id);
  row.images = imagesFor(row.id);
- if (req.user.role !== 'admin') {
-  row.in_stock = Number(row.current_stock) > 0;
+ row.in_stock = Number(row.current_stock) > 0;
+ const hideStock = !['admin', 'manager'].includes(req.user.role);
+ if (hideStock) {
   delete row.current_stock;
   delete row.reorder_level;
   delete row.reserved_stock;
-  for (const v of row.variants) {
-   v.in_stock = Number(v.current_stock) > 0;
+ }
+ for (const v of row.variants) {
+  v.in_stock = Number(v.current_stock) > 0;
+  if (hideStock) {
    delete v.current_stock;
    delete v.reorder_level;
    delete v.reserved_stock;
@@ -189,7 +194,7 @@ router.get('/:id', (req, res) => {
  res.json(row);
 });
 
-router.post('/', requireRole('admin'), (req, res) => {
+router.post('/', requireRole('admin', 'manager'), (req, res) => {
  const p = req.body;
  if (!p.name) return res.status(400).json({ error: 'Product name is required' });
  const barcode = p.barcode || (p.category_id ? barcodeForCategory(p.category_id) : null);
@@ -212,7 +217,7 @@ router.post('/', requireRole('admin'), (req, res) => {
  }
 });
 
-router.put('/:id', requireRole('admin'), (req, res) => {
+router.put('/:id', requireRole('admin', 'manager'), (req, res) => {
  const p = req.body;
  const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
  if (!existing) return res.status(404).json({ error: 'Product not found' });
@@ -359,9 +364,18 @@ router.post('/cats', requireRole('admin', 'manager'), (req, res) => {
  }
 });
 
-router.put('/cats/:id', requireRole('admin'), (req, res) => {
- db.prepare('UPDATE categories SET name=?, description=? WHERE id=?').run(req.body.name, req.body.description, req.params.id);
- audit(req.user.id, 'UPDATE', 'category', Number(req.params.id), { name: req.body.name });
+router.put('/cats/:id', requireRole('admin', 'manager'), (req, res) => {
+ const existing = db.prepare('SELECT * FROM categories WHERE id=?').get(req.params.id);
+ if (!existing) return res.status(404).json({ error: 'Category not found' });
+ const name = (req.body.name || '').trim();
+ if (!name) return res.status(400).json({ error: 'Name required' });
+ try {
+  db.prepare('UPDATE categories SET name=?, description=? WHERE id=?').run(name, req.body.description || null, req.params.id);
+ } catch (e) {
+  if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Category already exists' });
+  throw e;
+ }
+ audit(req.user.id, 'UPDATE', 'category', Number(req.params.id), { name });
  res.json({ ok: true });
 });
 
