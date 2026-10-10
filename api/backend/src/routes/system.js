@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-const { db, DB_PATH, audit, reopenDb } = require('../db');
+const { db, DB_PATH, audit, reopenDb, writeRedactedCopy } = require('../db');
 const { requireRole } = require('../auth');
 
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
@@ -40,12 +40,30 @@ router.post('/test-email', requireRole('admin'), async (req, res) => {
   : `Send failed: ${result.reason}` });
 });
 
-router.get('/backup', requireRole('admin'), (req, res) => {
- try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (_) {}
- const data = fs.readFileSync(DB_PATH);
+function sendBackup(res, data) {
  res.setHeader('Content-Type', 'application/octet-stream');
  res.setHeader('Content-Disposition', `attachment; filename="stationery-backup-${Date.now()}.db"`);
  res.send(data);
+}
+
+// Admins get the raw database; managers may snapshot too (so categories they
+// add survive an ephemeral-disk reset even when no admin session is open) but
+// the file they receive has password hashes stripped.
+router.get('/backup', requireRole('admin', 'manager'), (req, res) => {
+ try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (_) {}
+ if (req.user.role === 'admin') {
+  sendBackup(res, fs.readFileSync(DB_PATH));
+  return;
+ }
+ const tmp = path.join(path.dirname(DB_PATH), `backup-mgr-${Date.now()}.db`);
+ try {
+  writeRedactedCopy(DB_PATH, tmp);
+  sendBackup(res, fs.readFileSync(tmp));
+ } catch (e) {
+  res.status(500).json({ error: 'Backup failed: ' + e.message });
+ } finally {
+  try { fs.unlinkSync(tmp); } catch (_) { /* already sent or never created */ }
+ }
 });
 
 router.post('/restore', requireRole('admin'), uploadMem.single('file'), (req, res) => {
@@ -71,7 +89,11 @@ router.post('/restore', requireRole('admin'), uploadMem.single('file'), (req, re
  }
 });
 
-router.post('/restore-merge', requireRole('admin'), uploadMem.single('file'), (req, res) => {
+// Managers may merge too (their session must be able to push categories and
+// sales back after a disk reset) but only DATA: accounts and settings are
+// admin-only here, so a crafted backup file can never mint an admin.
+router.post('/restore-merge', requireRole('admin', 'manager'), uploadMem.single('file'), (req, res) => {
+  const mergeAll = req.user.role === 'admin';
   const file = req.file || (Array.isArray(req.files) ? req.files[0] : null);
   if (!file) return res.status(400).json({ error: 'No backup file uploaded' });
   const data = Buffer.from(file.buffer || file.data || '');
@@ -120,7 +142,7 @@ router.post('/restore-merge', requireRole('admin'), uploadMem.single('file'), (r
    return mapped === undefined ? v : mapped;
   };
 
-  const mergeByKey = (t, keyCols, map, remap = {}, { update = true, onRow = null } = {}) => {
+  const mergeByKey = (t, keyCols, map, remap = {}, { update = true, onRow = null, skip = null } = {}) => {
    if (!tableExists(t)) return;
    const cl = commonCols(t);
    if (!keyCols.every((c) => cl.includes(c))) return;
@@ -130,7 +152,7 @@ router.post('/restore-merge', requireRole('admin'), uploadMem.single('file'), (r
     if (ex) {
      map.set(Number(r.__id), Number(ex.id));
      if (update) {
-      const upd = cl.filter((c) => !keyCols.includes(c));
+      const upd = cl.filter((c) => !keyCols.includes(c) && !(skip && skip(c, r[c])));
       if (upd.length) db.prepare(`UPDATE ${t} SET ${upd.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...upd.map((c) => remapV(c, r[c], remap)), Number(ex.id));
      }
      continue;
@@ -149,7 +171,29 @@ router.post('/restore-merge', requireRole('admin'), uploadMem.single('file'), (r
    mergeByKey('offices', ['name'], officeMap, {});
    mergeByKey('categories', ['name'], catMap, { parent_id: catMap }, { update: false });
    mergeByKey('brands', ['name'], brandMap, {});
-   mergeByKey('users', ['email'], userMap, { office_id: officeMap });
+   if (tableExists('users')) {
+    if (mergeAll) {
+     // Empty password_hash marks a redacted (manager-downloaded) backup — never
+     // let it overwrite a real password.
+     mergeByKey('users', ['email'], userMap, { office_id: officeMap }, { skip: (c, v) => c === 'password_hash' && !v });
+     } else {
+      // Manager merges map accounts by email without writing them; unknown emails
+      // land as passwordless customers so created_by remapping still resolves.
+      const ul = commonCols('users');
+      if (ul.includes('email')) {
+       for (const r of bakRows('users', ul)) {
+        const ex = db.prepare('SELECT id FROM users WHERE email = ?').get(r.email);
+        if (ex) {
+         userMap.set(Number(r.__id), Number(ex.id));
+         continue;
+        }
+        const id = ins('users', ul, ul.map((c) => (c === 'role_id' ? 5 : c === 'password_hash' ? '' : remapV(c, r[c], { office_id: officeMap }))));
+        userMap.set(Number(r.__id), id);
+        bump('users');
+       }
+      }
+     }
+   }
 
    if (tableExists('customers')) {
     const cl = commonCols('customers');
@@ -189,6 +233,23 @@ router.post('/restore-merge', requireRole('admin'), uploadMem.single('file'), (r
      }
     }
    }
+
+   if (tableExists('product_categories')) {
+    const linkRows = db.prepare('SELECT product_id, category_id FROM bak.product_categories').all();
+    const addLink = db.prepare('INSERT OR IGNORE INTO product_categories (product_id, category_id) VALUES (?,?)');
+    for (const r of linkRows) {
+     const pid = prodMap.get(Number(r.product_id));
+     const cid = catMap.get(Number(r.category_id));
+     if (!pid || !cid) continue;
+     if (has('product_categories', 'product_id = ? AND category_id = ?', [pid, cid])) continue;
+     addLink.run(pid, cid);
+     bump('product_categories');
+    }
+   }
+   // Every primary category is a membership too — covers products imported
+   // from a backup made before the join table existed, right away.
+   const backfilled = db.prepare('INSERT OR IGNORE INTO product_categories (product_id, category_id) SELECT id, category_id FROM products WHERE category_id IS NOT NULL').run();
+   if (backfilled.changes) bump('product_categories');
 
    if (tableExists('sales')) {
     const cl = commonCols('sales');
@@ -423,7 +484,7 @@ router.post('/restore-merge', requireRole('admin'), uploadMem.single('file'), (r
     }
    }
 
-   if (tableExists('settings')) {
+   if (tableExists('settings') && mergeAll) {
     db.prepare("INSERT INTO settings (key, value) SELECT key, value FROM bak.settings WHERE key <> 'db_marker' ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
    }
 

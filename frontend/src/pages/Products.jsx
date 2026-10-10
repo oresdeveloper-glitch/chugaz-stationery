@@ -1,7 +1,7 @@
 ﻿import { useEffect, useState } from 'react';
 import { api, fmt, getUser, onLive } from '../lib/api';
 import { canRole } from '../lib/roles';
-import { orderCats, catLabel, catFilterIds } from '../lib/cats';
+import { orderCats, catLabel, catFilterIds, productInCats } from '../lib/cats';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 import Barcode from '../components/Barcode';
@@ -12,7 +12,7 @@ const EMPTY = {
   sku: '', barcode: '', name: '', category_id: '', brand_id: '', unit: 'piece',
   purchase_price: 0, selling_price: 0, tax_rate: 0, discount_rate: 0,
   reorder_level: 0, status: 'active', description: '', specifications: '',
-  unit_prices: {},
+  unit_prices: {}, extras: [],
 };
 
 export default function Products() {
@@ -63,8 +63,12 @@ export default function Products() {
     e.preventDefault();
     setSaving(true);
     try {
-      const { variants, ...base } = modal;
+      const { variants, extras, ...base } = modal;
       const body = { ...base, category_id: modal.category_id || null, brand_id: modal.brand_id || null, parent_id: modal.parent_id || null };
+      // Primary category first, then every extra membership (deduped) — this
+      // replaces the whole membership set on the server.
+      const primary = modal.category_id ? Number(modal.category_id) : null;
+      body.category_ids = [...new Set([primary, ...(extras || []).map(Number)].filter((n, i, a) => n && a.indexOf(n) === i))];
       if (variants && variants.length) {
         body.variants = variants.map((v) => ({
           ...v,
@@ -192,7 +196,7 @@ export default function Products() {
 
   const orderedCats = orderCats(categories);
   const catIds = cat ? catFilterIds(categories, cat) : null;
-  const filtered = catIds ? products.filter((p) => catIds.has(Number(p.category_id))) : products;
+  const filtered = catIds ? products.filter((p) => productInCats(p, catIds)) : products;
 
   return (
     <div>
@@ -254,7 +258,12 @@ export default function Products() {
                     <button className="btn sm primary" style={{ flex: 1 }} onClick={async () => {
                       try {
                         const full = await api(`/products/${p.id}`);
-                        setModal({ ...full, unit_prices: full.unit_prices || {}, variants: full.variants || [] });
+                        setModal({
+                          ...full,
+                          unit_prices: full.unit_prices || {},
+                          variants: full.variants || [],
+                          extras: (full.category_ids || []).filter((n) => Number(n) !== Number(full.category_id)),
+                        });
                       } catch (err) { toast(err.message, 'error'); }
                     }}>Edit</button>
                     {isAdmin && (
@@ -357,6 +366,27 @@ export default function Products() {
                 <option value="">None</option>
                 {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
+            </div>
+          </div>
+          <div className="field" style={{ width: '100%', marginBottom: 10 }}>
+            <label>Also appears in (extra categories)</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {orderedCats.filter((c) => Number(c.id) !== Number(modal?.category_id || 0)).map((c) => {
+                const on = (modal?.extras || []).map(Number).includes(Number(c.id));
+                return (
+                  <button
+                    type="button"
+                    key={c.id}
+                    className={`btn sm${on ? ' primary' : ''}`}
+                    onClick={() => {
+                      const cur = (modal.extras || []).map(Number);
+                      setModal({ ...modal, extras: on ? cur.filter((n) => n !== Number(c.id)) : [...cur, Number(c.id)] });
+                    }}
+                  >
+                    {on ? '✓ ' : '+ '}{catLabel(categories, c)}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <div className="form-row">

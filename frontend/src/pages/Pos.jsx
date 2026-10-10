@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, fmt, getUser, onLive } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { takeScanned } from '../lib/scanStore';
-import { orderCats, catLabel, catFilterIds } from '../lib/cats';
+import { orderCats, catLabel, catFilterIds, productInCats, categoryIdForBarcode } from '../lib/cats';
 import I from '../components/icons';
 import SafeImg from '../shop/SafeImg';
 
@@ -72,11 +72,13 @@ export default function Pos() {
   const heldKey = `pos_held_${me?.id || 0}`;
   const orderedCats = orderCats(cats);
   const catIds = pcat ? catFilterIds(cats, pcat) : null;
-  const visible = catIds ? products.filter((p) => catIds.has(Number(p.category_id))) : products;
+  const visible = catIds ? products.filter((p) => productInCats(p, catIds)) : products;
   // A shared category barcode matches several products at once. Show them as a
-  // category choice instead of letting Enter add an arbitrary first item.
+  // category choice instead of letting Enter add an arbitrary first item. The
+  // scan also matches products listed in the category besides their primary one.
   const bq = q.trim();
-  const shared = bq && visible.filter((p) => String(p.barcode || '') === bq);
+  const scanCat = categoryIdForBarcode(bq);
+  const shared = bq && visible.filter((p) => String(p.barcode || '') === bq || (scanCat != null && productInCats(p, [scanCat])));
   const sharedPick = shared && shared.length > 1 ? shared : null;
 
   const loadHeld = () => {
@@ -115,7 +117,11 @@ export default function Pos() {
 
   const loadProducts = async (term) => {
     try {
-      const p = await api(`/products${term ? `?q=${encodeURIComponent(term)}` : ''}`);
+      // A full shared category barcode must return every member of the category
+      // (including products whose primary category is a different one) — the
+      // plain q= search only matches each product's own barcode.
+      const catCode = categoryIdForBarcode(term || '');
+      const p = await api(`/products${term ? (catCode != null ? `?barcode=${encodeURIComponent(term)}` : `?q=${encodeURIComponent(term)}`) : ''}`);
       setProducts(p.filter((x) => x.status === 'active'));
     } catch (e) { toast(e.message, 'error'); }
   };

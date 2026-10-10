@@ -84,18 +84,26 @@ async function fetchPinned(url, opts, expect, tries = 6) {
   return null;
 }
 
-// Snapshot the live database into IndexedDB, tagged with the db_marker of the
-// server it came from. Runs only for admin sessions (they can download the
-// backup and can restore it again). The marker comes from the backup
-// response itself — a separate health() call could round-robin to ANOTHER
-// instance and mislabel the snapshot.
-async function backupNow() {
+// Admins and managers can download a backup (manager copies come redacted) and
+// can merge it back, so both roles keep snapshots alive. The marker comes from
+// the backup response itself — a separate health() call could round-robin to
+// ANOTHER instance and mislabel the snapshot.
+function canKeep() {
   const user = getUser();
-  if (!user || user.role !== 'admin' || !getToken()) return;
+  return !!user && (user.role === 'admin' || user.role === 'manager') && !!getToken();
+}
+
+async function backupNow() {
+  if (!canKeep() || !getToken()) return;
   if (backing) return;
   backing = true;
   try {
     const pin = getDbPin();
+    // A stored marker different from our pin means the server was reset and
+    // the merge has not run yet — the IndexedDB copy is the ONLY good data,
+    // so never overwrite it with the fresh (empty) instance.
+    const stored = localStorage.getItem(MARKER_KEY);
+    if (stored && pin && stored !== pin) return;
     const res = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, pin);
     if (!res || !res.ok) return;
     const marker = res.headers.get('X-Db-Marker') || pin;
@@ -161,8 +169,7 @@ async function restoreFromBackup(target) {
 // a request lands on, and the dashboard stops flipping between two numbers.
 export async function convergeInstances() {
   try {
-    const user = getUser();
-    if (!user || user.role !== 'admin' || !getToken()) return 'skip';
+    if (!canKeep()) return 'skip';
     if (converging) return 'busy';
     converging = true;
     try {
@@ -204,18 +211,18 @@ export async function convergeInstances() {
 
 // Runs on app mount, on focus and after login. Detects an ephemeral-disk
 // reset by comparing the server's persisted db_marker with the one stored
-// locally; for admin sessions the last IndexedDB backup is then MERGED into
-// the fresh server (kept and retried until it succeeds), so sales recorded
-// before and after the reset all reappear instead of one replacing the other.
+// locally; for admin/manager sessions the last IndexedDB backup is then MERGED
+// into the fresh server (kept and retried until it succeeds), so sales
+// recorded before and after the reset all reappear instead of one replacing
+// the other.
 export async function dbKeepInit() {
   if (checking) return;
   checking = true;
   try {
     const h = await health();
     if (!h || !h.db_marker) return;
-    const user = getUser();
-    const isAdmin = !!user && user.role === 'admin' && !!getToken();
-    if (isAdmin) scheduleBackups();
+    const canKeepSess = canKeep();
+    if (canKeepSess) scheduleBackups();
     if (!getDbPin()) setDbPin(h.db_marker);
 
     const stored = localStorage.getItem(MARKER_KEY);
@@ -225,7 +232,7 @@ export async function dbKeepInit() {
     }
     if (stored === h.db_marker) return;
 
-    if (isAdmin) {
+    if (canKeepSess) {
       const result = await restoreFromBackup(h.db_marker);
       if (result === 'ok') return;
       if (result === 'failed') return;
@@ -234,7 +241,12 @@ export async function dbKeepInit() {
       if (!virgin) backupNow();
       return;
     }
-    localStorage.setItem(MARKER_KEY, h.db_marker);
+    // Non-keep sessions (cashier/clerk/customer): remember the new marker ONLY
+    // when there is no stored snapshot — stamping it while a backup exists
+    // would hide the reset from the next admin/manager session and their merge
+    // would be skipped.
+    const entry = await idbGet(BACKUP_KEY);
+    if (!entry || !entry.blob) localStorage.setItem(MARKER_KEY, h.db_marker);
   } catch (e) {
     console.warn('[dbkeep] check failed:', e && e.message ? e.message : e);
   } finally {

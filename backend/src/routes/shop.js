@@ -44,8 +44,8 @@ const SHOP_FILTER = `(p.unit IN ${STORE_UNITS} OR (p.unit='piece' AND ${PIECE_AL
 router.get('/categories', (req, res) => {
  const rows = db.prepare(`
   SELECT c.id, c.name, c.description,
-   (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id AND p.status = 'active' AND p.parent_id IS NULL AND ${SHOP_FILTER}) AS product_count,
-   (SELECT p.image FROM products p WHERE p.category_id = c.id AND p.status = 'active' AND p.parent_id IS NULL AND ${SHOP_FILTER} AND p.image IS NOT NULL AND p.image != '' ORDER BY p.id LIMIT 1) AS image
+   (SELECT COUNT(*) FROM products p WHERE (p.category_id = c.id OR EXISTS(SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = c.id)) AND p.status = 'active' AND p.parent_id IS NULL AND ${SHOP_FILTER}) AS product_count,
+   (SELECT p.image FROM products p WHERE (p.category_id = c.id OR EXISTS(SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = c.id)) AND p.status = 'active' AND p.parent_id IS NULL AND ${SHOP_FILTER} AND p.image IS NOT NULL AND p.image != '' ORDER BY p.id LIMIT 1) AS image
   FROM categories c ORDER BY c.name
  `).all();
  res.json(rows);
@@ -60,7 +60,10 @@ router.get('/products', (req, res) => {
  const conds = ["p.status = 'active'", 'p.parent_id IS NULL', SHOP_FILTER, 'p.office_id IS NULL'];
  const params = [];
  if (q) { conds.push('(p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
- if (category_id) { conds.push('p.category_id = ?'); params.push(category_id); }
+ if (category_id) {
+  conds.push('(p.category_id = ? OR EXISTS(SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = ?))');
+  params.push(category_id, category_id);
+ }
  if (brand_id) { conds.push('p.brand_id = ?'); params.push(brand_id); }
  const orderBy = sort === 'price_low' ? 'p.selling_price ASC'
   : sort === 'price_high' ? 'p.selling_price DESC'
@@ -122,8 +125,8 @@ router.get('/products/:id', (req, res) => {
  }
 
  const similar = db.prepare(`
-  SELECT p.* FROM products p WHERE p.status='active' AND p.parent_id IS NULL AND ${SHOP_FILTER} AND p.office_id IS NULL AND p.category_id = ? AND p.id != ? LIMIT 6
- `).all(primary.category_id, primary.id);
+  SELECT p.* FROM products p WHERE p.status='active' AND p.parent_id IS NULL AND ${SHOP_FILTER} AND p.office_id IS NULL AND (p.category_id = ? OR EXISTS(SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = ?)) AND p.id != ? LIMIT 6
+ `).all(primary.category_id, primary.category_id, primary.id);
  for (const s of similar) {
   s.piece_price = u.piecePrice(s);
   sanitize(s);

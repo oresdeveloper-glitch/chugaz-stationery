@@ -105,16 +105,41 @@ router.get('/', (req, res) => {
   conds.push('p.office_id = ?'); params.push(Number(office_id));
  }
  if (q) { conds.push('(p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
- if (barcode) { conds.push('(p.barcode = ? OR p.sku = ?)'); params.push(barcode, barcode); }
- if (category_id) { conds.push('p.category_id = ?'); params.push(category_id); }
+ if (barcode) {
+  const scanCat = categoryForBarcode(barcode);
+  if (scanCat) {
+   // A shared category code must find the category's items even when the
+   // scanned code is not the product's own (primary-category) barcode.
+   conds.push('(p.barcode = ? OR p.sku = ? OR EXISTS(SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = ?))');
+   params.push(barcode, barcode, scanCat);
+  } else {
+   conds.push('(p.barcode = ? OR p.sku = ?)'); params.push(barcode, barcode);
+  }
+ }
+ if (category_id) {
+  conds.push('(p.category_id = ? OR EXISTS(SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = ?))');
+  params.push(category_id, category_id);
+ }
  if (status) { conds.push('p.status = ?'); params.push(status); }
  if (low === '1') { conds.push('p.current_stock <= p.reorder_level'); }
  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
  const rows = db.prepare(productSelect(where + ' ORDER BY p.name')).all(...params);
  const withCount = rows.map((r) => {
-  r.variant_count = db.prepare("SELECT COUNT(*) c FROM products WHERE parent_id = ? AND status='active'").get(r.id).c;
-  return withUnits(r);
+   r.variant_count = db.prepare("SELECT COUNT(*) c FROM products WHERE parent_id = ? AND status='active'").get(r.id).c;
+   return withUnits(r);
  });
+ // Full membership list (primary first) for the category filters and the edit form.
+ const links = new Map();
+ for (const l of db.prepare('SELECT product_id, category_id FROM product_categories').all()) {
+   const arr = links.get(l.product_id) || [];
+   arr.push(Number(l.category_id));
+   links.set(l.product_id, arr);
+ }
+ for (const r of withCount) {
+   const set = new Set(links.get(r.id) || []);
+   if (r.category_id) set.add(Number(r.category_id));
+   r.category_ids = r.category_id ? [Number(r.category_id), ...[...set].filter((n) => n !== Number(r.category_id))] : [...set];
+ }
  // Admin and managers work with real stock numbers; cashiers/clerk only see a yes/no flag.
  const hideStock = !['admin', 'manager'].includes(req.user.role);
  for (const r of withCount) {
@@ -136,6 +161,39 @@ function ean13CheckDigit(base12) {
   sum += i % 2 === 0 ? d : d * 3;
  }
  return (10 - (sum % 10)) % 10;
+}
+
+// Decode a shared category barcode (601 + 9-digit category id + check digit)
+// back to its category id, so scanning a category code also finds products
+// whose primary category is a different one. Random unique barcodes almost
+// never decode to an existing id, and a rare accidental hit only widens the
+// match set a little.
+function categoryForBarcode(code) {
+ const s = String(code || '');
+ if (!/^\d{13}$/.test(s) || !s.startsWith('601')) return null;
+ const base12 = s.slice(0, 12);
+ if (ean13CheckDigit(base12) !== Number(s[12])) return null;
+ const id = Number(base12.slice(3));
+ return id > 0 ? id : null;
+}
+
+// Membership set for a product write: the listed category_ids plus the primary
+// category. Unknown ids are dropped (a stale form tab must not fail the save)
+// and the primary is always kept as a member.
+function targetCategoryIds(p, keepPrimary) {
+ const wanted = [...(Array.isArray(p.category_ids) ? p.category_ids : [])];
+ const given = p.category_id !== undefined && p.category_id !== null && p.category_id !== '';
+ if (given) wanted.push(p.category_id);
+ const empty = { ids: [], primary: p.category_id !== undefined ? null : (keepPrimary ?? null) };
+ const nums = [...new Set(wanted.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+ if (!nums.length) return empty;
+ const ids = db.prepare(`SELECT id FROM categories WHERE id IN (${nums.map(() => '?').join(',')})`).all(...nums).map((r) => Number(r.id));
+ if (!ids.length) return empty;
+ const primary = given && ids.includes(Number(p.category_id)) ? Number(p.category_id)
+  : p.category_id !== undefined ? ids[0]
+  : keepPrimary != null && ids.includes(Number(keepPrimary)) ? Number(keepPrimary)
+  : ids[0];
+ return { ids, primary };
 }
 
 // One shared barcode per category: prefix 601 + category id zero-padded to 9 + check digit.
@@ -177,6 +235,10 @@ router.get('/:id', (req, res) => {
  row.variants = variantsOf(row.id);
  row.images = imagesFor(row.id);
  row.in_stock = Number(row.current_stock) > 0;
+ const members = db.prepare('SELECT category_id FROM product_categories WHERE product_id = ?').all(row.id).map((l) => Number(l.category_id));
+ const set = new Set(members);
+ if (row.category_id) set.add(Number(row.category_id));
+ row.category_ids = row.category_id ? [Number(row.category_id), ...[...set].filter((n) => n !== Number(row.category_id))] : [...set];
  const hideStock = !['admin', 'manager'].includes(req.user.role);
  if (hideStock) {
   delete row.current_stock;
@@ -197,20 +259,27 @@ router.get('/:id', (req, res) => {
 router.post('/', requireRole('admin', 'manager'), (req, res) => {
  const p = req.body;
  if (!p.name) return res.status(400).json({ error: 'Product name is required' });
- const barcode = p.barcode || (p.category_id ? barcodeForCategory(p.category_id) : null);
+ const { ids, primary } = targetCategoryIds(p);
+ const barcode = p.barcode || (primary ? barcodeForCategory(primary) : null);
  try {
-  const info = db.prepare(`
-   INSERT INTO products (sku, barcode, name, category_id, brand_id, unit, purchase_price,
-    selling_price, tax_rate, discount_rate, reorder_level, current_stock, image, status, description, specifications, unit_prices, parent_id)
-   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `).run(
-   p.sku || null, barcode, p.name, p.category_id || null, p.brand_id || null,
-   p.unit || 'piece', p.purchase_price || 0, p.selling_price || 0, p.tax_rate || 0,
-   p.discount_rate || 0, p.reorder_level || 0, p.current_stock || 0, p.image || null, p.status || 'active',
-   p.description || null, p.specifications || null, cleanUnitPrices(p.unit_prices), p.parent_id || null
-  );
-  audit(req.user.id, 'CREATE', 'product', info.lastInsertRowid, { name: p.name });
-  res.status(201).json({ id: Number(info.lastInsertRowid), barcode });
+  const id = transact(() => {
+   const info = db.prepare(`
+    INSERT INTO products (sku, barcode, name, category_id, brand_id, unit, purchase_price,
+     selling_price, tax_rate, discount_rate, reorder_level, current_stock, image, status, description, specifications, unit_prices, parent_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+   `).run(
+    p.sku || null, barcode, p.name, primary, p.brand_id || null,
+    p.unit || 'piece', p.purchase_price || 0, p.selling_price || 0, p.tax_rate || 0,
+    p.discount_rate || 0, p.reorder_level || 0, p.current_stock || 0, p.image || null, p.status || 'active',
+    p.description || null, p.specifications || null, cleanUnitPrices(p.unit_prices), p.parent_id || null
+   );
+   const pid = Number(info.lastInsertRowid);
+   const addLink = db.prepare('INSERT OR IGNORE INTO product_categories (product_id, category_id) VALUES (?,?)');
+   for (const cid of ids) addLink.run(pid, cid);
+   audit(req.user.id, 'CREATE', 'product', pid, { name: p.name });
+   return pid;
+  });
+  res.status(201).json({ id, barcode });
  } catch (e) {
   if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'SKU or barcode already exists' });
   throw e;
@@ -225,8 +294,12 @@ router.put('/:id', requireRole('admin', 'manager'), (req, res) => {
  const rawNew = p.current_stock !== undefined && p.current_stock !== null ? Number(p.current_stock) : null;
  const newStock = rawNew === null || Number.isNaN(rawNew) ? oldStock : rawNew;
  const prev = { selling_price: existing.selling_price, purchase_price: existing.purchase_price, status: existing.status };
- // When category is set (or changed) and no explicit barcode given, keep the shared category barcode.
- const targetCat = p.category_id !== undefined ? p.category_id : existing.category_id;
+ // When the membership changes (or no explicit barcode given), keep the shared
+ // barcode of the primary category. With no category fields at all the current
+ // memberships stay untouched.
+ const hasCatChange = p.category_ids !== undefined || p.category_id !== undefined;
+ const target = hasCatChange ? targetCategoryIds(p, existing.category_id) : { ids: null, primary: existing.category_id };
+ const targetCat = target.primary;
  const barcode = (p.barcode !== undefined && p.barcode !== null && p.barcode !== '')
   ? p.barcode
   : (targetCat ? barcodeForCategory(targetCat) : existing.barcode);
@@ -238,7 +311,7 @@ router.put('/:id', requireRole('admin', 'manager'), (req, res) => {
   `);
   update.run(
    p.sku ?? existing.sku, barcode, p.name ?? existing.name,
-   p.category_id ?? existing.category_id, p.brand_id ?? existing.brand_id, p.unit ?? existing.unit,
+   target.primary, p.brand_id ?? existing.brand_id, p.unit ?? existing.unit,
    p.purchase_price ?? existing.purchase_price, p.selling_price ?? existing.selling_price,
    p.tax_rate ?? existing.tax_rate, p.discount_rate ?? existing.discount_rate,
    p.reorder_level ?? existing.reorder_level, newStock, p.image ?? existing.image, p.status ?? existing.status,
@@ -247,6 +320,13 @@ router.put('/:id', requireRole('admin', 'manager'), (req, res) => {
    p.parent_id !== undefined ? p.parent_id : existing.parent_id,
    req.params.id
   );
+  if (target.ids) {
+   db.prepare('DELETE FROM product_categories WHERE product_id = ?').run(Number(req.params.id));
+   const addLink = db.prepare('INSERT OR IGNORE INTO product_categories (product_id, category_id) VALUES (?,?)');
+   for (const cid of target.ids) addLink.run(Number(req.params.id), cid);
+  } else if (target.primary) {
+   db.prepare('INSERT OR IGNORE INTO product_categories (product_id, category_id) VALUES (?,?)').run(Number(req.params.id), Number(target.primary));
+  }
   if (newStock !== oldStock) {
    db.prepare('INSERT INTO stock_movements (product_id, movement_type, quantity, reference_id, notes, created_by) VALUES (?,?,?,NULL,?,?)')
     .run(req.params.id, newStock > oldStock ? 'in' : 'out', Math.abs(newStock - oldStock),
@@ -379,8 +459,11 @@ router.put('/cats/:id', requireRole('admin', 'manager'), (req, res) => {
  res.json({ ok: true });
 });
 
-router.delete('/cats/:id', requireRole('admin', 'manager'), (req, res) => {
- const used = db.prepare('SELECT COUNT(*) c FROM products WHERE category_id=?').get(req.params.id).c;
+// Categories are permanent: only an admin may remove one, and only after no
+// product (primary or extra membership) still points at it.
+router.delete('/cats/:id', requireRole('admin'), (req, res) => {
+ const catId = Number(req.params.id);
+ const used = db.prepare('SELECT COUNT(*) c FROM products WHERE category_id = ? OR id IN (SELECT product_id FROM product_categories WHERE category_id = ?)').get(catId, catId).c;
  if (used > 0) return res.status(409).json({ error: 'Category is used by products' });
  const subs = db.prepare('SELECT COUNT(*) c FROM categories WHERE parent_id=?').get(req.params.id).c;
  if (subs > 0) return res.status(409).json({ error: 'Delete its subcategories first' });

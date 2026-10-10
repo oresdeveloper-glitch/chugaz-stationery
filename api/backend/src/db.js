@@ -75,6 +75,11 @@ try {
     if (!hasColumn('products', 'parent_id')) real.exec('ALTER TABLE products ADD COLUMN parent_id INTEGER REFERENCES products(id)');
  if (!hasColumn('categories', 'parent_id')) real.exec('ALTER TABLE categories ADD COLUMN parent_id INTEGER REFERENCES categories(id)');
     if (!hasColumn('products', 'office_id')) real.exec('ALTER TABLE products ADD COLUMN office_id INTEGER REFERENCES offices(id)');
+    // A product can belong to several categories: products.category_id stays the
+    // primary one (barcode + scanner description) and this table holds every
+    // membership, primary included.
+    real.exec('CREATE TABLE IF NOT EXISTS product_categories (\n product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,\n category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,\n PRIMARY KEY (product_id, category_id)\n)');
+    real.exec('CREATE INDEX IF NOT EXISTS idx_product_categories_cat ON product_categories(category_id)');
     if (!hasColumn('carts', 'guest_id')) {
       real.exec('DROP TABLE IF EXISTS cart_items');
       real.exec('DROP TABLE IF EXISTS carts');
@@ -165,6 +170,15 @@ try {
     console.error('[db] catalog seed skipped:', e && e.message ? e.message : e);
   }
 
+  // A product's primary category is also one of its memberships. Rebuild any
+  // missing rows on every boot — idempotent, and it upgrades databases that
+  // predate the join table (or come from an old backup restore).
+  try {
+    real.exec('INSERT OR IGNORE INTO product_categories (product_id, category_id) SELECT id, category_id FROM products WHERE category_id IS NOT NULL');
+  } catch (e) {
+    console.error('[db] product_categories backfill skipped:', e && e.message ? e.message : e);
+  }
+
   db = real;
   dbReady = true;
 } catch (e) {
@@ -206,6 +220,13 @@ function reopenDb() {
     const fresh = new DatabaseSyncClass(DB_PATH);
     fresh.exec('PRAGMA journal_mode = WAL');
     fresh.exec('PRAGMA foreign_keys = ON');
+    // A full restore swaps in an arbitrary (possibly older) database file —
+    // bring the join table back before route queries run against it.
+    try {
+      fresh.exec('CREATE TABLE IF NOT EXISTS product_categories (\n product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,\n category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,\n PRIMARY KEY (product_id, category_id)\n)');
+      fresh.exec('CREATE INDEX IF NOT EXISTS idx_product_categories_cat ON product_categories(category_id)');
+      fresh.exec('INSERT OR IGNORE INTO product_categories (product_id, category_id) SELECT id, category_id FROM products WHERE category_id IS NOT NULL');
+    } catch (_) { /* table may be missing on a stubbed environment */ }
     db = fresh;
     return true;
   } catch (e) {
@@ -224,4 +245,25 @@ function audit(userId, action, entity, entityId, details) {
   }
 }
 
-module.exports = { db: dbProxy, DB_PATH, transact, audit, dbReady, reopenDb };
+// Copy a database file with account credentials stripped. Backup downloads for
+// non-admin sessions must not hand out password hashes; their merges never
+// touch the users table anyway, and the merge skips empty hashes so a
+// redacted file can never blank a real password.
+function writeRedactedCopy(src, dst) {
+  if (!DatabaseSyncClass) throw new Error('sqlite unavailable for redacted backup');
+  fs.copyFileSync(src, dst);
+  const conn = new DatabaseSyncClass(dst);
+  try {
+    // Leave WAL mode first so the redaction lands in the main file (a
+    // readFileSync would otherwise miss changes still sitting in dst-wal).
+    conn.exec('PRAGMA journal_mode = DELETE');
+    conn.exec("UPDATE users SET password_hash = '' WHERE password_hash IS NOT NULL AND password_hash != ''");
+    // Rewriting rows leaves the old bytes in free pages — VACUUM purges them
+    // so the download cannot leak hashes through unreferenced page space.
+    conn.exec('VACUUM');
+  } finally {
+    try { conn.close(); } catch (_) { /* already closed */ }
+  }
+}
+
+module.exports = { db: dbProxy, DB_PATH, transact, audit, dbReady, reopenDb, writeRedactedCopy };
