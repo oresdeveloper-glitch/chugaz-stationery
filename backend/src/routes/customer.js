@@ -8,6 +8,13 @@ const { signToken, requireCustomer } = require('../auth');
 const { rateLimit, registerFailure, lockState, clearFailures, clientIp } = require('../security');
 const { checkEmailReal, sendVerificationCode, smtpReady, EMAIL_RE } = require('../mailer');
 
+// Express 4 does not forward rejections from async handlers to the error
+// middleware — an unexpected throw (DB error, DNS failure) would leave the
+// request hanging with no response. This wrapper catches and reports it.
+function asyncRoute(fn) {
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+
 const AVATAR_DIR = process.env.VERCEL === '1' ? '/tmp/stationery-avatars' : path.join(__dirname, '..', '..', 'uploads', 'avatars');
 try {
   if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
@@ -45,7 +52,7 @@ function issueVerificationCode(email) {
 
 // ---- public auth ----
 
-publicRouter.post('/register', async (req, res) => {
+publicRouter.post('/register', asyncRoute(async (req, res) => {
  const ip = clientIp(req);
  const rl = rateLimit(`register:${ip}`, 5, 60 * 60 * 1000);
  if (!rl.ok) return res.status(429).json({ error: 'Too many registration attempts — try again later' });
@@ -98,9 +105,9 @@ publicRouter.post('/register', async (req, res) => {
  // SMTP configured but delivery failed — keep unverified, allow resend.
  audit(userId, 'REGISTER', 'user', userId, { email: clean, verification: 'send_failed', ip });
  return res.status(201).json({ needs_verification: true, email: clean, message: 'We could not deliver the email — use "Resend code"' });
-});
+}));
 
-publicRouter.post('/verify-email', async (req, res) => {
+publicRouter.post('/verify-email', asyncRoute(async (req, res) => {
  const { email, code } = req.body;
  const clean = String(email || '').toLowerCase().trim();
  const ip = clientIp(req);
@@ -133,9 +140,9 @@ publicRouter.post('/verify-email', async (req, res) => {
  user.status = 'active';
  audit(user.id, 'VERIFY_EMAIL', 'user', user.id, { email: clean, ip });
  res.json({ token: signToken(user), user });
-});
+}));
 
-publicRouter.post('/resend-verification', async (req, res) => {
+publicRouter.post('/resend-verification', asyncRoute(async (req, res) => {
  const clean = String(req.body.email || '').toLowerCase().trim();
  const ip = clientIp(req);
  const rl = rateLimit(`resend:${ip}:${clean}`, 3, 10 * 60 * 1000);
@@ -150,7 +157,7 @@ publicRouter.post('/resend-verification', async (req, res) => {
  audit(user.id, 'RESEND_VERIFICATION', 'user', user.id, { email: clean, ok: sent.sent, ip });
  if (!sent.sent) return res.status(500).json({ error: 'Could not send the email right now — try again shortly' });
  res.json({ ok: true, message: 'A new code is on its way' });
-});
+}));
 
 function handleCustomerLogin(req, res) {
  const { email, password } = req.body;
