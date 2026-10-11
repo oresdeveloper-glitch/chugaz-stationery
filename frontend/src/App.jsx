@@ -106,14 +106,22 @@ export default function App() {
         if (ticks % 4 === 0) {
           try {
             const u = getUser();
-            const p = await api('/sync', { anyInstance: true });
             const pin = getDbPin();
-            // admin OR manager (managers merge a redacted backup). Limiting
-            // convergence to admins left a manager's freshly added category
-            // stuck on one diverged instance where a later refresh could not
-            // see it.
-            if (u && (u.role === 'admin' || u.role === 'manager') && p && p.db_marker && p.data_version && pin && p.db_marker !== pin && p.data_version !== s.data_version) {
-              convergeInstances().catch(() => {});
+            // admin OR manager (managers merge a redacted backup).
+            if (u && (u.role === 'admin' || u.role === 'manager') && pin) {
+              // Converge whenever ANY live instance holds more data than the
+              // one we are pinned to — not only when data_version differs. Two
+              // empty twins can share a version-shaped hash while a third
+              // instance holds the real sales, and gating on version alone
+              // would skip that case and leave the POS total pinned to an
+              // empty twin (rendering 0 after every sale).
+              const mine = Number(s.sales) || 0;
+              let richer = false;
+              for (let i = 0; i < 6 && !richer; i++) {
+                const p = await api('/sync', { anyInstance: true });
+                if (p && p.db_marker !== pin && (Number(p.sales) || 0) > mine) richer = true;
+              }
+              if (richer) convergeInstances().catch(() => {});
             }
           } catch (e) { /* ignore */ }
         }

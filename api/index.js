@@ -79,7 +79,7 @@ const SYNC_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT
 const SYNC_DATA_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT SUM(total) FROM sales),0) || ':' || COALESCE((SELECT SUM(paid_amount) FROM sales),0) || ':' || (SELECT COUNT(*) FROM sale_returns) || '|' || (SELECT COUNT(*) FROM orders) || ':' || COALESCE((SELECT MAX(updated_at) FROM orders),'') || '|' || (SELECT COUNT(*) FROM order_status_history) || '|' || (SELECT COUNT(*) FROM stock_movements) || '|' || (SELECT COUNT(*) FROM products) || ':' || COALESCE((SELECT SUM(selling_price) FROM products),0) || ':' || COALESCE((SELECT SUM(current_stock) FROM products),0) || '|' || (SELECT COUNT(*) FROM purchases) || '|' || (SELECT COUNT(*) FROM expenses) || '|' || (SELECT COUNT(*) FROM customers) || '|' || (SELECT COUNT(*) FROM users) || '|' || (SELECT COUNT(*) FROM payments) || '|' || (SELECT COUNT(*) FROM notifications) || '|' || (SELECT COUNT(*) FROM contact_messages) || '|' || (SELECT COUNT(*) FROM order_returns) || ':' || COALESCE((SELECT MAX(processed_at) FROM order_returns),'') || '|' || '0' || '|' || (SELECT COUNT(*) FROM categories) || ':' || (SELECT COUNT(*) FROM product_categories) || ':' || (SELECT COUNT(*) FROM brands) || ':' || (SELECT COUNT(*) FROM suppliers) || '|' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(sku,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(image,''))+LENGTH(COALESCE(description,''))+LENGTH(COALESCE(unit,''))),0) FROM products) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(phone,''))+LENGTH(COALESCE(email,''))),0) FROM customers) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(email,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(avatar,''))),0) FROM users) AS v";
 
 app.get('/api/sync', (req, res) => {
-  let version = null, dataVersion = null;
+  let version = null, dataVersion = null, sales = null, orders = null, categories = null;
   try {
     // eslint-disable-next-line no-eval
     const m = eval('require')('./backend/src/db');
@@ -94,9 +94,18 @@ app.get('/api/sync', (req, res) => {
         const d = m.db.prepare(SYNC_DATA_SQL).get();
         dataVersion = d && d.v != null ? String(d.v) : null;
       } catch (_) {}
+      // Row counts let the client ELECT a canonical leader: serverless runs
+      // several instances on independent ephemeral disks, and the instance a
+      // session happens to pin first can be an empty twin (sales=0) while
+      // another holds the real data. Reporting counts here lets the client
+      // discover the instance with the most data, merge everything into it,
+      // and re-pin there — so the POS total stops snapping back to 0.
+      try { sales = m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; } catch (_) {}
+      try { orders = m.db.prepare('SELECT COUNT(*) c FROM orders').get().c; } catch (_) {}
+      try { categories = m.db.prepare('SELECT COUNT(*) c FROM categories').get().c; } catch (_) {}
     }
   } catch (_) { version = null; }
-  res.json({ ok: true, version, data_version: dataVersion, db_marker: res.getHeader('X-Db-Marker') || null });
+  res.json({ ok: true, version, data_version: dataVersion, db_marker: res.getHeader('X-Db-Marker') || null, sales, orders, categories });
 });
 
 function safeRoute(routePath) {

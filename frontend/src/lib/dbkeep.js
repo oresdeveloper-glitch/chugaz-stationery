@@ -184,36 +184,65 @@ export async function convergeInstances() {
     if (converging) return 'busy';
     converging = true;
     try {
-      const pin = getDbPin();
-      if (!pin) return 'nopin';
-      const pinned = await api('/sync');
-      if (!pinned || !pinned.version || !pinned.data_version) return 'fail';
-      // Discover EVERY other live instance, not just the first one: serverless
-      // hosting can run several diverged disks at once, and merging with only
-      // one of them leaves a freshly added category (or sale) missing on the
-      // rest — so a refresh that lands on one of those instances makes the new
-      // row appear to vanish. Collect a set of distinct markers instead.
-      const others = new Set();
-      for (let i = 0; i < 24 && others.size < 8; i++) {
+      // Discover EVERY live instance, not just one: serverless hosting runs
+      // several instances on independent ephemeral disks, and the instance a
+      // session happens to pin first can be an EMPTY twin (sales=0) while
+      // another holds the real data. Merging only the pinned instance with one
+      // other leaves the rest diverged, so a refresh that lands on one of them
+      // makes the sale (or category) appear to vanish again.
+      const mine = await api('/sync');
+      if (!mine || !mine.db_marker) return 'fail';
+      const seen = new Map();
+      seen.set(mine.db_marker, mine);
+      for (let i = 0; i < 24 && seen.size < 8; i++) {
         const p = await api('/sync', { anyInstance: true });
-        if (p && p.db_marker && p.db_marker !== pin) others.add(p.db_marker);
+        if (p && p.db_marker && !seen.has(p.db_marker)) seen.set(p.db_marker, p);
       }
-      if (others.size === 0) return 'same';
-      // One pinned backup, pushed to every other instance. The merge is
-      // name-keyed and idempotent, so repeating it across instances is safe
-      // and cannot duplicate or clobber existing rows.
-      const fwd = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, pin);
+      if (seen.size <= 1) return 'same';
+
+      // ELECT the canonical leader: the instance holding the most sales. Ties
+      // break on orders, then categories, then whichever we are already pinned
+      // to. This is what stops the POS "Today" total snapping back to 0 — the
+      // session pins to the instance that actually has the data instead of an
+      // empty twin that happened to answer first.
+      const weight = (s) => [
+        Number(s.sales) || 0,
+        Number(s.orders) || 0,
+        Number(s.categories) || 0,
+      ];
+      const cmp = (a, b) => {
+        const wa = weight(a), wb = weight(b);
+        for (let i = 0; i < wa.length; i++) if (wa[i] !== wb[i]) return wa[i] - wb[i];
+        return 0;
+      };
+      let leader = mine;
+      for (const s of seen.values()) if (cmp(s, leader) > 0) leader = s;
+
+      // Push the leader's rows into every other instance. The merge is
+      // name-keyed and idempotent, so repeating it is safe and cannot
+      // duplicate or clobber existing rows.
+      const fwd = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, leader.db_marker);
       if (!fwd || !fwd.ok) return 'fail';
       let merged = 0;
-      for (const marker of others) {
+      for (const [marker, s] of seen) {
+        if (marker === leader.db_marker) continue;
+        // An instance already at least as full as the leader needs no push.
+        if (cmp(s, leader) >= 0) continue;
         const fd = new FormData();
         fd.append('file', await fwd.blob(), 'converge.db');
         const m = await fetchPinned(`${apiBase()}/api/system/restore-merge`, { method: 'POST', headers: authHeaders(), body: fd }, marker);
         if (m && m.ok) merged += 1;
       }
-      if (merged === 0) return 'fail';
-      await backupNow();
-      console.info('[dbkeep] instances converged — pushed pinned data to', merged, 'instance(s)');
+
+      // Re-pin the session to the leader so every subsequent read (POS total,
+      // dashboard, lists) is answered by the instance holding the data.
+      setDbPin(leader.db_marker);
+      localStorage.setItem(MARKER_KEY, leader.db_marker);
+
+      if (merged > 0) {
+        await backupNow();
+        console.info('[dbkeep] instances converged — leader', leader.db_marker.slice(0, 8), 'pushed to', merged, 'instance(s)');
+      }
       try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'] } })); } catch (e) { /* ignore */ }
       return 'ok';
     } finally {
