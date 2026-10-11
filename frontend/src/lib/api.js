@@ -219,3 +219,20 @@ export function onLive(cb, ms = 800) {
     window.removeEventListener('chugaz-live', handler);
   };
 }
+
+// Wrap a list-loading fetch so only the most-recent call may publish its
+// result. Concurrent/stale loads (a debounce firing alongside a live event, or
+// a response that arrives late from a slower instance) can no longer resolve
+// out-of-order and overwrite newer data with a pre-write snapshot — the cause
+// of a freshly added row (sale, category, product…) flashing in and then
+// disappearing a beat later. Per-key so independent fetches don't cancel.
+export function latest() {
+  let n = 0;
+  return async function () {
+    const seq = ++n;
+    const res = await arguments[0]();
+    if (seq === n) arguments[1](res);
+    else if (arguments[2]) arguments[2]();
+    return res;
+  };
+}

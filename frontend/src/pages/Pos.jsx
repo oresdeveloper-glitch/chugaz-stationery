@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, fmt, getUser, onLive } from '../lib/api';
+import { api, fmt, getUser, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { takeScanned } from '../lib/scanStore';
 import { orderCats, catLabel, catFilterIds, productInCats, categoryIdForBarcode } from '../lib/cats';
@@ -115,16 +115,15 @@ export default function Pos() {
     }
   }, [toast]);
 
-  const loadProducts = async (term) => {
-    try {
-      // A full shared category barcode must return every member of the category
-      // (including products whose primary category is a different one) — the
-      // plain q= search only matches each product's own barcode.
-      const catCode = categoryIdForBarcode(term || '');
-      const p = await api(`/products${term ? (catCode != null ? `?barcode=${encodeURIComponent(term)}` : `?q=${encodeURIComponent(term)}`) : ''}`);
-      setProducts(p.filter((x) => x.status === 'active'));
-    } catch (e) { toast(e.message, 'error'); }
-  };
+  const setProductsLatest = latest();
+  const loadProducts = (term) => setProductsLatest(async () => {
+    // A full shared category barcode must return every member of the category
+    // (including products whose primary category is a different one) — the
+    // plain q= search only matches each product's own barcode.
+    const catCode = categoryIdForBarcode(term || '');
+    const p = await api(`/products${term ? (catCode != null ? `?barcode=${encodeURIComponent(term)}` : `?q=${encodeURIComponent(term)}`) : ''}`);
+    return p.filter((x) => x.status === 'active');
+  }, setProducts).catch((e) => toast(e.message, 'error'));
 
   useEffect(() => {
     loadProducts();

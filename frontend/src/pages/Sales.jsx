@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, fmt, fmtDateTime, getUser, onLive } from '../lib/api';
+import { api, fmt, fmtDateTime, getUser, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
@@ -19,16 +19,15 @@ export default function Sales() {
   const statusFilter = params.get('status') || '';
   const toast = useToast();
 
-  const load = async () => {
-    try {
-      // Cashiers/clerks only ever see their own sales, scoped explicitly to the logged-in user.
-      const q = [
-        statusFilter ? `status=${encodeURIComponent(statusFilter)}` : '',
-        !isSeller && seller ? `created_by=${encodeURIComponent(seller)}` : '',
-      ].filter(Boolean).join('&');
-      setSales(await api(`/sales${q ? '?' + q : ''}`));
-    } catch (e) { toast(e.message, 'error'); }
-  };
+  const setSalesLatest = latest();
+  const load = () => setSalesLatest(async () => {
+    // Cashiers/clerks only ever see their own sales, scoped explicitly to the logged-in user.
+    const q = [
+      statusFilter ? `status=${encodeURIComponent(statusFilter)}` : '',
+      !isSeller && seller ? `created_by=${encodeURIComponent(seller)}` : '',
+    ].filter(Boolean).join('&');
+    return api(`/sales${q ? '?' + q : ''}`);
+  }, setSales).catch((e) => toast(e.message, 'error'));
   useEffect(() => { load(); }, [statusFilter, seller]);
   useEffect(() => onLive(() => { load(); }), [statusFilter, seller]);
   useEffect(() => {

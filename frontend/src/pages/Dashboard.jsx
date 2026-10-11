@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, fmt, getUser, onLive } from '../lib/api';
+import { api, fmt, getUser, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { LineChart, Donut, SplitBar, HBarList, BarChart, Spark } from '../components/charts';
 import { canRole } from '../lib/roles';
@@ -100,18 +100,12 @@ export default function Dashboard() {
   const rangeRef = useRef(range);
   rangeRef.current = range;
 
-  const load = async (r) => {
-    const rr = r || rangeRef.current;
-    setRefreshing(true);
-    try {
-      setData(await api(`/reports/dashboard?range=${rr}`));
-      setUpdated(new Date());
-    } catch (e) {
-      toast(e.message, 'error');
-    } finally {
-      setRefreshing(false);
-    }
-  };
+  const setDash = latest();
+  const load = (r) => setDash(
+    async () => { setRefreshing(true); return api(`/reports/dashboard?range=${r || rangeRef.current}`); },
+    (d) => { setData(d); setUpdated(new Date()); setRefreshing(false); },
+    () => setRefreshing(false),
+  ).catch((e) => { toast(e.message, 'error'); setRefreshing(false); });
 
   useEffect(() => { load(rangeRef.current); }, []);
   useEffect(() => onLive(() => { load(rangeRef.current); }), []);

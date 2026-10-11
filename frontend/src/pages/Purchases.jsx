@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, fmt, fmtDateTime, onLive } from '../lib/api';
+import { api, fmt, fmtDateTime, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
@@ -18,13 +18,12 @@ export default function Purchases() {
 
   const [form, setForm] = useState({ supplier_id: '', invoice_number: '', purchase_date: new Date().toISOString().slice(0, 16), items: [{ product_id: '', quantity: 1, unit_cost: 0 }], paid_amount: 0, payment_method: 'cash', discount: 0, notes: '' });
 
-  const load = async () => {
-    try {
-      const q = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
-      const [p, s, pr] = await Promise.all([api(`/purchases${q}`), api('/suppliers'), api('/products')]);
-      setPurchases(p); setSuppliers(s); setProducts(pr.filter((x) => x.status === 'active'));
-    } catch (e) { toast(e.message, 'error'); }
-  };
+  const setListsLatest = latest();
+  const load = () => setListsLatest(async () => {
+    const q = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    const [p, s, pr] = await Promise.all([api(`/purchases${q}`), api('/suppliers'), api('/products')]);
+    return [p, s, pr];
+  }, ([p, s, pr]) => { setPurchases(p); setSuppliers(s); setProducts(pr.filter((x) => x.status === 'active')); }).catch((e) => toast(e.message, 'error'));
   useEffect(() => { load(); }, [statusFilter]);
   useEffect(() => onLive(load), [statusFilter]);
 

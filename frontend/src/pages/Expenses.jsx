@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmt, fmtDate, onLive } from '../lib/api';
+import { api, fmt, fmtDate, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
@@ -9,9 +9,8 @@ export default function Expenses() {
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
-  const load = async () => {
-    try { setExpenses(await api('/expenses')); } catch (e) { toast(e.message, 'error'); }
-  };
+  const setExpensesLatest = latest();
+  const load = () => setExpensesLatest(() => api('/expenses'), setExpenses).catch((e) => toast(e.message, 'error'));
   useEffect(() => { load(); }, []);
   useEffect(() => onLive(load), []);
 

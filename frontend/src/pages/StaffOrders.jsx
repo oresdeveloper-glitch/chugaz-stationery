@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { api, fmt, fmtDateTime, getUser, lockPrintRedirect, unlockPrintRedirect, onLive } from '../lib/api';
+import { api, fmt, fmtDateTime, getUser, lockPrintRedirect, unlockPrintRedirect, onLive, latest } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { useToast } from '../components/Toast';
 import I from '../components/icons';
@@ -23,14 +23,14 @@ export default function StaffOrders() {
   const me = getUser();
   const isAdminView = canRole(me, 'manager');
 
-  const load = async () => {
+  const setOrdersLatest = latest();
+  const setStatsLatest = latest();
+  const load = () => {
     const query = new URLSearchParams();
     if (filter !== 'all') query.set('status', filter);
     if (q) query.set('q', q);
-    try {
-      setOrders(await api(`/orders?${query.toString()}`));
-      setStats(await api('/orders/stats'));
-    } catch (e) { toast(e.message, 'error'); }
+    setOrdersLatest(() => api(`/orders?${query.toString()}`), setOrders).catch((e) => toast(e.message, 'error'));
+    setStatsLatest(() => api('/orders/stats'), setStats).catch((e) => toast(e.message, 'error'));
   };
   useEffect(() => { load(); }, [filter]);
   useEffect(() => onLive(() => { if (selected) refreshSelected(); else load(); }), [filter, q, selected]);

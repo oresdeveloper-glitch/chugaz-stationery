@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, fmt, fmtDateTime, onLive } from '../lib/api';
+import { api, fmt, fmtDateTime, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
@@ -15,16 +15,15 @@ export default function Inventory() {
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
-  const load = async () => {
-    try {
-      const [m, l, p] = await Promise.all([
-        api('/stock/movements'),
-        api('/stock/low'),
-        api('/products'),
-      ]);
-      setMovements(m); setLow(l); setProducts(p);
-    } catch (e) { toast(e.message, 'error'); }
-  };
+  const setListsLatest = latest();
+  const load = () => setListsLatest(async () => {
+    const [m, l, p] = await Promise.all([
+      api('/stock/movements'),
+      api('/stock/low'),
+      api('/products'),
+    ]);
+    return [m, l, p];
+  }, ([m, l, p]) => { setMovements(m); setLow(l); setProducts(p); }).catch((e) => toast(e.message, 'error'));
   useEffect(() => { load(); }, []);
   useEffect(() => onLive(load), []);
 

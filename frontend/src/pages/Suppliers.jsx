@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmt, onLive } from '../lib/api';
+import { api, fmt, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 
@@ -9,9 +9,8 @@ export default function Suppliers() {
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
-  const load = async () => {
-    try { setSuppliers(await api('/suppliers')); } catch (e) { toast(e.message, 'error'); }
-  };
+  const setSuppliersLatest = latest();
+  const load = () => setSuppliersLatest(() => api('/suppliers'), setSuppliers).catch((e) => toast(e.message, 'error'));
   useEffect(() => { load(); }, []);
   useEffect(() => onLive(load), []);
 

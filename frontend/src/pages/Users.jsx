@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmtDateTime, onLive } from '../lib/api';
+import { api, fmtDateTime, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 import { getUser } from '../lib/api';
@@ -13,12 +13,11 @@ export default function Users() {
   const toast = useToast();
   const me = getUser();
 
-  const load = async () => {
-    try {
-      const [u, r, o] = await Promise.all([api('/users'), api('/users/roles'), api('/offices')]);
-      setUsers(u); setRoles(r); setOffices(o);
-    } catch (e) { toast(e.message, 'error'); }
-  };
+  const setListsLatest = latest();
+  const load = () => setListsLatest(async () => {
+    const [u, r, o] = await Promise.all([api('/users'), api('/users/roles'), api('/offices')]);
+    return [u, r, o];
+  }, ([u, r, o]) => { setUsers(u); setRoles(r); setOffices(o); }).catch((e) => toast(e.message, 'error'));
   useEffect(() => { load(); }, []);
   useEffect(() => onLive(load), []);
 

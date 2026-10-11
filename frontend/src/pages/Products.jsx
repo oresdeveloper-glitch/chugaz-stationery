@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { api, fmt, getUser, onLive } from '../lib/api';
+import { api, fmt, getUser, onLive, latest } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { orderCats, catLabel, catFilterIds, productInCats, categoryBarcode } from '../lib/cats';
 import { useToast } from '../components/Toast';
@@ -48,14 +48,15 @@ export default function Products() {
     finally { setGenerating(false); }
   };
 
-  const load = async () => {
+  const setLists = latest();
+  const load = () => setLists(async () => {
     const [p, c, b] = await Promise.all([
       api(`/products${q ? `?q=${encodeURIComponent(q)}` : ''}`),
       api('/products/cats/all'),
       api('/products/brands/all'),
     ]);
-    setProducts(p); setCategories(c); setBrands(b);
-  };
+    return [p, c, b];
+  }, ([p, c, b]) => { setProducts(p); setCategories(c); setBrands(b); });
 
   useEffect(() => {
     const t = setTimeout(load, 300);

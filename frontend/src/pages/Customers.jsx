@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmt, fmtDateTime, getUser, onLive } from '../lib/api';
+import { api, fmt, fmtDateTime, getUser, onLive, latest } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
@@ -12,9 +12,8 @@ export default function Customers() {
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
-  const load = async () => {
-    try { setCustomers(await api('/customers')); } catch (e) { toast(e.message, 'error'); }
-  };
+  const setCustomersLatest = latest();
+  const load = () => setCustomersLatest(() => api('/customers'), setCustomers).catch((e) => toast(e.message, 'error'));
   useEffect(() => { load(); }, []);
   useEffect(() => onLive(load), []);
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmtDateTime, onLive } from '../lib/api';
+import { api, fmtDateTime, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 
 export default function Messages() {
@@ -7,12 +7,11 @@ export default function Messages() {
   const [selected, setSelected] = useState(null);
   const toast = useToast();
 
-  const load = async () => {
-    try {
-      const res = await api('/messages');
-      setMessages(res.messages || res);
-    } catch (e) { toast(e.message, 'error'); }
-  };
+  const setMsgs = latest();
+  const load = () => setMsgs(async () => {
+    const res = await api('/messages');
+    return res.messages || res;
+  }, setMessages).catch((e) => toast(e.message, 'error'));
   useEffect(() => { load(); }, []);
   useEffect(() => onLive(load), []);
 
