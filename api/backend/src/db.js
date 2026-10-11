@@ -90,6 +90,12 @@ try {
     real.exec('CREATE TABLE IF NOT EXISTS order_status_history (\n id INTEGER PRIMARY KEY AUTOINCREMENT,\n order_id INTEGER NOT NULL REFERENCES orders(id),\n from_status TEXT,\n to_status TEXT,\n action TEXT NOT NULL,\n changed_by INTEGER REFERENCES users(id),\n changed_by_name TEXT,\n changed_by_role TEXT,\n office_id INTEGER REFERENCES offices(id),\n office_name TEXT,\n notes TEXT,\n created_at TEXT NOT NULL DEFAULT (datetime(\'now\'))\n)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_order_history_order ON order_status_history(order_id)');
     if (!hasColumn('users', 'avatar')) real.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
+    // Hot-path indexes: the POS "Today" view filters sales by created_by on
+    // every load, sales lists filter by customer, and purchases filter by
+    // supplier. Without these the queries full-scan as data grows.
+    real.exec('CREATE INDEX IF NOT EXISTS idx_sales_created_by ON sales(created_by)');
+    real.exec('CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id)');
+    real.exec('CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON purchases(supplier_id)');
   }
   migrate();
 
