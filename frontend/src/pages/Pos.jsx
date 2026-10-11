@@ -172,6 +172,7 @@ export default function Pos() {
       };
       const result = await api('/sales', { method: 'POST', body });
       try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sale'] } })); } catch (e) { /* ignore */ }
+      try { window.dispatchEvent(new Event('chugaz-mutated')); } catch (e) { /* ignore */ }
       const sale = await api(`/sales/${result.id}`);
       setReceipt(sale);
       setCart([]); setDiscount(0); setPaid(''); setCustomerId('');

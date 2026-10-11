@@ -174,6 +174,13 @@ async function request(path, options = {}, shop = false) {
    if (data && data.code) err.code = data.code;
    throw err;
   }
+  // A write landed: nudge the app's live poller so the version check re-runs a
+  // couple of times and any open dashboard/list resyncs to the committed totals
+  // right away, instead of waiting for the next scheduled poll (which could
+  // still be answered by an instance that hasn't seen the write yet).
+  if (!idempotent) {
+    try { window.dispatchEvent(new Event('chugaz-mutated')); } catch {}
+  }
   return data;
 }
 

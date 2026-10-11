@@ -56,6 +56,23 @@ export default function App() {
     return () => window.removeEventListener('focus', onFocus);
   }, []);
 
+  // Mutation convergence nudge. On serverless the dashboard can briefly show
+  // only the latest transaction (or an old total) when a version check lands on
+  // an instance that hasn't seen the write yet, and once the version settles no
+  // further change is announced so the stale number sticks. After a write we
+  // force a couple of extra version checks a beat apart so the announced
+  // version reflects committed data from whichever instance answers, and the
+  // 'chugaz-live' resync always carries the fresh, accumulated totals.
+  useEffect(() => {
+    let n = 0;
+    const onMut = () => {
+      const me = ++n;
+      [600, 1800].forEach((ms) => setTimeout(() => { if (me === n) window.dispatchEvent(new Event('chugaz-nudge')); }, ms));
+    };
+    window.addEventListener('chugaz-mutated', onMut);
+    return () => window.removeEventListener('chugaz-mutated', onMut);
+  }, []);
+
   // Global live-data poller: fetch a cheap version hash and announce a single
   // 'chugaz-live' event whenever it changes, so every open page refetches its
   // own data in place — no page reloads, no per-page intervals. Skipped while
@@ -127,13 +144,16 @@ export default function App() {
     tick();
     const id = setInterval(tick, 4000);
     const onVis = () => { if (!document.hidden) tick(); };
+    const onNudge = () => tick();
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('focus', onVis);
+    window.addEventListener('chugaz-nudge', onNudge);
     return () => {
       stopped = true;
       clearInterval(id);
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('focus', onVis);
+      window.removeEventListener('chugaz-nudge', onNudge);
     };
   }, []);
   return (
