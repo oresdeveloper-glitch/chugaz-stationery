@@ -3,6 +3,13 @@ const USER_KEY = 'sst_user';
 const SHOP_TOKEN_KEY = 'sst_shop_token';
 const SHOP_USER_KEY = 'sst_shop_user';
 
+// Registered by dbkeep.js (which imports this module, so we cannot import it
+// back without a cycle) to run an urgent backup after each successful write —
+// that is how a freshly added category is folded into the browser snapshot
+// before a serverless cold reset can wipe it.
+let onWriteFn = null;
+export function registerOnWrite(fn) { onWriteFn = fn; }
+
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -180,6 +187,7 @@ async function request(path, options = {}, shop = false) {
   // still be answered by an instance that hasn't seen the write yet).
   if (!idempotent) {
     try { window.dispatchEvent(new Event('chugaz-mutated')); } catch {}
+    try { if (onWriteFn) onWriteFn(); } catch {}
   }
   return data;
 }

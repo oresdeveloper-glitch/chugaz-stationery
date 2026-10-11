@@ -1,16 +1,27 @@
-import { getToken, getUser, getDbPin, setDbPin, api } from './api';
+import { getToken, getUser, getDbPin, setDbPin, api, registerOnWrite } from './api';
+
+// Wire the urgent post-write backup into the api() write path (see api.js
+// registerOnWrite). Every successful mutation refreshes the browser snapshot
+// ~8s later, so freshly added categories are folded in long before a cold reset.
+registerOnWrite(schedulePostWriteBackup);
 
 const MARKER_KEY = 'sst_db_marker';
+const CATS_KEY = 'sst_db_cats';
 const DB_NAME = 'sst-keep';
 const STORE = 'kv';
 const BACKUP_KEY = 'backup';
 const BACKUP_INTERVAL_MS = 10 * 60 * 1000;
+// A write can land right before a serverless cold reset, so the periodic
+// 10-minute snapshot may not include it — the write path schedules a much
+// sooner follow-up so the new row is captured long before the next interval.
+const POST_WRITE_BACKUP_MS = 8 * 1000;
 
 let scheduled = false;
 let checking = false;
 let backing = false;
 let converging = false;
 let liveBackupTimer = null;
+let postWriteTimer = null;
 
 function apiBase() {
   return (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
@@ -209,6 +220,16 @@ export async function convergeInstances() {
   }
 }
 
+// Called by the api() write path after any successful admin/manager mutation
+// (e.g. a new category). Schedules one urgent backup so the new row is folded
+// into the browser snapshot well before the next 10-minute interval — the
+// difference between a category surviving a cold reset and silently vanishing.
+export function schedulePostWriteBackup() {
+  if (!canKeep()) return;
+  clearTimeout(postWriteTimer);
+  postWriteTimer = setTimeout(backupNow, POST_WRITE_BACKUP_MS);
+}
+
 // Runs on app mount, on focus and after login. Detects an ephemeral-disk
 // reset by comparing the server's persisted db_marker with the one stored
 // locally; for admin/manager sessions the last IndexedDB backup is then MERGED
@@ -226,14 +247,31 @@ export async function dbKeepInit() {
     if (!getDbPin()) setDbPin(h.db_marker);
 
     const stored = localStorage.getItem(MARKER_KEY);
+    const cats = h.categories == null ? null : Number(h.categories);
+
     if (!stored) {
       localStorage.setItem(MARKER_KEY, h.db_marker);
+      if (cats != null) localStorage.setItem(CATS_KEY, String(cats));
       return;
     }
-    if (stored === h.db_marker) return;
+
+    if (stored === h.db_marker) {
+      // Same marker, but the server reports FEWER categories than we last
+      // recorded. That means this instance lost user-added categories while the
+      // marker happened to survive (or a reset regenerated an identical marker).
+      // Merging the snapshot restores the missing rows without touching data
+      // that already exists on the server, so this is safe to run on keep-sessions.
+      const lastCats = Number(localStorage.getItem(CATS_KEY) || 0);
+      if (canKeepSess && cats != null && lastCats > 0 && cats < lastCats) {
+        try { await restoreFromBackup(h.db_marker); } catch (_) { /* keep init non-fatal */ }
+      }
+      if (cats != null) localStorage.setItem(CATS_KEY, String(Math.max(cats, lastCats)));
+      return;
+    }
 
     if (canKeepSess) {
       const result = await restoreFromBackup(h.db_marker);
+      if (cats != null) localStorage.setItem(CATS_KEY, String(cats));
       if (result === 'ok') return;
       if (result === 'failed') return;
       localStorage.setItem(MARKER_KEY, h.db_marker);
@@ -241,6 +279,7 @@ export async function dbKeepInit() {
       if (!virgin) backupNow();
       return;
     }
+    if (cats != null) localStorage.setItem(CATS_KEY, String(cats));
     // Non-keep sessions (cashier/clerk/customer): remember the new marker ONLY
     // when there is no stored snapshot — stamping it while a backup exists
     // would hide the reset from the next admin/manager session and their merge

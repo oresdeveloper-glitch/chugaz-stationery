@@ -87,14 +87,15 @@ app.use('/api/system', staff, require('./src/routes/system'));
 app.get('/api/health', (req, res) => {
   try {
     const m = require('./src/db');
-    let users = null, db_marker = null, sales = null, orders = null;
+    let users = null, db_marker = null, sales = null, orders = null, categories = null;
     if (m.dbReady) {
       try { users = m.db.prepare('SELECT COUNT(*) c FROM users').get().c; } catch (_) {}
       try { db_marker = m.db.prepare("SELECT value FROM settings WHERE key='db_marker'").get()?.value || null; } catch (_) {}
       try { sales = m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; } catch (_) {}
       try { orders = m.db.prepare('SELECT COUNT(*) c FROM orders').get().c; } catch (_) {}
+      try { categories = m.db.prepare('SELECT COUNT(*) c FROM categories').get().c; } catch (_) {}
     }
-    res.json({ ok: true, db: m.dbReady ? 'connected' : 'degraded', users, db_marker, sales, orders });
+    res.json({ ok: true, db: m.dbReady ? 'connected' : 'degraded', users, db_marker, sales, orders, categories });
   } catch (_) {
     res.json({ ok: true, db: 'connected', users: null, db_marker: null, sales: null, orders: null });
   }
