@@ -422,7 +422,9 @@ router.delete('/:id/images/:imgId', requireRole('admin'), (req, res) => {
 });
 
 router.get('/cats/all', (req, res) => {
- res.json(db.prepare('SELECT * FROM categories ORDER BY name').all());
+ // Each category's shared barcode (601 + id + check digit) travels with the
+ // row so the UI can show/print it the moment a category is created.
+ res.json(db.prepare('SELECT * FROM categories ORDER BY name').all().map((c) => ({ ...c, barcode: categoryBarcode(c.id) })));
 });
 
 router.post('/cats', requireRole('admin', 'manager'), (req, res) => {

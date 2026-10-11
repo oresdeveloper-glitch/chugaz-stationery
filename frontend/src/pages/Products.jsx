@@ -1,7 +1,7 @@
 ﻿import { useEffect, useState } from 'react';
 import { api, fmt, getUser, onLive } from '../lib/api';
 import { canRole } from '../lib/roles';
-import { orderCats, catLabel, catFilterIds, productInCats } from '../lib/cats';
+import { orderCats, catLabel, catFilterIds, productInCats, categoryBarcode } from '../lib/cats';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 import Barcode from '../components/Barcode';
@@ -31,6 +31,7 @@ export default function Products() {
   const [catPicker, setCatPicker] = useState([]);
   const [catPick, setCatPick] = useState('');
   const [catSelected, setCatSelected] = useState([]);
+  const [barcodeCat, setBarcodeCat] = useState(null);
   const [gallery, setGallery] = useState(null);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -203,13 +204,17 @@ export default function Products() {
     setSaving(true);
     try {
       let catId = catModal.id;
+      const catName = catModal.name.trim();
       if (catModal.id) {
-        await api(`/products/cats/${catModal.id}`, { method: 'PUT', body: { name: catModal.name.trim(), description: catModal.description } });
+        await api(`/products/cats/${catModal.id}`, { method: 'PUT', body: { name: catName, description: catModal.description } });
         toast('Category updated');
       } else {
-        const created = await api('/products/cats', { method: 'POST', body: { name: catModal.name.trim(), description: catModal.description || null, parent_id: catModal.parent_id || null } });
+        const created = await api('/products/cats', { method: 'POST', body: { name: catName, description: catModal.description || null, parent_id: catModal.parent_id || null } });
         catId = created && created.id;
         toast(catModal.parent_id ? 'Subcategory added' : 'Category added');
+        // Show the generated barcode right away so the label can be printed
+        // before leaving the screen.
+        if (catId) setBarcodeCat({ id: catId, name: catName, barcode: categoryBarcode(catId) });
       }
       // Pull the tapped products into the category via multi-category membership.
       // The product's own barcode is re-sent so the PUT keeps it (otherwise it
@@ -244,6 +249,8 @@ export default function Products() {
   const orderedCats = orderCats(categories);
   const catIds = cat ? catFilterIds(categories, cat) : null;
   const filtered = catIds ? products.filter((p) => productInCats(p, catIds)) : products;
+  const openBarcodeCat = (c) => setBarcodeCat({ id: c.id, name: c.name, barcode: c.barcode || categoryBarcode(c.id) });
+  const editCatBarcode = catModal?.id ? (categories.find((c) => c.id === catModal.id)?.barcode || categoryBarcode(catModal.id)) : null;
 
   return (
     <div>
@@ -347,6 +354,7 @@ export default function Products() {
                     <td className="muted">{c.description || '-'}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
                       {!c.parent_id && <button className="btn sm" style={{ marginRight: 6 }} onClick={() => openCat(null, c.id)}>+ Subcategory</button>}
+                      <button className="btn sm" style={{ marginRight: 6 }} onClick={() => openBarcodeCat(c)}>Barcode</button>
                       <button className="btn sm" style={{ marginRight: 6 }} onClick={() => openCat(c)}>Edit</button>
                       <button className="btn sm danger" onClick={async () => { try { await api(`/products/cats/${c.id}`, { method: 'DELETE' }); load(); } catch (e) { toast(e.message, 'error'); } }}>Delete</button>
                     </td>
@@ -540,6 +548,13 @@ export default function Products() {
             <label>Name <em>*</em></label>
             <input value={catModal?.name || ''} onChange={(e) => setCatModal({ ...catModal, name: e.target.value })} placeholder="e.g. A4 Files" autoFocus />
           </div>
+          {editCatBarcode && (
+            <div style={{ margin: '0 0 12px', textAlign: 'center' }}>
+              <div className="muted small" style={{ marginBottom: 4 }}>Category barcode (products in this category share it)</div>
+              <Barcode code={editCatBarcode} />
+              <div className="muted small" style={{ marginTop: 4, fontFamily: 'monospace', letterSpacing: 2 }}>{editCatBarcode}</div>
+            </div>
+          )}
           <div className="field">
             <label>Item types <span className="muted small">(optional)</span></label>
             {catModal?.id && catItems.length > 0 && (
@@ -611,6 +626,27 @@ export default function Products() {
             <button type="submit" className="btn primary" disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
           </div>
         </form>
+      </Modal>
+
+      <Modal open={!!barcodeCat} onClose={() => setBarcodeCat(null)} title="Category barcode">
+        {barcodeCat && (
+          <div id="cat-barcode-label" style={{ textAlign: 'center', padding: 10 }}>
+            <style>{`
+              @media print {
+                body * { visibility: hidden; }
+                #cat-barcode-label, #cat-barcode-label * { visibility: visible; }
+                #cat-barcode-label { position: absolute; left: 0; top: 0; width: 100%; }
+              }
+            `}</style>
+            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 12 }}>{barcodeCat.name}</div>
+            <Barcode code={barcodeCat.barcode} height={80} module={3} />
+            <div className="muted small" style={{ marginTop: 8, fontFamily: 'monospace', letterSpacing: 2 }}>{barcodeCat.barcode}</div>
+            <p className="muted small" style={{ marginTop: 12 }}>
+              Scan this code at the till to open this category's items. Every product in the category shares it automatically.
+            </p>
+            <button type="button" className="btn primary" style={{ marginTop: 10 }} onClick={() => window.print()}>Print</button>
+          </div>
+        )}
       </Modal>
     </div>
   );

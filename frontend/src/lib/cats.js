@@ -51,3 +51,18 @@ export function categoryIdForBarcode(code) {
   const id = Number(s.slice(3, 12));
   return id > 0 ? id : null;
 }
+
+// Generate a category's shared barcode (601 + 9-digit id + EAN-13 check digit)
+// — mirrors the server so the UI can show and print it the moment a category
+// is created, with no extra round-trip.
+export function categoryBarcode(catId) {
+  const id = Number(catId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const base = `601${String(id).padStart(9, '0')}`;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const d = Number(base[i]);
+    sum += i % 2 === 0 ? d : d * 3;
+  }
+  return base + ((10 - (sum % 10)) % 10);
+}
