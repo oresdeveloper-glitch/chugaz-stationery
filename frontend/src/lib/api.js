@@ -140,7 +140,14 @@ async function request(path, options = {}, shop = false) {
   const idempotent = !options.method || options.method === 'GET' || options.method === 'HEAD';
   const send = () => {
     const h = { ...headers };
-    if (dbPin && affinity) h['X-Expect-Db-Marker'] = dbPin;
+    // Always read the pin via getDbPin(): the in-memory var starts null on a
+    // fresh load, and a request sent WITHOUT the pin lands on a random
+    // instance (serverless round-robin). That instance may be an empty twin,
+    // so the first fetches after a reload briefly render 0 before the pin
+    // settles — reading through the getter restores the persisted pin on the
+    // very first request instead.
+    const pin = getDbPin();
+    if (pin && affinity) h['X-Expect-Db-Marker'] = pin;
     return fetch(url, { ...options, headers: h });
   };
 
@@ -165,8 +172,9 @@ async function request(path, options = {}, shop = false) {
   }
   const answered = res.headers.get('X-Db-Marker');
   if (answered && !options.anyInstance) {
-    if (!dbPin) setDbPin(answered);
-    else if (answered !== dbPin && affinity && !idempotent) setDbPin(answered);
+    const cur = getDbPin();
+    if (!cur) setDbPin(answered);
+    else if (answered !== cur && affinity && !idempotent) setDbPin(answered);
   }
   if (res.status === 401 && recoverable) {
     // A lone 401 can be transient on serverless hosting (the request lands on

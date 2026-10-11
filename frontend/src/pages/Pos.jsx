@@ -89,13 +89,16 @@ export default function Pos() {
     localStorage.setItem(heldKey, JSON.stringify(list));
   };
 
-  const loadShift = async () => {
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const rows = await api(`/sales?from=${today}&to=${today}&created_by=${me?.id || ''}`);
-      setShift({ count: rows.length, total: rows.reduce((s, r) => s + Number(r.total || 0), 0) });
-    } catch { /* non-critical */ }
-  };
+  // latest() guards the Today total against a stale response overwriting the
+  // fresh one: after a sale the poller resyncs several times, and without the
+  // guard an older in-flight fetch could resolve last and snap the total back
+  // to a pre-sale (or empty-instance) figure.
+  const setShiftLatest = latest();
+  const loadShift = () => setShiftLatest(async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = await api(`/sales?from=${today}&to=${today}&created_by=${me?.id || ''}`);
+    return { count: rows.length, total: rows.reduce((s, r) => s + Number(r.total || 0), 0) };
+  }, setShift).catch(() => { /* non-critical */ });
 
   useEffect(() => { loadHeld(); loadShift(); }, []);
 
