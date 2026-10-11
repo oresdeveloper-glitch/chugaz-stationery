@@ -28,6 +28,9 @@ export default function Products() {
   const [modal, setModal] = useState(null);
   const [catModal, setCatModal] = useState(null);
   const [catItems, setCatItems] = useState([]);
+  const [catPicker, setCatPicker] = useState([]);
+  const [catPick, setCatPick] = useState('');
+  const [catSelected, setCatSelected] = useState([]);
   const [gallery, setGallery] = useState(null);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -143,6 +146,8 @@ export default function Products() {
       description: c ? (c.description || '') : '',
       parent_id: c ? (c.parent_id || null) : parentId,
     });
+    setCatPick('');
+    setCatSelected([]);
     // Item types are picked from the products already inside the category.
     if (c && c.id) {
       api(`/products?category_id=${c.id}`)
@@ -151,6 +156,10 @@ export default function Products() {
     } else {
       setCatItems([]);
     }
+    // Full catalog for the tap-to-add picker (active base products, variants skipped).
+    api('/products')
+      .then((rows) => setCatPicker((rows || []).filter((p) => p.status === 'active' && !p.parent_id)))
+      .catch(() => setCatPicker([]));
   };
 
   const catTypes = (catModal?.description || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -161,6 +170,25 @@ export default function Products() {
       : [...catTypes, name];
     setCatModal({ ...catModal, description: next.join(', ') });
   };
+  // Tapping a catalog product selects it for the category (attached on save)
+  // and adds its name to the item types without removing any other type.
+  const togglePick = (p) => {
+    const on = catSelected.some((x) => x.id === p.id);
+    if (on) {
+      setCatSelected(catSelected.filter((x) => x.id !== p.id));
+      toggleItemType(p.name);
+      return;
+    }
+    setCatSelected([...catSelected, { id: p.id, name: p.name }]);
+    const has = catTypes.some((t) => t.toLowerCase() === String(p.name).toLowerCase());
+    if (!has) setCatModal({ ...catModal, description: [...catTypes, p.name].join(', ') });
+  };
+  const inCat = new Set(catItems.map((x) => x.id));
+  const pickQ = catPick.trim().toLowerCase();
+  const pickRows = catPicker
+    .filter((p) => !inCat.has(p.id))
+    .filter((p) => !pickQ || String(p.name).toLowerCase().includes(pickQ) || String(p.sku || '').toLowerCase().includes(pickQ))
+    .slice(0, 120);
   const useAllCatItems = () => {
     const merged = [...catTypes];
     for (const it of catItems) {
@@ -174,14 +202,33 @@ export default function Products() {
     if (!catModal.name.trim()) return toast('Category name is required', 'error');
     setSaving(true);
     try {
+      let catId = catModal.id;
       if (catModal.id) {
         await api(`/products/cats/${catModal.id}`, { method: 'PUT', body: { name: catModal.name.trim(), description: catModal.description } });
         toast('Category updated');
       } else {
-        await api('/products/cats', { method: 'POST', body: { name: catModal.name.trim(), description: catModal.description || null, parent_id: catModal.parent_id || null } });
+        const created = await api('/products/cats', { method: 'POST', body: { name: catModal.name.trim(), description: catModal.description || null, parent_id: catModal.parent_id || null } });
+        catId = created && created.id;
         toast(catModal.parent_id ? 'Subcategory added' : 'Category added');
       }
+      // Pull the tapped products into the category via multi-category membership.
+      // The product's own barcode is re-sent so the PUT keeps it (otherwise it
+      // would be replaced by the primary category's shared barcode), and the
+      // membership list is re-read fresh so a concurrent edit is not lost.
+      let attached = 0;
+      if (catId) {
+        for (const pick of catSelected) {
+          const full = await api(`/products/${pick.id}`);
+          if (!full) continue;
+          const ids = [...new Set([...(full.category_ids || []).map(Number), Number(catId)])];
+          await api(`/products/${pick.id}`, { method: 'PUT', body: { category_ids: ids, barcode: full.barcode || undefined } });
+          attached++;
+        }
+      }
       setCatModal(null);
+      setCatSelected([]);
+      setCatPick('');
+      if (attached) toast(`${attached} product${attached > 1 ? 's' : ''} added to this category`);
       load();
     } catch (err) { toast(err.message, 'error'); }
     finally { setSaving(false); }
@@ -495,50 +542,66 @@ export default function Products() {
           </div>
           <div className="field">
             <label>Item types <span className="muted small">(optional)</span></label>
-            {catModal?.id ? (
-              catItems.length > 0 ? (
-                <>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {catItems.map((it) => {
-                      const on = catTypes.some((t) => t.toLowerCase() === String(it.name).toLowerCase());
-                      return (
-                        <button
-                          type="button"
-                          key={it.id}
-                          className={`btn sm${on ? ' primary' : ''}`}
-                          onClick={() => toggleItemType(it.name)}
-                        >
-                          {on ? '✓ ' : '+ '}{it.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                    <button type="button" className="btn sm" onClick={useAllCatItems}>Use all items</button>
-                    {catTypes.length > 0 && (
-                      <button type="button" className="btn sm" onClick={() => setCatModal({ ...catModal, description: '' })}>Clear</button>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <p className="muted small">No items in this category yet. Add items from the Products tab and they will appear here to pick as item types.</p>
-              )
-            ) : (
-              <textarea
-                rows="3"
-                value={catModal?.description || ''}
-                onChange={(e) => setCatModal({ ...catModal, description: e.target.value })}
-                placeholder="Comma-separated item types shown to cashiers when this category's barcode is scanned, e.g.: A4 box file, A4 spring file, A4 clear file"
-              />
+            {catModal?.id && catItems.length > 0 && (
+              <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {catItems.map((it) => {
+                    const on = catTypes.some((t) => t.toLowerCase() === String(it.name).toLowerCase());
+                    return (
+                      <button
+                        type="button"
+                        key={it.id}
+                        className={`btn sm${on ? ' primary' : ''}`}
+                        onClick={() => toggleItemType(it.name)}
+                      >
+                        {on ? '✓ ' : '+ '}{it.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button type="button" className="btn sm" onClick={useAllCatItems}>Use all items</button>
+                  {catTypes.length > 0 && (
+                    <button type="button" className="btn sm" onClick={() => setCatModal({ ...catModal, description: '' })}>Clear</button>
+                  )}
+                </div>
+              </>
             )}
-            {catModal?.id && catTypes.length > 0 && (
-              <textarea
-                rows="2"
-                style={{ marginTop: 8 }}
-                value={catModal?.description || ''}
-                onChange={(e) => setCatModal({ ...catModal, description: e.target.value })}
+            <div style={{ marginTop: 10 }}>
+              <div className="muted small" style={{ marginBottom: 4 }}>
+                Pick from existing products — tap to select: the product is added to this category and its name becomes an item type (no typing needed).
+              </div>
+              <input
+                value={catPick}
+                onChange={(e) => setCatPick(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                placeholder="Search products by name or SKU..."
+                style={{ width: '100%' }}
               />
-            )}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, maxHeight: 170, overflowY: 'auto' }}>
+                {pickRows.map((p) => {
+                  const on = catSelected.some((x) => x.id === p.id);
+                  return (
+                    <button
+                      type="button"
+                      key={p.id}
+                      className={`btn sm${on ? ' primary' : ''}`}
+                      onClick={() => togglePick(p)}
+                    >
+                      {on ? '✓ ' : '+ '}{p.name}
+                    </button>
+                  );
+                })}
+                {!pickRows.length && <span className="muted small">No products match.</span>}
+              </div>
+            </div>
+            <textarea
+              rows="3"
+              style={{ marginTop: 10 }}
+              value={catModal?.description || ''}
+              onChange={(e) => setCatModal({ ...catModal, description: e.target.value })}
+              placeholder="Item types shown to cashiers when this category's barcode is scanned — tap products above or type comma-separated, e.g.: A4 box file, A4 spring file, A4 clear file"
+            />
             <p className="muted small" style={{ marginTop: 4 }}>
               When several items share this category's barcode, the scanner shows these item types so the cashier can pick the exact product.
             </p>
