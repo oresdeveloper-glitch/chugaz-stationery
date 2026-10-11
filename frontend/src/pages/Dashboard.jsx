@@ -386,7 +386,7 @@ export default function Dashboard() {
           <div className="stats-grid">
             <KpiCard label={`Sales · ${data.range.label}`} value={k.sales} currency={cur} color="amber"
               spark={trendData} sparkKey="sales" trend={data.kpi.trend.sales}
-              sub={`${k.count} transaction${k.count === 1 ? '' : 's'}`} />
+              sub={`${k.count} txn${k.count === 1 ? '' : 's'}${Number(data.stats.range_online_revenue) > 0 ? ` · +${fmt(data.stats.range_online_revenue)} online = ${fmt(data.stats.range_total_revenue)} total` : ''}`} />
             <KpiCard label={`Profit · ${data.range.label}`} value={k.profit} currency={cur} color="amber"
               spark={trendData} sparkKey="profit" trend={data.kpi.trend.profit}
               sub={`margin ${k.margin}%`} />

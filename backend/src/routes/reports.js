@@ -200,22 +200,24 @@ router.get('/dashboard', (req, res) => {
   currency,
  };
 
- const stats = {
-  total_products: inventory.product_count,
-  total_stock: isAdmin ? inventory.stock_units : 0,
-  inventory_value_cost: isAdmin ? inventory.cost : 0,
-  inventory_value_retail: isAdmin ? inventory.retail : 0,
-  low_stock_count: isAdmin ? lowStockCount : 0,
-  out_of_stock: isAdmin ? outStockCount : 0,
-  pending_customer_balance: ar.total,
-  pending_supplier_balance: ap.total,
-  pending_orders: pendingOrders.count,
-  orders_today_count: num(ordersToday.count),
-  orders_today_total: num(ordersToday.total),
-  range_expenses: num(curExpenses.total),
-  range_sales: num(curSales.sales),
-  range_profit: num(curProfit.profit),
- };
+  const stats = {
+   total_products: inventory.product_count,
+   total_stock: isAdmin ? inventory.stock_units : 0,
+   inventory_value_cost: isAdmin ? inventory.cost : 0,
+   inventory_value_retail: isAdmin ? inventory.retail : 0,
+   low_stock_count: isAdmin ? lowStockCount : 0,
+   out_of_stock: isAdmin ? outStockCount : 0,
+   pending_customer_balance: ar.total,
+   pending_supplier_balance: ap.total,
+   pending_orders: pendingOrders.count,
+   orders_today_count: num(ordersToday.count),
+   orders_today_total: num(ordersToday.total),
+   range_expenses: num(curExpenses.total),
+   range_sales: num(curSales.sales),
+   range_online_revenue: num(byChannel[1].revenue),
+   range_total_revenue: num(curSales.sales) + num(byChannel[1].revenue),
+   range_profit: num(curProfit.profit),
+  };
 
  res.json({
   range: { key: range, label: b.label, prevLabel: b.prevLabel },
