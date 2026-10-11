@@ -108,7 +108,11 @@ export default function App() {
             const u = getUser();
             const p = await api('/sync', { anyInstance: true });
             const pin = getDbPin();
-            if (u && u.role === 'admin' && p && p.db_marker && p.data_version && pin && p.db_marker !== pin && p.data_version !== s.data_version) {
+            // admin OR manager (managers merge a redacted backup). Limiting
+            // convergence to admins left a manager's freshly added category
+            // stuck on one diverged instance where a later refresh could not
+            // see it.
+            if (u && (u.role === 'admin' || u.role === 'manager') && p && p.db_marker && p.data_version && pin && p.db_marker !== pin && p.data_version !== s.data_version) {
               convergeInstances().catch(() => {});
             }
           } catch (e) { /* ignore */ }

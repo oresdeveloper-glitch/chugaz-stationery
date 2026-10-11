@@ -188,27 +188,32 @@ export async function convergeInstances() {
       if (!pin) return 'nopin';
       const pinned = await api('/sync');
       if (!pinned || !pinned.version || !pinned.data_version) return 'fail';
-      let other = null;
-      for (let i = 0; i < 8 && !other; i++) {
+      // Discover EVERY other live instance, not just the first one: serverless
+      // hosting can run several diverged disks at once, and merging with only
+      // one of them leaves a freshly added category (or sale) missing on the
+      // rest — so a refresh that lands on one of those instances makes the new
+      // row appear to vanish. Collect a set of distinct markers instead.
+      const others = new Set();
+      for (let i = 0; i < 24 && others.size < 8; i++) {
         const p = await api('/sync', { anyInstance: true });
-        if (p && p.db_marker && p.db_marker !== pin) other = p;
+        if (p && p.db_marker && p.db_marker !== pin) others.add(p.db_marker);
       }
-      if (!other || !other.db_marker || other.db_marker === pin) return 'same';
-      if (!other.data_version || other.data_version === pinned.data_version) return 'same';
+      if (others.size === 0) return 'same';
+      // One pinned backup, pushed to every other instance. The merge is
+      // name-keyed and idempotent, so repeating it across instances is safe
+      // and cannot duplicate or clobber existing rows.
       const fwd = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, pin);
       if (!fwd || !fwd.ok) return 'fail';
-      const fd1 = new FormData();
-      fd1.append('file', await fwd.blob(), 'converge-a.db');
-      const m1 = await fetchPinned(`${apiBase()}/api/system/restore-merge`, { method: 'POST', headers: authHeaders(), body: fd1 }, other.db_marker);
-      if (!m1 || !m1.ok) return 'fail';
-      const back = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, other.db_marker);
-      if (!back || !back.ok) return 'fail';
-      const fd2 = new FormData();
-      fd2.append('file', await back.blob(), 'converge-b.db');
-      const m2 = await fetchPinned(`${apiBase()}/api/system/restore-merge`, { method: 'POST', headers: authHeaders(), body: fd2 }, pin);
-      if (!m2 || !m2.ok) return 'fail';
+      let merged = 0;
+      for (const marker of others) {
+        const fd = new FormData();
+        fd.append('file', await fwd.blob(), 'converge.db');
+        const m = await fetchPinned(`${apiBase()}/api/system/restore-merge`, { method: 'POST', headers: authHeaders(), body: fd }, marker);
+        if (m && m.ok) merged += 1;
+      }
+      if (merged === 0) return 'fail';
       await backupNow();
-      console.info('[dbkeep] instances converged — both sides hold all data');
+      console.info('[dbkeep] instances converged — pushed pinned data to', merged, 'instance(s)');
       try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'] } })); } catch (e) { /* ignore */ }
       return 'ok';
     } finally {

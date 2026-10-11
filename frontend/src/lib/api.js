@@ -2,6 +2,13 @@ const TOKEN_KEY = 'sst_token';
 const USER_KEY = 'sst_user';
 const SHOP_TOKEN_KEY = 'sst_shop_token';
 const SHOP_USER_KEY = 'sst_shop_user';
+// Persisted instance pin: serverless hosting runs several API instances, each
+// with its own ephemeral disk. Without a durable pin, a page refresh loses the
+// in-memory pin, the first request lands on a random instance, and the client
+// adopts THAT instance's marker — so a category written to another instance
+// never appears. Storing the pin in localStorage keeps every request in a
+// session (across refreshes) on the one instance that has the data.
+const DB_PIN_KEY = 'sst_db_pin';
 
 // Registered by dbkeep.js (which imports this module, so we cannot import it
 // back without a cycle) to run an urgent backup after each successful write —
@@ -92,8 +99,17 @@ export function unlockPrintRedirect() { printLocked = false; }
 // numbers then only move when data really changes on that instance — never
 // because a round-robin request hit a stale twin.
 let dbPin = null;
-export function getDbPin() { return dbPin; }
-export function setDbPin(m) { dbPin = m || null; }
+export function getDbPin() {
+  if (!dbPin) { try { dbPin = localStorage.getItem(DB_PIN_KEY) || null; } catch (_) { dbPin = null; } }
+  return dbPin;
+}
+export function setDbPin(m) {
+  dbPin = m || null;
+  try {
+    if (dbPin) localStorage.setItem(DB_PIN_KEY, dbPin);
+    else localStorage.removeItem(DB_PIN_KEY);
+  } catch (_) { /* private mode etc. — pin just stays in-memory */ }
+}
 
 const AFFINITY_TRIES = 5;
 
@@ -139,7 +155,7 @@ async function request(path, options = {}, shop = false) {
       if (!data || data.code !== 'instance_mismatch') break;
       data = null;
       if (attempt === AFFINITY_TRIES) {
-        dbPin = null;
+        setDbPin(null);
         res = await send();
         break;
       }
@@ -149,8 +165,8 @@ async function request(path, options = {}, shop = false) {
   }
   const answered = res.headers.get('X-Db-Marker');
   if (answered && !options.anyInstance) {
-    if (!dbPin) dbPin = answered;
-    else if (answered !== dbPin && affinity && !idempotent) dbPin = answered;
+    if (!dbPin) setDbPin(answered);
+    else if (answered !== dbPin && affinity && !idempotent) setDbPin(answered);
   }
   if (res.status === 401 && recoverable) {
     // A lone 401 can be transient on serverless hosting (the request lands on
