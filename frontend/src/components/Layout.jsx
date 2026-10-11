@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
-import { clearAuth, api, fmt, setAuth, getToken, getUser, lockPrintRedirect, unlockPrintRedirect, refreshToken } from '../lib/api';
+import { clearAuth, api, setAuth, getToken, getUser, lockPrintRedirect, unlockPrintRedirect, refreshToken } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { dbKeepInit } from '../lib/dbkeep';
 import Modal from './Modal';
@@ -13,17 +13,11 @@ export default function Layout({ user, setUser, children }) {
   const location = useLocation();
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const [results, setResults] = useState(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searching, setSearching] = useState(false);
   const [clock, setClock] = useState(new Date());
   const [userMenu, setUserMenu] = useState(false);
   const [pwdModal, setPwdModal] = useState(false);
   const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' });
   const [pwdBusy, setPwdBusy] = useState(false);
-  const searchBox = useRef(null);
-  const searchInput = useRef(null);
   const close = () => setOpen(false);
 
   // Re-run the persistence check right after login (App's own mount ran while
@@ -41,7 +35,6 @@ export default function Layout({ user, setUser, children }) {
   // Close dropdowns on outside click
   useEffect(() => {
     const onDoc = (e) => {
-      if (searchBox.current && !searchBox.current.contains(e.target)) setSearchOpen(false);
       if (e.target.closest && !e.target.closest('.staff-user-wrap')) setUserMenu(false);
     };
     document.addEventListener('mousedown', onDoc);
@@ -49,24 +42,15 @@ export default function Layout({ user, setUser, children }) {
   }, []);
 
   useEffect(() => {
-    setSearchOpen(false);
-    setResults(null);
     setUserMenu(false);
   }, [location.pathname]);
 
-  // Global keyboard shortcuts: '/' or Ctrl+K focus search, Esc closes dropdowns
+  // Esc closes dropdowns/modals
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') {
-        setSearchOpen(false);
         setUserMenu(false);
         setPwdModal(false);
-        return;
-      }
-      if ((e.key === '/' || (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey))) && !e.target.closest('input, textarea, select')) {
-        e.preventDefault();
-        searchInput.current?.focus();
-        setSearchOpen(true);
       }
     };
     document.addEventListener('keydown', onKey);
@@ -94,27 +78,6 @@ export default function Layout({ user, setUser, children }) {
       window.removeEventListener('afterprint', onAfterPrint);
     };
   }, []);
-
-  const doSearch = useCallback(async (q) => {
-    if (!q) { setResults(null); setSearching(false); return; }
-    setSearching(true);
-    try {
-      const r = await api(`/orders/search/global?q=${encodeURIComponent(q)}`);
-      setResults(r || { products: [], orders: [], customers: [], suppliers: [] });
-      setSearchOpen(true);
-    } catch {
-      setResults(null);
-    } finally {
-      setSearching(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const q = search.trim();
-    if (!q) { setResults(null); setSearching(false); return; }
-    const t = setTimeout(() => doSearch(q), 300);
-    return () => clearTimeout(t);
-  }, [search, doSearch]);
 
   const links = [
     { to: '/', label: 'Dashboard', icon: 'dashboard', min: 'clerk' },
@@ -232,89 +195,6 @@ export default function Layout({ user, setUser, children }) {
             </div>
           </div>
         </div>
-        
-        
-        {user?.role === 'admin' && (
-        <div className="staff-subbar">
-          <div className="staff-search" ref={searchBox}>
-            <span className="staff-search-ico"><I name="search" size={16} /></span>
-            <input
-              ref={searchInput}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onFocus={() => search && setSearchOpen(true)}
-              placeholder="Search products, orders, customers..."
-              aria-label="Global search"
-            />
-            <span className="staff-search-kbd" title="Press / or Ctrl+K to search">/</span>
-            <button type="button" className="staff-search-btn" onClick={() => { setSearchOpen(true); if (search) doSearch(search); searchInput.current?.focus(); }}>Search</button>
-            {search && <button className="staff-search-clear" onClick={() => { setSearch(''); setResults(null); }} aria-label="Clear search"><I name="x" size={13} /></button>}
-            {searchOpen && (
-              <div className="staff-search-drop">
-                {searching ? (
-                  <div className="staff-search-skel">
-                    <div className="skel-row" />
-                    <div className="skel-row" />
-                    <div className="skel-row" />
-                    <div className="skel-row" />
-                  </div>
-                ) : results ? (
-                  ['products', 'orders', 'customers', 'suppliers'].every((k) => (results[k] || []).length === 0) ? (
-                    <div className="staff-search-empty">No matches for "{search}"</div>
-                  ) : (
-                    <>
-                      {results.products?.length > 0 && (
-                        <div className="staff-search-group">
-                          <div className="staff-search-label">Products</div>
-                          {results.products.map((p) => (
-                            <button key={p.id} className="staff-search-item" onClick={() => { setSearchOpen(false); navigate('/products'); }}>
-                              <span className="s-ico"><I name="box" size={13} /></span>
-                              <span className="s-main"><span className="s-name">{p.name}</span><span className="s-sub">{p.sku || p.barcode || ''}{p.piece_price ? ' - ' + fmt(p.piece_price) + '/pc' : ''}</span></span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {results.orders?.length > 0 && (
-                        <div className="staff-search-group">
-                          <div className="staff-search-label">Orders</div>
-                          {results.orders.map((o) => (
-                            <button key={o.id} className="staff-search-item" onClick={() => { setSearchOpen(false); navigate('/orders'); }}>
-                              <span className="s-ico"><I name="list" size={13} /></span>
-                              <span className="s-main"><span className="s-name">{o.order_number} - {o.user_name}</span><span className="s-sub">{o.order_status} - {fmt(o.total)}</span></span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {results.customers?.length > 0 && (
-                        <div className="staff-search-group">
-                          <div className="staff-search-label">Customers</div>
-                          {results.customers.map((c) => (
-                            <button key={c.id} className="staff-search-item" onClick={() => { setSearchOpen(false); navigate('/customers'); }}>
-                              <span className="s-ico"><I name="user" size={13} /></span>
-                              <span className="s-main"><span className="s-name">{c.name}</span><span className="s-sub">{c.phone || c.email || ''}</span></span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {results.suppliers?.length > 0 && (
-                        <div className="staff-search-group">
-                          <div className="staff-search-label">Suppliers</div>
-                          {results.suppliers.map((s) => (
-                            <button key={s.id} className="staff-search-item" onClick={() => { setSearchOpen(false); navigate('/suppliers'); }}>
-                              <span className="s-ico"><I name="truck" size={13} /></span>
-                              <span className="s-main"><span className="s-name">{s.name}</span><span className="s-sub">{s.phone || s.email || ''}</span></span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )
-                ) : null}
-              </div>
-            )}
-          </div>
-        </div>
-        )}
 </header>
         
         <main className="main">{children}</main>
