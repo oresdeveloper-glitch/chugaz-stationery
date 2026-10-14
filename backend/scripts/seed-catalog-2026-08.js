@@ -51,13 +51,13 @@ const CATALOG = [
   ['PEN NATARAJ (BLUE/BLACK) PIECE', 'piece', 500],
   ['PEN NATARAJ (BLUE/BLACK) DOZEN', 'dozen', 1500],
  ]},
- { cat: 'BAITASHA (A3, A4, A6)', desc: 'A6 baitasha, A3 baitasha, A4 baitasha', items: [
-  ['BAITASHA A6 PIECE', 'piece', 100],
-  ['BAITASHA A6 DOZEN', 'dozen', 2500],
-  ['BAITASHA A3 PIECE', 'piece', 500],
-  ['BAITASHA A3 DOZEN', 'dozen', 7000],
-  ['BAITASHA A4 PIECE', 'piece', 200],
-  ['BAITASHA A4 DOZEN', 'dozen', 5000],
+ { cat: 'BAHASHA (A3, A4, A6)', desc: 'A6 bahasha, A3 bahasha, A4 bahasha', items: [
+  ['BAHASHA A6 PIECE', 'piece', 100],
+  ['BAHASHA A6 DOZEN', 'dozen', 2500],
+  ['BAHASHA A3 PIECE', 'piece', 500],
+  ['BAHASHA A3 DOZEN', 'dozen', 7000],
+  ['BAHASHA A4 PIECE', 'piece', 200],
+  ['BAHASHA A4 DOZEN', 'dozen', 5000],
  ]},
  { cat: 'DAFTARI', desc: 'Page 100 daftari, Page 200 daftari, Stiff cover daftari, Counter book Q2, Counter book Q3, Msomi', items: [
   ['DAFTARI PAGE 100 PIECE', 'piece', 1000],

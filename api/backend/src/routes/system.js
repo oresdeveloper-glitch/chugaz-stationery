@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-const { db, DB_PATH, audit, reopenDb, writeRedactedCopy } = require('../db');
+const { db, DB_PATH, audit, reopenDb, writeRedactedCopy, fixBahashaSpelling } = require('../db');
 const { requireRole } = require('../auth');
 
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
@@ -82,6 +82,9 @@ router.post('/restore', requireRole('admin'), uploadMem.single('file'), (req, re
    try { fs.unlinkSync(DB_PATH + '-wal'); } catch (_) {}
    try { fs.unlinkSync(DB_PATH + '-shm'); } catch (_) {}
    reopenDb();
+   // A restored file may predate the product-line spelling fix — repair it
+   // immediately so the retired name never renders, not on the next boot.
+   fixBahashaSpelling(db);
    audit(req.user.id, 'RESTORE', 'database', null, { restored_from: file.originalname || file.name || 'upload' });
   res.json({ ok: true, message: 'Database restored. Previous database saved as stationery-pre-restore.db' });
  } catch (e) {
@@ -511,9 +514,14 @@ router.post('/restore-merge', requireRole('admin', 'manager'), uploadMem.single(
    try { fs.unlinkSync(srcPath); } catch (_) {}
    return res.status(500).json({ error: 'Merge failed: ' + e.message });
   }
-  try { db.prepare('DETACH DATABASE bak').run(); } catch (_) {}
-  try { fs.unlinkSync(srcPath); } catch (_) {}
-  audit(req.user.id, 'RESTORE_MERGE', 'database', null, { merged: M, source: file.originalname || file.name || 'upload' });
+   try { db.prepare('DETACH DATABASE bak').run(); } catch (_) {}
+   try { fs.unlinkSync(srcPath); } catch (_) {}
+   // An old browser backup can carry the retired product-line spelling
+   // (products update by SKU; order_items insert name snapshots verbatim).
+   // Repair right after the merge so it never surfaces in the UI — the boot
+   // migration would only catch it on the next cold start.
+   fixBahashaSpelling(db);
+   audit(req.user.id, 'RESTORE_MERGE', 'database', null, { merged: M, source: file.originalname || file.name || 'upload' });
   res.json({ ok: true, merged: M });
 });
 

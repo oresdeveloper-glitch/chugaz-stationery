@@ -35,6 +35,57 @@ let db = createStubDb();
 let dbReady = false;
 let DatabaseSyncClass = null;
 
+// The exercise-book line shipped under the misspelling "Baitasha" in three
+// casings (product names shout it, descriptions whisper it). SQLite's REPLACE
+// is case-sensitive but LIKE is not, so each casing needs its own pass and the
+// case-insensitive LIKE guard keeps the UPDATEs off rows that are already
+// correct. order_items.product_name is a snapshot column that the merge
+// inserts verbatim from browser backups, so historical orders need it too.
+// categories.name is UNIQUE and the merge is name-keyed, so an old backup
+// inserts the retired name as a NEW row next to the already-renamed one —
+// a plain rename would collide, so duplicates are collapsed instead.
+// Called on every boot, after restore-merge, and after a full restore — an
+// old backup must never be able to reintroduce the retired spelling.
+function fixBahashaSpelling(d) {
+  const ren = (col) => `REPLACE(REPLACE(REPLACE(${col}, 'BAITASHA', 'BAHASHA'), 'Baitasha', 'Bahasha'), 'baitasha', 'bahasha')`;
+  const fix = (table, col) => {
+    try {
+      d.exec(`UPDATE ${table} SET ${col} = ${ren(col)} WHERE ${col} LIKE '%aitasha%'`);
+    } catch (_) { /* table may not exist on a fresh stub */ }
+  };
+  fix('products', 'name');
+  fix('products', 'specifications');
+  fix('products', 'description');
+  fix('categories', 'description');
+  fix('order_items', 'product_name');
+  // categories.name cannot take the plain rename: the merged-in old row would
+  // collide with the survivor (UNIQUE). Collapse the pair instead — every
+  // reference (products.category_id, memberships, child categories) moves to
+  // the surviving row before the duplicate is dropped.
+  try {
+    const olds = d.prepare("SELECT id, name FROM categories WHERE name LIKE '%aitasha%'").all();
+    const survivorOf = d.prepare('SELECT id FROM categories WHERE name = ?');
+    const moveTo = d.prepare('UPDATE products SET category_id = ? WHERE category_id = ?');
+    const reparent = d.prepare('UPDATE categories SET parent_id = ? WHERE parent_id = ?');
+    const addLink = d.prepare('INSERT OR IGNORE INTO product_categories (product_id, category_id) SELECT product_id, ? FROM product_categories WHERE category_id = ?');
+    const dropLinks = d.prepare('DELETE FROM product_categories WHERE category_id = ?');
+    const dropCat = d.prepare('DELETE FROM categories WHERE id = ?');
+    for (const row of olds) {
+      const fixed = row.name.replace(/BAITASHA/g, 'BAHASHA').replace(/Baitasha/g, 'Bahasha').replace(/baitasha/g, 'bahasha');
+      const survivor = survivorOf.get(fixed);
+      if (survivor && survivor.id !== row.id) {
+        moveTo.run(survivor.id, row.id);
+        reparent.run(survivor.id, row.id);
+        addLink.run(survivor.id, row.id);
+        dropLinks.run(row.id);
+        dropCat.run(row.id);
+      } else {
+        d.prepare('UPDATE categories SET name = ? WHERE id = ?').run(fixed, row.id);
+      }
+    }
+  } catch (_) { /* categories may not exist yet on a fresh stub */ }
+}
+
 try {
   const DatabaseSync = loadDatabaseSync();
   if (!DatabaseSync) throw new Error('node:sqlite unavailable');
@@ -96,6 +147,9 @@ try {
     real.exec('CREATE INDEX IF NOT EXISTS idx_sales_created_by ON sales(created_by)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON purchases(supplier_id)');
+    // Re-run the product-line spelling repair on every boot (see
+    // fixBahashaSpelling below); a no-op once the names are already correct.
+    fixBahashaSpelling(real);
   }
   migrate();
 
@@ -272,4 +326,4 @@ function writeRedactedCopy(src, dst) {
   }
 }
 
-module.exports = { db: dbProxy, DB_PATH, transact, audit, dbReady, reopenDb, writeRedactedCopy };
+module.exports = { db: dbProxy, DB_PATH, transact, audit, dbReady, reopenDb, writeRedactedCopy, fixBahashaSpelling };
