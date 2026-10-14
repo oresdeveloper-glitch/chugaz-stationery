@@ -137,9 +137,9 @@ body { overscroll-behavior-y: contain; }
   .stats-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
   .stats-grid .stat-card .value { font-size: 18px; }
   .grid-2 { grid-template-columns: 1fr; }
-  .alibaba-grid { grid-template-columns: 1fr; }
-  .alibaba-card { flex-direction: row; }
-  .alibaba-img { width: 110px; min-width: 110px; height: 110px; }
+  .catalog-grid { grid-template-columns: 1fr; }
+  .catalog-card { flex-direction: row; }
+  .catalog-img { width: 110px; min-width: 110px; height: 110px; }
   .pos-layout { grid-template-columns: 1fr; }
   .pos-products { grid-template-columns: repeat(2, 1fr); }
 }
@@ -164,7 +164,7 @@ body { overscroll-behavior-y: contain; }
 
 /* ---------- Disable hover effects on touch ---------- */
 @media (hover: none) {
-  .btn:hover, .alibaba-card:hover, .pos-tile:hover { transform: none; box-shadow: none; }
+  .btn:hover, .catalog-card:hover, .pos-tile:hover { transform: none; box-shadow: none; }
 }
 
 /* Print tweaks */

@@ -133,7 +133,7 @@ export function SplitBar({ items, currency = 'TSh' }) {
           <div key={i.channel} className="small">
             <i className="dot" style={{ background: PALETTE[idx % PALETTE.length] }} />
             <b style={{ textTransform: 'capitalize' }}> {i.channel}</b>
-            <span className="muted"> â€” {fmt(i.revenue)} {currency} Â· {i.count} txns ({Math.round((Number(i.revenue) / total) * 100)}%)</span>
+            <span className="muted"> — {fmt(i.revenue)} {currency} · {i.count} txns ({Math.round((Number(i.revenue) / total) * 100)}%)</span>
           </div>
         ))}
       </div>

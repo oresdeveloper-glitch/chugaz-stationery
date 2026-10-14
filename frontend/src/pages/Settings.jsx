@@ -68,7 +68,7 @@ export default function Settings() {
       <div className="grid grid-2">
         <div className="card" style={{ gridColumn: '1 / -1' }}>
           <h2>Appearance</h2>
-          <p className="muted">Choose a theme : applied instantly to the whole system and remembered on this device.</p>
+          <p className="muted">Choose a theme — applied instantly to the whole system and remembered on this device.</p>
           <div className="theme-grid">
             {THEMES.map((t) => (
               <button key={t.id} className={`theme-card${theme === t.id ? ' on' : ''}`} onClick={() => pickTheme(t.id)}>
@@ -129,7 +129,7 @@ export default function Settings() {
         <div className="card">
           <h2>Email delivery (SMTP)</h2>
           <p className="muted small">
-            Required for customer email verification codes. Example: Gmail : host <code>smtp.gmail.com</code>, port <code>587</code>, your email as user, an <b>App Password</b> as password.
+            Required for customer email verification codes. Example: Gmail — host <code>smtp.gmail.com</code>, port <code>587</code>, your email as user, an <b>App Password</b> as password.
           </p>
           <div className="form-row">
             <div className="field"><label>SMTP host</label><input value={settings.smtp_host || ''} onChange={(e) => set('smtp_host', e.target.value)} placeholder="smtp.gmail.com" /></div>
@@ -157,7 +157,7 @@ export default function Settings() {
                 } catch (err) { toast(err.message, 'error'); }
                 finally { setTesting(false); }
               }}
-            >{testing ? 'Sendingâ€¦' : 'Send test email'}</button>
+            >{testing ? 'Sending…' : 'Send test email'}</button>
             <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="send to (email)" style={{ flex: 1, minWidth: 180 }} />
           </div>
         </div>

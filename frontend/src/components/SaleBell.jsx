@@ -22,9 +22,7 @@ function beep() {
   } catch (e) { /* ignore */ }
 }
 
-// Real-time sales feed for managers and admins: polls the notifications
-// channel every few seconds, toasts each NEW sale/order as it happens and
-// keeps a dropdown history with an unread badge until acknowledged.
+// Sales feed for managers/admins: toasts each new sale/order, keeps a dropdown history.
 export default function SaleBell() {
   const [list, setList] = useState([]);
   const [count, setCount] = useState(0);

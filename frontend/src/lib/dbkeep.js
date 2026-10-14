@@ -1,8 +1,6 @@
 import { getToken, getUser, getDbPin, setDbPin, api, registerOnWrite } from './api';
 
-// Wire the urgent post-write backup into the api() write path (see api.js
-// registerOnWrite). Every successful mutation refreshes the browser snapshot
-// ~8s later, so freshly added categories are folded in long before a cold reset.
+// Wire the post-write backup hook so fresh rows are folded in before a cold reset.
 registerOnWrite(schedulePostWriteBackup);
 
 const MARKER_KEY = 'sst_db_marker';
@@ -11,9 +9,7 @@ const DB_NAME = 'sst-keep';
 const STORE = 'kv';
 const BACKUP_KEY = 'backup';
 const BACKUP_INTERVAL_MS = 10 * 60 * 1000;
-// A write can land right before a serverless cold reset, so the periodic
-// 10-minute snapshot may not include it — the write path schedules a much
-// sooner follow-up so the new row is captured long before the next interval.
+// A write near a cold reset may miss the 10-minute snapshot — schedule an 8s follow-up.
 const POST_WRITE_BACKUP_MS = 8 * 1000;
 
 let scheduled = false;
@@ -72,10 +68,7 @@ function authHeaders() {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
-// Talk to one specific database instance: X-Expect-Db-Marker makes the server
-// answer 409 (before running any handler) when the request round-robined to a
-// different instance, so retrying here is always safe and eventually lands on
-// the instance we asked for. Returns null when it never did.
+// Pin a request to one instance via X-Expect-Db-Marker; null when it never lands there.
 async function fetchPinned(url, opts, expect, tries = 6) {
   for (let i = 0; i < tries; i++) {
     let res;
@@ -95,10 +88,7 @@ async function fetchPinned(url, opts, expect, tries = 6) {
   return null;
 }
 
-// Admins and managers can download a backup (manager copies come redacted) and
-// can merge it back, so both roles keep snapshots alive. The marker comes from
-// the backup response itself — a separate health() call could round-robin to
-// ANOTHER instance and mislabel the snapshot.
+// Admins and managers can download (redacted for managers) and merge backups.
 function canKeep() {
   const user = getUser();
   return !!user && (user.role === 'admin' || user.role === 'manager') && !!getToken();
@@ -110,9 +100,7 @@ async function backupNow() {
   backing = true;
   try {
     const pin = getDbPin();
-    // A stored marker different from our pin means the server was reset and
-    // the merge has not run yet — the IndexedDB copy is the ONLY good data,
-    // so never overwrite it with the fresh (empty) instance.
+    // Marker drift means the server reset — never overwrite the IndexedDB copy with an empty instance.
     const stored = localStorage.getItem(MARKER_KEY);
     if (stored && pin && stored !== pin) return;
     const res = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, pin);
@@ -143,10 +131,7 @@ function scheduleBackups() {
   });
 }
 
-// Merge the stored backup into the live database (never replaces it): rows
-// that already exist on the server are kept, backup-only rows are imported,
-// so sales made on both sides of a reset survive together. `target` pins the
-// merge to one specific instance.
+// Merge the stored backup into the live DB (never replaces); `target` pins the merge.
 async function restoreFromBackup(target) {
   try {
     const entry = await idbGet(BACKUP_KEY);
@@ -173,23 +158,14 @@ async function restoreFromBackup(target) {
   }
 }
 
-// Bring every live instance to the same data. Called by the app poller when
-// its pinned instance and another instance report different versions: first
-// push the pinned instance's rows over there, then push everything back, so
-// both sides hold the union — after that it no longer matters which instance
-// a request lands on, and the dashboard stops flipping between two numbers.
+// Bring every live instance to the same data (leader = most sales; ties: orders, categories).
 export async function convergeInstances() {
   try {
     if (!canKeep()) return 'skip';
     if (converging) return 'busy';
     converging = true;
     try {
-      // Discover EVERY live instance, not just one: serverless hosting runs
-      // several instances on independent ephemeral disks, and the instance a
-      // session happens to pin first can be an EMPTY twin (sales=0) while
-      // another holds the real data. Merging only the pinned instance with one
-      // other leaves the rest diverged, so a refresh that lands on one of them
-      // makes the sale (or category) appear to vanish again.
+      // Discover every live instance — an empty twin can answer first while another holds real data.
       const mine = await api('/sync');
       if (!mine || !mine.db_marker) return 'fail';
       const seen = new Map();
@@ -200,11 +176,7 @@ export async function convergeInstances() {
       }
       if (seen.size <= 1) return 'same';
 
-      // ELECT the canonical leader: the instance holding the most sales. Ties
-      // break on orders, then categories, then whichever we are already pinned
-      // to. This is what stops the POS "Today" total snapping back to 0 — the
-      // session pins to the instance that actually has the data instead of an
-      // empty twin that happened to answer first.
+      // Elect the canonical leader: most sales wins, so the session pins to the instance that has the data.
       const weight = (s) => [
         Number(s.sales) || 0,
         Number(s.orders) || 0,
@@ -218,9 +190,7 @@ export async function convergeInstances() {
       let leader = mine;
       for (const s of seen.values()) if (cmp(s, leader) > 0) leader = s;
 
-      // Push the leader's rows into every other instance. The merge is
-      // name-keyed and idempotent, so repeating it is safe and cannot
-      // duplicate or clobber existing rows.
+      // Push the leader's rows into every other instance; the merge is name-keyed and idempotent.
       const fwd = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, leader.db_marker);
       if (!fwd || !fwd.ok) return 'fail';
       let merged = 0;
@@ -234,8 +204,7 @@ export async function convergeInstances() {
         if (m && m.ok) merged += 1;
       }
 
-      // Re-pin the session to the leader so every subsequent read (POS total,
-      // dashboard, lists) is answered by the instance holding the data.
+      // Re-pin to the leader so every subsequent read is answered by the instance holding the data.
       setDbPin(leader.db_marker);
       localStorage.setItem(MARKER_KEY, leader.db_marker);
 
@@ -254,22 +223,14 @@ export async function convergeInstances() {
   }
 }
 
-// Called by the api() write path after any successful admin/manager mutation
-// (e.g. a new category). Schedules one urgent backup so the new row is folded
-// into the browser snapshot well before the next 10-minute interval — the
-// difference between a category surviving a cold reset and silently vanishing.
+// After any successful admin/manager write, schedule one urgent backup so the new row is captured.
 export function schedulePostWriteBackup() {
   if (!canKeep()) return;
   clearTimeout(postWriteTimer);
   postWriteTimer = setTimeout(backupNow, POST_WRITE_BACKUP_MS);
 }
 
-// Runs on app mount, on focus and after login. Detects an ephemeral-disk
-// reset by comparing the server's persisted db_marker with the one stored
-// locally; for admin/manager sessions the last IndexedDB backup is then MERGED
-// into the fresh server (kept and retried until it succeeds), so sales
-// recorded before and after the reset all reappear instead of one replacing
-// the other.
+// On mount/focus/login: detect an ephemeral-disk reset and merge the last backup back in.
 export async function dbKeepInit() {
   if (checking) return;
   checking = true;
@@ -290,11 +251,7 @@ export async function dbKeepInit() {
     }
 
     if (stored === h.db_marker) {
-      // Same marker, but the server reports FEWER categories than we last
-      // recorded. That means this instance lost user-added categories while the
-      // marker happened to survive (or a reset regenerated an identical marker).
-      // Merging the snapshot restores the missing rows without touching data
-      // that already exists on the server, so this is safe to run on keep-sessions.
+      // Same marker but fewer categories: the instance lost rows — merge the snapshot back.
       const lastCats = Number(localStorage.getItem(CATS_KEY) || 0);
       if (canKeepSess && cats != null && lastCats > 0 && cats < lastCats) {
         try { await restoreFromBackup(h.db_marker); } catch (_) { /* keep init non-fatal */ }
@@ -314,10 +271,7 @@ export async function dbKeepInit() {
       return;
     }
     if (cats != null) localStorage.setItem(CATS_KEY, String(cats));
-    // Non-keep sessions (cashier/clerk/customer): remember the new marker ONLY
-    // when there is no stored snapshot — stamping it while a backup exists
-    // would hide the reset from the next admin/manager session and their merge
-    // would be skipped.
+    // Non-keep sessions: stamp the new marker only when no snapshot exists yet.
     const entry = await idbGet(BACKUP_KEY);
     if (!entry || !entry.blob) localStorage.setItem(MARKER_KEY, h.db_marker);
   } catch (e) {

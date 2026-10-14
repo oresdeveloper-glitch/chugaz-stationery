@@ -12,12 +12,9 @@ function loadSecret() {
  if (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 16) {
   return process.env.JWT_SECRET;
  }
- JWT_SECRET_SOURCE = 'code-fallback';
- // Fixed fallback so ALL serverless instances sign tokens with the same secret
- // even when JWT_SECRET is not configured (Vercel free tier has no persistent
- // disk). Setting JWT_SECRET in the environment always wins; do not rotate
- // this value without invalidating all sessions.
- return 'chugaz-stationery-production-secret-9f8e7d6c5b4a39718f0e1d2c3b4a5f69788123456789';
+  JWT_SECRET_SOURCE = 'code-fallback';
+  // Shared fallback so all serverless instances sign with one secret; env always wins.
+  return 'chugaz-stationery-production-secret-9f8e7d6c5b4a39718f0e1d2c3b4a5f69788123456789';
 }
 
 const JWT_SECRET = loadSecret();
@@ -89,9 +86,7 @@ function optionalAuth(req, res, next) {
  next();
 }
 
-// Shop endpoints: ONE connected account system — customers AND staff
-// (admin, manager, cashier, clerk) may keep a shop profile, addresses and
-// place storefront orders with their own account.
+// Customers and staff share one account system for the storefront.
 function requireCustomer(req, res, next) {
  if (!req.user) {
   return res.status(401).json({ error: 'Sign in to continue' });

@@ -56,13 +56,8 @@ export default function App() {
     return () => window.removeEventListener('focus', onFocus);
   }, []);
 
-  // Mutation convergence nudge. On serverless the dashboard can briefly show
-  // only the latest transaction (or an old total) when a version check lands on
-  // an instance that hasn't seen the write yet, and once the version settles no
-  // further change is announced so the stale number sticks. After a write we
-  // force a couple of extra version checks a beat apart so the announced
-  // version reflects committed data from whichever instance answers, and the
-  // 'chugaz-live' resync always carries the fresh, accumulated totals.
+  // After a write, force a couple of extra version checks so a lagging
+  // instance can't leave stale totals on the dashboard.
   useEffect(() => {
     let n = 0;
     const onMut = () => {
@@ -73,14 +68,9 @@ export default function App() {
     return () => window.removeEventListener('chugaz-mutated', onMut);
   }, []);
 
-  // Global live-data poller: fetch a cheap version hash and announce a single
-  // 'chugaz-live' event whenever it changes, so every open page refetches its
-  // own data in place — no page reloads, no per-page intervals. Skipped while
-  // the tab is hidden; caught up immediately when it becomes visible again.
-  // On serverless the hash can bounce between instances (A→B→A): the first
-  // change is announced immediately, but once a previously-seen version comes
-  // back we suppress announcements until the version holds for 2 ticks, then
-  // announce one resync — so a flap never turns into an event storm.
+  // Poll a cheap version hash; announce 'chugaz-live' when it changes so every
+  // open page refetches. Flap suppression: a previously-seen version must hold
+  // 2 ticks before a resync fires, so instance bouncing never storms events.
   useEffect(() => {
     let last = null;
     let seen = [];
@@ -98,23 +88,13 @@ export default function App() {
         const v = s && s.version;
         if (v == null) return;
         ticks += 1;
-        // Every 4th tick, ask a random instance how its DATA version differs
-        // from our pinned one (data_version ignores per-instance audit noise);
-        // a mismatch means the two disks drifted apart, and (admin sessions)
-        // the backup/merge cycle brings them back to the same data so the
-        // dashboard can never flip between two numbers again.
+        // Every 4th tick, check for a richer instance and re-merge if found.
         if (ticks % 4 === 0) {
           try {
             const u = getUser();
             const pin = getDbPin();
-            // admin OR manager (managers merge a redacted backup).
+            // Converge whenever any live instance holds more sales than our pinned one.
             if (u && (u.role === 'admin' || u.role === 'manager') && pin) {
-              // Converge whenever ANY live instance holds more data than the
-              // one we are pinned to — not only when data_version differs. Two
-              // empty twins can share a version-shaped hash while a third
-              // instance holds the real sales, and gating on version alone
-              // would skip that case and leave the POS total pinned to an
-              // empty twin (rendering 0 after every sale).
               const mine = Number(s.sales) || 0;
               let richer = false;
               for (let i = 0; i < 6 && !richer; i++) {

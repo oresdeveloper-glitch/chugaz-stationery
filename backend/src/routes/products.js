@@ -163,11 +163,7 @@ function ean13CheckDigit(base12) {
  return (10 - (sum % 10)) % 10;
 }
 
-// Decode a shared category barcode (601 + 9-digit category id + check digit)
-// back to its category id, so scanning a category code also finds products
-// whose primary category is a different one. Random unique barcodes almost
-// never decode to an existing id, and a rare accidental hit only widens the
-// match set a little.
+// Decode a shared category barcode (601 + 9-digit id + check digit) to its category id.
 function categoryForBarcode(code) {
  const s = String(code || '');
  if (!/^\d{13}$/.test(s) || !s.startsWith('601')) return null;
@@ -177,9 +173,7 @@ function categoryForBarcode(code) {
  return id > 0 ? id : null;
 }
 
-// Membership set for a product write: the listed category_ids plus the primary
-// category. Unknown ids are dropped (a stale form tab must not fail the save)
-// and the primary is always kept as a member.
+// Listed category_ids plus the primary; unknown ids dropped, primary always kept.
 function targetCategoryIds(p, keepPrimary) {
  const wanted = [...(Array.isArray(p.category_ids) ? p.category_ids : [])];
  const given = p.category_id !== undefined && p.category_id !== null && p.category_id !== '';
@@ -208,9 +202,7 @@ function barcodeForCategory(categoryId) {
  return row ? row.barcode : categoryBarcode(categoryId);
 }
 
-// Shared category barcode: when creating/editing a product in a category, reuse that
-// category's single barcode so every product in the category scans the same.
-// GET /barcode/generate?category_id= returns the category's shared barcode, otherwise a fresh unique one.
+// Category products share one barcode; otherwise generate a fresh unique one.
 router.get('/barcode/generate', requireRole('admin', 'manager'), (req, res) => {
  const catId = req.query.category_id;
  if (catId) {
@@ -294,10 +286,8 @@ router.put('/:id', requireRole('admin', 'manager'), (req, res) => {
  const rawNew = p.current_stock !== undefined && p.current_stock !== null ? Number(p.current_stock) : null;
  const newStock = rawNew === null || Number.isNaN(rawNew) ? oldStock : rawNew;
  const prev = { selling_price: existing.selling_price, purchase_price: existing.purchase_price, status: existing.status };
- // When the membership changes (or no explicit barcode given), keep the shared
- // barcode of the primary category. With no category fields at all the current
- // memberships stay untouched.
- const hasCatChange = p.category_ids !== undefined || p.category_id !== undefined;
+  // Keep the shared category barcode when membership changes or none was sent.
+  const hasCatChange = p.category_ids !== undefined || p.category_id !== undefined;
  const target = hasCatChange ? targetCategoryIds(p, existing.category_id) : { ids: null, primary: existing.category_id };
  const targetCat = target.primary;
  const barcode = (p.barcode !== undefined && p.barcode !== null && p.barcode !== '')

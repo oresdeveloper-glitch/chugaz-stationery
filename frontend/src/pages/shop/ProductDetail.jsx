@@ -37,7 +37,7 @@ export default function ProductDetail() {
     try {
       await shopApi('/cart/items', { method: 'POST', body: { product_id: eff.id, quantity: qty, unit } });
       await refreshCart();
-      toast(`${qty} ${unit} Ã— ${eff.name} added to cart`);
+      toast(`${qty} ${unit} × ${eff.name} added to cart`);
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -74,7 +74,7 @@ export default function ProductDetail() {
 
   return (
     <div className="pd">
-      <Link to="/shop" className="muted small pd-back">â† Back to catalog</Link>
+      <Link to="/shop" className="muted small pd-back">← Back to catalog</Link>
 
       <div className="card pd-hero">
         <div className="pd-media">
@@ -94,7 +94,7 @@ export default function ProductDetail() {
           <div className="pd-cat">{p.category_name}</div>
           <h1 className="pd-name">{eff.name}</h1>
           <div className="pd-sub">
-            {[p.brand_name, eff.unit ? `Sold per ${eff.unit}` : null, eff.sku || p.sku ? `SKU ${eff.sku || p.sku}` : null].filter(Boolean).join('  Â·  ')}
+            {[p.brand_name, eff.unit ? `Sold per ${eff.unit}` : null, eff.sku || p.sku ? `SKU ${eff.sku || p.sku}` : null].filter(Boolean).join('  ·  ')}
           </div>
           {(eff.barcode || p.barcode) && <div className="pd-sub muted small">Barcode: {eff.barcode || p.barcode}</div>}
 
@@ -110,7 +110,7 @@ export default function ProductDetail() {
                 {variants.map((v) => (
                   <button key={v.id} className={`pd-chip${variant && variant.id === v.id ? ' on' : ''}`}
                     onClick={() => { setVariant(v); setUnit(v.units && v.units[0] ? v.units[0].id : 'piece'); setQty(1); }}>
-                    {v.name} Â· {fmt(v.units && v.units[0] ? v.units[0].price : v.selling_price)}
+                    {v.name} · {fmt(v.units && v.units[0] ? v.units[0].price : v.selling_price)}
                   </button>
                 ))}
               </div>
@@ -123,7 +123,7 @@ export default function ProductDetail() {
                 {units.map((x) => (
                   <button key={x.id} className={`pd-chip${unit === x.id ? ' on' : ''}`}
                     onClick={() => { setUnit(x.id); setQty(1); }}>
-                    {x.label} Â· {fmt(x.price)}
+                    {x.label} · {fmt(x.price)}
                   </button>
                 ))}
               </div>
@@ -132,15 +132,15 @@ export default function ProductDetail() {
 
           <div className="pd-buy">
             <div className="pd-qty">
-              <button onClick={() => setQty(Math.max(1, qty - 1))}>âˆ’</button>
+              <button onClick={() => setQty(Math.max(1, qty - 1))}>−</button>
               <input type="number" min="1" value={qty} onChange={(e) => setQty(Math.max(1, +e.target.value || 1))} />
               <button onClick={() => setQty(qty + 1)}>+</button>
             </div>
             <button className="btn primary pd-add" onClick={add}>Add to cart</button>
           </div>
           <div className="pd-line">
-            {qty} {activeUnit.label.toLowerCase()} Ã— {fmt(activeUnit.price)} = <b>{fmt(lineTotal)} {currency}</b>
-            {qty * activeUnit.pieces !== 1 && ` Â· ${qty * activeUnit.pieces} pieces`}
+            {qty} {activeUnit.label.toLowerCase()} × {fmt(activeUnit.price)} = <b>{fmt(lineTotal)} {currency}</b>
+            {qty * activeUnit.pieces !== 1 && ` · ${qty * activeUnit.pieces} pieces`}
           </div>
         </div>
       </div>

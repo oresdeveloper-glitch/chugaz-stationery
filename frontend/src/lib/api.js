@@ -2,18 +2,10 @@ const TOKEN_KEY = 'sst_token';
 const USER_KEY = 'sst_user';
 const SHOP_TOKEN_KEY = 'sst_shop_token';
 const SHOP_USER_KEY = 'sst_shop_user';
-// Persisted instance pin: serverless hosting runs several API instances, each
-// with its own ephemeral disk. Without a durable pin, a page refresh loses the
-// in-memory pin, the first request lands on a random instance, and the client
-// adopts THAT instance's marker — so a category written to another instance
-// never appears. Storing the pin in localStorage keeps every request in a
-// session (across refreshes) on the one instance that has the data.
+// Persisted instance pin — keeps requests on the instance that holds the data.
 const DB_PIN_KEY = 'sst_db_pin';
 
-// Registered by dbkeep.js (which imports this module, so we cannot import it
-// back without a cycle) to run an urgent backup after each successful write —
-// that is how a freshly added category is folded into the browser snapshot
-// before a serverless cold reset can wipe it.
+// Registered by dbkeep.js (cycle-free) to run an urgent backup after each write.
 let onWriteFn = null;
 export function registerOnWrite(fn) { onWriteFn = fn; }
 
@@ -92,12 +84,7 @@ let printLocked = false;
 export function lockPrintRedirect() { printLocked = true; }
 export function unlockPrintRedirect() { printLocked = false; }
 
-// Database instance this session is pinned to. Serverless hosting can run
-// several API instances on diverged ephemeral disks; pinning makes every
-// request target one instance (the server 409s a request that lands
-// elsewhere, before any handler runs, so retrying is always safe). Dashboard
-// numbers then only move when data really changes on that instance — never
-// because a round-robin request hit a stale twin.
+// Instance pin for this session; the server 409s a request that lands elsewhere.
 let dbPin = null;
 export function getDbPin() {
   if (!dbPin) { try { dbPin = localStorage.getItem(DB_PIN_KEY) || null; } catch (_) { dbPin = null; } }
@@ -133,19 +120,13 @@ async function request(path, options = {}, shop = false) {
 
   const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
   const url = `${base}/api${shop ? '/shop' : ''}${path}`;
-  // Auth endpoints (login/refresh) must never be retried: a 401 there means
-  // wrong credentials, and retrying would burn rate-limit budget and locks.
+  // Never retry auth endpoints: a 401 there means wrong credentials.
   const recoverable = !path.startsWith('/auth/');
   const affinity = recoverable && !options.anyInstance;
   const idempotent = !options.method || options.method === 'GET' || options.method === 'HEAD';
   const send = () => {
     const h = { ...headers };
-    // Always read the pin via getDbPin(): the in-memory var starts null on a
-    // fresh load, and a request sent WITHOUT the pin lands on a random
-    // instance (serverless round-robin). That instance may be an empty twin,
-    // so the first fetches after a reload briefly render 0 before the pin
-    // settles — reading through the getter restores the persisted pin on the
-    // very first request instead.
+    // Read the pin via getDbPin(): the in-memory var starts null on a fresh load.
     const pin = getDbPin();
     if (pin && affinity) h['X-Expect-Db-Marker'] = pin;
     return fetch(url, { ...options, headers: h });
@@ -153,8 +134,7 @@ async function request(path, options = {}, shop = false) {
 
   let res = await send();
   let data = null;
-  // 409 instance_mismatch: the request hit another instance and nothing ran
-  // server-side, so retrying until we are back on the pinned one is safe.
+  // Retry on 409 instance_mismatch: nothing ran server-side, so it is safe.
   if (affinity) {
     for (let attempt = 0; attempt <= AFFINITY_TRIES; attempt++) {
       if (res.status !== 409) break;
@@ -177,10 +157,8 @@ async function request(path, options = {}, shop = false) {
     else if (answered !== cur && affinity && !idempotent) setDbPin(answered);
   }
   if (res.status === 401 && recoverable) {
-    // A lone 401 can be transient on serverless hosting (the request lands on
-    // a cold instance that doesn't know this session yet). The auth gate
-    // returns 401 before any route handler runs, so retrying even POSTs is
-    // safe — nothing was created server-side.
+    // A lone 401 can be transient on serverless (cold instance); the auth gate
+    // 401s before any handler runs, so retrying is safe.
     for (let attempt = 1; attempt <= 2 && res.status === 401; attempt++) {
       await new Promise((r) => setTimeout(r, attempt * 700));
       res = await send();
@@ -205,10 +183,7 @@ async function request(path, options = {}, shop = false) {
    if (data && data.code) err.code = data.code;
    throw err;
   }
-  // A write landed: nudge the app's live poller so the version check re-runs a
-  // couple of times and any open dashboard/list resyncs to the committed totals
-  // right away, instead of waiting for the next scheduled poll (which could
-  // still be answered by an instance that hasn't seen the write yet).
+  // Write landed: nudge the live poller so open dashboards resync right away.
   if (!idempotent) {
     try { window.dispatchEvent(new Event('chugaz-mutated')); } catch {}
     try { if (onWriteFn) onWriteFn(); } catch {}
@@ -227,8 +202,7 @@ export async function shopApi(path, options = {}) {
 export async function validateShopSession() {
     try {
         const data = await shopApi('/me');
-        // Return the fresh account record (name, phone, avatar…) so callers
-        // can replace any stale copy saved at login time.
+        // Return the fresh account record so callers can replace any stale login copy.
         return data && data.user ? data.user : null;
     } catch {
         clearShopAuth();
@@ -243,9 +217,7 @@ export const fmt = (n) => {
 export const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-US') : '');
 export const fmtDateTime = (d) => (d ? new Date(d).toLocaleString('en-US') : '');
 
-// Subscribe to the app-wide live channel ('chugaz-live'). Calls are debounced
-// so a burst of events (sale + notification + version tick) triggers ONE
-// refetch instead of several. Returns the unsubscribe function for useEffect.
+// Subscribe to the app-wide live channel; debounced so bursts trigger ONE refetch.
 export function onLive(cb, ms = 800) {
   let t = null;
   const handler = () => {
@@ -259,12 +231,7 @@ export function onLive(cb, ms = 800) {
   };
 }
 
-// Wrap a list-loading fetch so only the most-recent call may publish its
-// result. Concurrent/stale loads (a debounce firing alongside a live event, or
-// a response that arrives late from a slower instance) can no longer resolve
-// out-of-order and overwrite newer data with a pre-write snapshot — the cause
-// of a freshly added row (sale, category, product…) flashing in and then
-// disappearing a beat later. Per-key so independent fetches don't cancel.
+// Only the most-recent call publishes its result (stale concurrent loads can't overwrite newer data).
 export function latest() {
   let n = 0;
   return async function () {

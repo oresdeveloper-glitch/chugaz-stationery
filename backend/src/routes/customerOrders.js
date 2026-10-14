@@ -8,9 +8,7 @@ const u = require('../units');
 
 const router = express.Router();
 
-// System customer that owns guest-checkout orders (created on demand).
-// Guests can order without signing in, so placing an order never depends
-// on a session. This row can never log in (random unguessable hash).
+// System customer owning guest-checkout orders; can never log in (random hash).
 const GUEST_EMAIL = 'guest@shop.local';
 function ensureGuestUserId() {
   const existing = db.prepare('SELECT id FROM users WHERE email=?').get(GUEST_EMAIL);
@@ -68,9 +66,7 @@ router.post('/', (req, res) => {
     return res.status(403).json({ error: 'Customer account required' });
   }
   if (isGuest && !!String(req.headers.authorization || '').startsWith('Bearer ')) {
-    // A token was sent but verifies nowhere (e.g. cold serverless instance):
-    // tell the client the session is dead so it can re-authenticate or
-    // fall back to guest checkout, instead of failing contact validation.
+    // Dead session on a cold instance: let the client re-auth or fall back to guest.
     return res.status(401).json({ error: 'Session expired - please sign in again' });
   }
   const { fulfillment_type, delivery_address_id, payment_method, transaction_reference, notes,
@@ -78,13 +74,11 @@ router.post('/', (req, res) => {
   const ft = fulfillment_type === 'pickup' ? 'pickup' : 'delivery';
   const method = PAYMENT_METHODS.includes(payment_method) ? payment_method : 'cash_on_delivery';
   if (method === 'credit' && isGuest) {
-    return res.status(400).json({ error: 'Credit purchases require a customer account â€” please sign in' });
+    return res.status(400).json({ error: 'Credit purchases require a customer account — please sign in' });
   }
   let gName = null, gPhone = null, gAddr = null, gCity = null;
   if (isGuest) {
-    // Accept the details under ANY key the client may have used (guest_* for
-    // the guest card, contact_* for the signed-in contact card) so a request
-    // that carries a name/phone is never rejected asking for it again.
+    // Accept contact_* keys too, so a request carrying a name/phone never gets bounced.
     const contactName = typeof req.body.contact_name === 'string' ? req.body.contact_name : '';
     const contactPhone = typeof req.body.contact_phone === 'string' ? req.body.contact_phone : '';
     gName = String(guest_name || contactName || '').trim().slice(0, 80);
@@ -163,7 +157,7 @@ router.post('/', (req, res) => {
    if (baseNeeded > available) {
     throw new Error(`Insufficient stock for ${l.product_name} (only ${Math.floor(available * u.basePieces(productLike))} pieces available)`);
    }
-   // Price integrity: always recompute from the current product price â€”
+   // Price integrity: always recompute from the current product price —
    // never trust a stored/client-supplied unit price.
    const unitPrice = u.unitPrice(l.cart_unit, productLike);
    const lineSub = Math.round(Number(l.quantity) * unitPrice * 100) / 100;
@@ -236,7 +230,7 @@ router.post('/', (req, res) => {
   notifyManagers({
    kind: 'order',
    title: `Online order ${orderNumber}`,
-   body: `${(isGuest ? gName : (contactName || (user && user.name))) || 'Customer'} Â· ${total} Â· ${ft === 'delivery' ? 'Delivery' : 'Pickup'} Â· ${method}`,
+   body: `${(isGuest ? gName : (contactName || (user && user.name))) || 'Customer'} · ${total} · ${ft === 'delivery' ? 'Delivery' : 'Pickup'} · ${method}`,
   });
   try { db.prepare(`INSERT INTO order_status_history (order_id, from_status, to_status, action, changed_by, changed_by_name, changed_by_role, office_id, office_name, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(orderId, null, 'pending', 'create', orderUserId, isGuest ? gName : req.user.name, isGuest ? 'customer' : req.user.role, isGuest ? null : (req.user.office_id || null), isGuest ? null : (req.user.office || null), `Order placed ${orderNumber}`); } catch {}
   return orderId;
@@ -272,7 +266,7 @@ router.post('/:id/cancel', requireCustomer, (req, res) => {
  if (!order) return res.status(404).json({ error: 'Order not found' });
  if (order.order_status !== 'pending') return res.status(400).json({ error: 'Only pending orders can be cancelled' });
  const paid = db.prepare("SELECT COALESCE(SUM(amount),0) s FROM order_payments WHERE order_id=? AND payment_status='paid'").get(order.id).s;
- if (paid > 0) return res.status(400).json({ error: 'This order has been paid â€” contact the stationery to request a refund' });
+ if (paid > 0) return res.status(400).json({ error: 'This order has been paid — contact the stationery to request a refund' });
 
  transact(() => {
   const items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(order.id);

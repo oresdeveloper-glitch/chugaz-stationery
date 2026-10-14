@@ -8,9 +8,7 @@ const { signToken, requireCustomer } = require('../auth');
 const { rateLimit, registerFailure, lockState, clearFailures, clientIp } = require('../security');
 const { checkEmailReal, sendVerificationCode, smtpReady, EMAIL_RE } = require('../mailer');
 
-// Express 4 does not forward rejections from async handlers to the error
-// middleware — an unexpected throw (DB error, DNS failure) would leave the
-// request hanging with no response. This wrapper catches and reports it.
+// Express 4 doesn't forward async rejections to the error middleware.
 function asyncRoute(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
@@ -177,12 +175,8 @@ function handleCustomerLogin(req, res) {
    SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.status, u.token_ver, r.name AS role
    FROM users u JOIN roles r ON r.id = u.role_id WHERE u.email = ?
   `).get(clean);
-  // Self-heal after a database reset: sign-in mirrors the no-SMTP registration
-  // policy — when email delivery is not configured, a sign-in for an account
-  // that no longer exists (ephemeral serverless DB was wiped) recreates the
-  // customer with the password presented, so register -> sign-out -> sign-in
-  // always works. Never runs when SMTP is configured (verification required)
-  // and never bypasses password checks on accounts that do exist.
+  // Self-heal after a DB reset: with no SMTP configured, sign-in for a wiped
+  // account recreates it with the presented password. Never bypasses existing accounts.
   if (!user && EMAIL_RE.test(clean) && passwordOk(password) && !smtpReady()) {
    try {
     const roleId = db.prepare("SELECT id FROM roles WHERE name='customer'").get();

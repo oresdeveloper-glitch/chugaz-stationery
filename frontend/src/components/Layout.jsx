@@ -218,7 +218,7 @@ export default function Layout({ user, setUser, children }) {
             </div>
             <div className="form-actions">
               <button type="button" className="btn" onClick={() => setPwdModal(false)}>Cancel</button>
-              <button type="submit" className="btn primary" disabled={pwdBusy}>{pwdBusy ? 'Savingâ€¦' : 'Update password'}</button>
+              <button type="submit" className="btn primary" disabled={pwdBusy}>{pwdBusy ? 'Saving…' : 'Update password'}</button>
             </div>
           </form>
         </Modal>

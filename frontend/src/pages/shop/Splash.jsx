@@ -6,17 +6,17 @@ const SLIDES = [
   {
     icon: 'store',
     title: 'Welcome to CHUGAZ STATIONERY',
-    desc: 'Your trusted CHUGAZ STATIONERY in Mbeya â€” quality products for school, office and business.',
+    desc: 'School, office and business supplies in Mbeya.',
   },
   {
     icon: 'box',
-    title: 'Browse & Order Easily',
-    desc: '1,000+ items: pens, books, reams, files and more. Add to cart in one tap.',
+    title: 'Browse the catalog',
+    desc: 'Pens, books, reams, files and more. Order online for delivery or pickup.',
   },
   {
     icon: 'truck',
-    title: 'Fast Delivery or Pickup',
-    desc: 'Get it delivered to your door or pick up at our stationery. Pay with M-Pesa, Airtel, Yas or HaloPesa.',
+    title: 'Delivery or pickup',
+    desc: 'Delivered to your door, or collect at the shop. Pay with M-Pesa, Airtel, Yas or HaloPesa.',
   },
 ];
 
@@ -55,7 +55,7 @@ export default function Splash() {
           <div style={{ width: 96, height: 96, borderRadius: 20, background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--primary)', display: 'grid', placeItems: 'center', margin: '0 auto 18px' }}>
             <I name={s.icon} size={42} />
           </div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--primary-soft, rgba(146,64,14,0.1))', color: 'var(--primary)', fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', padding: '4px 8px', borderRadius: 6, marginBottom: 12, border: '1px solid var(--border)' }}>CHUGAZ STATIONERY â€¢ MBEYA</div>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--primary-soft, rgba(146,64,14,0.1))', color: 'var(--primary)', fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', padding: '4px 8px', borderRadius: 6, marginBottom: 12, border: '1px solid var(--border)' }}>CHUGAZ STATIONERY • MBEYA</div>
           <h1 style={{ fontSize: 21, fontWeight: 700, lineHeight: 1.25, margin: '0 0 10px', letterSpacing: '-0.015em', color: 'var(--text)' }}>{s.title}</h1>
           <p style={{ fontSize: 13.5, lineHeight: 1.65, margin: '0 0 22px', color: 'var(--muted)', minHeight: 44 }}>{s.desc}</p>
 
@@ -66,7 +66,7 @@ export default function Splash() {
           </div>
 
           <button className="btn primary" style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 14, fontWeight: 700, borderRadius: 8 }} onClick={next}>
-            {last ? 'Get Started' : 'Continue'} <I name={last ? 'check' : 'chevDown'} size={16} style={{ marginLeft: 8, transform: last ? 'none' : 'rotate(-90deg)' }} />
+            {last ? 'Start shopping' : 'Continue'} <I name={last ? 'check' : 'chevDown'} size={16} style={{ marginLeft: 8, transform: last ? 'none' : 'rotate(-90deg)' }} />
           </button>
 
           {last ? (
@@ -79,7 +79,7 @@ export default function Splash() {
           )}
         </div>
         <div style={{ marginTop: 16, display: 'flex', gap: 16, fontSize: 10, fontWeight: 600, letterSpacing: '.07em', color: 'var(--muted)', textAlign: 'center' }}>
-          <span>500+ PRODUCTS</span><span style={{ color: 'var(--border)' }}>â€¢</span><span>CASH/M-PESA</span><span style={{ color: 'var(--border)' }}>â€¢</span><span>DELIVERY</span>
+          <span>SCHOOL & OFFICE</span><span style={{ color: 'var(--border)' }}>•</span><span>CASH/M-PESA</span><span style={{ color: 'var(--border)' }}>•</span><span>DELIVERY</span>
         </div>
       </div>
     </div>

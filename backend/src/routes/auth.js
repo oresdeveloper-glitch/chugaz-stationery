@@ -42,9 +42,7 @@ router.post('/login', (req, res) => {
 
  const user = findUserByEmail(email);
  if (!user) {
-  // Account not found: hand off to the customer sign-in handler, which can
-  // restore the account after an ephemeral database reset (and otherwise
-  // returns the same generic 401). Lazy require avoids a cycle.
+  // Unknown staff email: let the customer handler try (self-heals after a DB reset).
   const { handleCustomerLogin } = require('./customer');
   return handleCustomerLogin(req, res);
  }

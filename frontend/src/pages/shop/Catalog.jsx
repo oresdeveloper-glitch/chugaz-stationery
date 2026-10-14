@@ -77,8 +77,8 @@ export default function Catalog() {
   const row2 = categories.slice(5);
 
   return (
-    <div className="alibaba-layout">
-      <div className="alibaba-main">
+    <div className="catalog-layout">
+      <div className="catalog-main">
         <div className="cat-slider-head">
           <div className="cat-slider-title">Categories</div>
           <span className="cat-slider-hint">{categories.length} categories</span>
@@ -114,12 +114,12 @@ export default function Catalog() {
           )}
         </div>
 
-        <div className="alibaba-toolbar">
-          <div className="alibaba-title">
+        <div className="catalog-toolbar">
+          <div className="catalog-title">
             {q ? `Results for "${q}"` : activeCat?.name || 'All products'}
-            <span className="alibaba-count">{products.length} items</span>
+            <span className="catalog-count">{products.length} items</span>
           </div>
-          <select className="alibaba-sort" value={sort} onChange={(e) => setParam('sort', e.target.value)}>
+          <select className="catalog-sort" value={sort} onChange={(e) => setParam('sort', e.target.value)}>
             <option value="">Recommended</option>
             <option value="name">Name A-Z</option>
             <option value="price_low">Price low to high</option>
@@ -128,35 +128,35 @@ export default function Catalog() {
         </div>
 
         {loading ? <div className="card">Loading...</div> : (
-          <div className="alibaba-grid">
+          <div className="catalog-grid">
             {products.length === 0 && <p className="muted">No products found.</p>}
             {products.map((p) => (
-              <Link key={p.id} to={`/shop/product/${p.id}`} className="alibaba-card" style={p.in_stock === false ? { opacity: 0.62 } : {}}>
-                <div className="alibaba-img">
+              <Link key={p.id} to={`/shop/product/${p.id}`} className="catalog-card" style={p.in_stock === false ? { opacity: 0.62 } : {}}>
+                <div className="catalog-img">
                   <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || "P"} loading="lazy" />
                 </div>
-                <div className="alibaba-card-body">
-                  <div className="alibaba-name">
+                <div className="catalog-card-body">
+                  <div className="catalog-name">
                     {p.name}
                     {p.in_stock === false && <span className="badge red" style={{ marginLeft: 8, verticalAlign: 'middle' }}>Out of stock</span>}
                   </div>
-                  <div className="alibaba-brand">{p.brand_name || 'Unbranded'}</div>
-                  <div className="alibaba-price">
-                    <span className="alibaba-price-cur">{currency}</span>
+                  <div className="catalog-brand">{p.brand_name || 'Unbranded'}</div>
+                  <div className="catalog-price">
+                    <span className="catalog-price-cur">{currency}</span>
                     {fmt(p.selling_price)}
                     <span className="muted small" style={{ fontSize: 11, fontWeight: 700 }}> /{p.unit || 'piece'}</span>
                   </div>
-                  <div className="alibaba-meta">
+                  <div className="catalog-meta">
                     <span>price per {p.unit || 'piece'}</span>
                   </div>
-                  <div className="alibaba-actions">
+                  <div className="catalog-actions">
                     <button
-                      className="alibaba-view"
+                      className="catalog-view"
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate(`/shop/product/${p.id}`); }}
                     >
                       <I name="search" size={13} /> View details
                     </button>
-                    <button className="alibaba-add" disabled={p.in_stock === false} onClick={(e) => add(e, p)}>
+                    <button className="catalog-add" disabled={p.in_stock === false} onClick={(e) => add(e, p)}>
                       {p.in_stock === false ? 'Out of stock' : 'Add to cart'}
                     </button>
                   </div>

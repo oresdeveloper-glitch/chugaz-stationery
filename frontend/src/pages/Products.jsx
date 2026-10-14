@@ -283,20 +283,20 @@ export default function Products() {
       </div>
 
       {tab === 'products' && (
-        <div className="alibaba-grid">
+        <div className="catalog-grid">
           {filtered.map((p) => (
-            <div key={p.id} className="alibaba-card" style={{ cursor: 'default' }}>
-              <div className="alibaba-img">
+            <div key={p.id} className="catalog-card" style={{ cursor: 'default' }}>
+              <div className="catalog-img">
                 {p.image ? <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || 'P'} loading="lazy" /> : <span style={{ display: 'grid', placeItems: 'center', width: '100%', height: '100%', background: 'var(--panel-2)', color: 'var(--muted)', fontWeight: 600 }}>{p.name?.[0] || 'P'}</span>}
               </div>
-              <div className="alibaba-card-body">
-                <div className="alibaba-name">{p.name}</div>
-                <div className="alibaba-brand">{p.category_name || 'No category'} Â· {p.sku}</div>
-                <div className="alibaba-price">
-                  <span className="alibaba-price-cur">{fmt(p.selling_price)}</span>
+              <div className="catalog-card-body">
+                <div className="catalog-name">{p.name}</div>
+                <div className="catalog-brand">{p.category_name || 'No category'} · {p.sku}</div>
+                <div className="catalog-price">
+                  <span className="catalog-price-cur">{fmt(p.selling_price)}</span>
                   <span className="muted small" style={{ fontSize: 11, fontWeight: 700 }}> /{p.unit || 'piece'}</span>
                 </div>
-                <div className="alibaba-meta">
+                <div className="catalog-meta">
                   <span>Cost: {fmt(p.purchase_price)}</span>
                   {p.current_stock !== undefined ? (
                     <span style={{ fontWeight: 750, color: p.current_stock <= p.reorder_level ? 'var(--danger)' : 'var(--primary)' }}>
@@ -401,7 +401,7 @@ export default function Products() {
               <label>Barcode</label>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input value={modal?.barcode || ''} onChange={(e) => setModal({ ...modal, barcode: e.target.value })} placeholder="Generate or type a barcode" />
-                <button type="button" className="btn sm" onClick={genBarcode} disabled={generating}>{generating ? 'â€¦' : 'Generate'}</button>
+                <button type="button" className="btn sm" onClick={genBarcode} disabled={generating}>{generating ? '…' : 'Generate'}</button>
               </div>
             </div>
           </div>
@@ -528,7 +528,7 @@ export default function Products() {
                     style={{ position: 'absolute', top: 4, right: 4, padding: '2px 7px', borderRadius: '50%' }}
                     onClick={() => removeImage(gallery, im.id)}
                     title="Remove photo"
-                  >Ã—</button>
+                  >×</button>
                 </div>
               ))}
               {!gallery.images || !gallery.images.length ? <p className="muted">No photos yet.</p> : null}

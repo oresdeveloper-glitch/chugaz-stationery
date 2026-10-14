@@ -29,14 +29,14 @@ router.put('/settings', requireRole('admin'), (req, res) => {
 router.post('/test-email', requireRole('admin'), async (req, res) => {
  const { sendTestEmail } = require('../mailer');
  const to = req.body.to || db.prepare("SELECT value FROM settings WHERE key='shop_email'").get()?.value;
- if (!to) return res.status(400).json({ error: 'No recipient â€” enter an email or set the stationery email in settings' });
+ if (!to) return res.status(400).json({ error: 'No recipient — enter an email or set the stationery email in settings' });
  const result = await sendTestEmail(String(to).trim());
  if (result.sent) {
   audit(req.user.id, 'TEST_EMAIL', 'settings', null, { to });
   return res.json({ ok: true, message: `Test email sent to ${to}` });
  }
  res.status(400).json({ error: result.reason === 'smtp_not_configured'
-  ? 'SMTP is not configured â€” fill the host, user and password first'
+  ? 'SMTP is not configured — fill the host, user and password first'
   : `Send failed: ${result.reason}` });
 });
 
@@ -46,9 +46,7 @@ function sendBackup(res, data) {
  res.send(data);
 }
 
-// Admins get the raw database; managers may snapshot too (so categories they
-// add survive an ephemeral-disk reset even when no admin session is open) but
-// the file they receive has password hashes stripped.
+// Admins get the raw file; manager snapshots come with password hashes stripped.
 router.get('/backup', requireRole('admin', 'manager'), (req, res) => {
  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (_) {}
  if (req.user.role === 'admin') {
@@ -92,9 +90,7 @@ router.post('/restore', requireRole('admin'), uploadMem.single('file'), (req, re
  }
 });
 
-// Managers may merge too (their session must be able to push categories and
-// sales back after a disk reset) but only DATA: accounts and settings are
-// admin-only here, so a crafted backup file can never mint an admin.
+// Managers may merge DATA back after a disk reset; accounts/settings stay admin-only.
 router.post('/restore-merge', requireRole('admin', 'manager'), uploadMem.single('file'), (req, res) => {
   const mergeAll = req.user.role === 'admin';
   const file = req.file || (Array.isArray(req.files) ? req.files[0] : null);
@@ -516,11 +512,8 @@ router.post('/restore-merge', requireRole('admin', 'manager'), uploadMem.single(
   }
    try { db.prepare('DETACH DATABASE bak').run(); } catch (_) {}
    try { fs.unlinkSync(srcPath); } catch (_) {}
-   // An old browser backup can carry the retired product-line spelling
-   // (products update by SKU; order_items insert name snapshots verbatim).
-   // Repair right after the merge so it never surfaces in the UI — the boot
-   // migration would only catch it on the next cold start.
-   fixBahashaSpelling(db);
+    // Repair retired product-line spelling right after the merge (boot would only catch it on cold start).
+    fixBahashaSpelling(db);
    audit(req.user.id, 'RESTORE_MERGE', 'database', null, { merged: M, source: file.originalname || file.name || 'upload' });
   res.json({ ok: true, merged: M });
 });

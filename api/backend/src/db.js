@@ -35,17 +35,8 @@ let db = createStubDb();
 let dbReady = false;
 let DatabaseSyncClass = null;
 
-// The exercise-book line shipped under the misspelling "Baitasha" in three
-// casings (product names shout it, descriptions whisper it). SQLite's REPLACE
-// is case-sensitive but LIKE is not, so each casing needs its own pass and the
-// case-insensitive LIKE guard keeps the UPDATEs off rows that are already
-// correct. order_items.product_name is a snapshot column that the merge
-// inserts verbatim from browser backups, so historical orders need it too.
-// categories.name is UNIQUE and the merge is name-keyed, so an old backup
-// inserts the retired name as a NEW row next to the already-renamed one —
-// a plain rename would collide, so duplicates are collapsed instead.
-// Called on every boot, after restore-merge, and after a full restore — an
-// old backup must never be able to reintroduce the retired spelling.
+// Rename the retired "Baitasha" spelling (all three casings) across every
+// column that carries it — old browser backups can reintroduce it on merge.
 function fixBahashaSpelling(d) {
   const ren = (col) => `REPLACE(REPLACE(REPLACE(${col}, 'BAITASHA', 'BAHASHA'), 'Baitasha', 'Bahasha'), 'baitasha', 'bahasha')`;
   const fix = (table, col) => {
@@ -58,10 +49,8 @@ function fixBahashaSpelling(d) {
   fix('products', 'description');
   fix('categories', 'description');
   fix('order_items', 'product_name');
-  // categories.name cannot take the plain rename: the merged-in old row would
-  // collide with the survivor (UNIQUE). Collapse the pair instead — every
-  // reference (products.category_id, memberships, child categories) moves to
-  // the surviving row before the duplicate is dropped.
+  // categories.name is UNIQUE: a merged-in old row would collide on rename,
+  // so references move to the surviving row and the duplicate is dropped.
   try {
     const olds = d.prepare("SELECT id, name FROM categories WHERE name LIKE '%aitasha%'").all();
     const survivorOf = d.prepare('SELECT id FROM categories WHERE name = ?');
@@ -126,9 +115,7 @@ try {
     if (!hasColumn('products', 'parent_id')) real.exec('ALTER TABLE products ADD COLUMN parent_id INTEGER REFERENCES products(id)');
  if (!hasColumn('categories', 'parent_id')) real.exec('ALTER TABLE categories ADD COLUMN parent_id INTEGER REFERENCES categories(id)');
     if (!hasColumn('products', 'office_id')) real.exec('ALTER TABLE products ADD COLUMN office_id INTEGER REFERENCES offices(id)');
-    // A product can belong to several categories: products.category_id stays the
-    // primary one (barcode + scanner description) and this table holds every
-    // membership, primary included.
+    // products.category_id is the primary membership; this table holds them all.
     real.exec('CREATE TABLE IF NOT EXISTS product_categories (\n product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,\n category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,\n PRIMARY KEY (product_id, category_id)\n)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_product_categories_cat ON product_categories(category_id)');
     if (!hasColumn('carts', 'guest_id')) {
@@ -141,14 +128,10 @@ try {
     real.exec('CREATE TABLE IF NOT EXISTS order_status_history (\n id INTEGER PRIMARY KEY AUTOINCREMENT,\n order_id INTEGER NOT NULL REFERENCES orders(id),\n from_status TEXT,\n to_status TEXT,\n action TEXT NOT NULL,\n changed_by INTEGER REFERENCES users(id),\n changed_by_name TEXT,\n changed_by_role TEXT,\n office_id INTEGER REFERENCES offices(id),\n office_name TEXT,\n notes TEXT,\n created_at TEXT NOT NULL DEFAULT (datetime(\'now\'))\n)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_order_history_order ON order_status_history(order_id)');
     if (!hasColumn('users', 'avatar')) real.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
-    // Hot-path indexes: the POS "Today" view filters sales by created_by on
-    // every load, sales lists filter by customer, and purchases filter by
-    // supplier. Without these the queries full-scan as data grows.
+    // Hot paths: POS "Today" (created_by), sales by customer, purchases by supplier.
     real.exec('CREATE INDEX IF NOT EXISTS idx_sales_created_by ON sales(created_by)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON purchases(supplier_id)');
-    // Re-run the product-line spelling repair on every boot (see
-    // fixBahashaSpelling below); a no-op once the names are already correct.
     fixBahashaSpelling(real);
   }
   migrate();
@@ -166,9 +149,7 @@ try {
     real.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('db_marker', ?)").run(require('crypto').randomBytes(16).toString('hex'));
   } catch (_) { /* settings table may not exist yet on fresh stub */ }
 
-  // First-run bootstrap: serverless disks (/tmp) start empty and seed.js
-  // never runs there, so create roles + default logins when no users exist.
-  // Idempotent — skipped on warm instances that already have users.
+  // First-run seed of roles + default logins (serverless disks start empty).
   try {
     real.exec("INSERT OR IGNORE INTO roles (id, name) VALUES (1,'admin'),(2,'manager'),(3,'cashier'),(4,'clerk'),(5,'customer')");
     const userCount = real.prepare('SELECT COUNT(*) AS c FROM users').get().c;
@@ -184,11 +165,7 @@ try {
       add.run('Online Customer', 'customer@shop.com', bcrypt.hashSync('cust123', 10), 5);
     }
 
-    // Office cashiers — Cashier A and Cashier B — are part of the full
-    // system, so ensure them on EVERY start. seed.js never runs on Vercel
-    // and the database resets on each deploy; this block is idempotent
-    // (skipped when the accounts already exist), so it also repairs warm
-    // databases that only have the five default logins.
+    // Office cashiers — ensured every start, idempotent.
     real.exec("INSERT OR IGNORE INTO offices (name) VALUES ('Office A'), ('Office B')");
     const officeA = real.prepare('SELECT id FROM offices WHERE name=?').get('Office A');
     const officeB = real.prepare('SELECT id FROM offices WHERE name=?').get('Office B');
@@ -205,9 +182,7 @@ try {
     console.error('[db] bootstrap seed skipped:', e && e.message ? e.message : e);
   }
 
-  // Catalog bootstrap: ship the real store catalog so the customer shop
-  // is not empty on fresh serverless disks. Idempotent — skipped when
-  // products already exist (warm instances).
+  // Seed the store catalog when the products table is empty.
   try {
     const prodCount = real.prepare('SELECT COUNT(*) AS c FROM products').get().c;
     if (!prodCount) {
@@ -230,9 +205,7 @@ try {
     console.error('[db] catalog seed skipped:', e && e.message ? e.message : e);
   }
 
-  // A product's primary category is also one of its memberships. Rebuild any
-  // missing rows on every boot — idempotent, and it upgrades databases that
-  // predate the join table (or come from an old backup restore).
+  // Backfill primary-category memberships (covers pre-join-table databases).
   try {
     real.exec('INSERT OR IGNORE INTO product_categories (product_id, category_id) SELECT id, category_id FROM products WHERE category_id IS NOT NULL');
   } catch (e) {
@@ -260,9 +233,7 @@ function transact(fn) {
   }
 }
 
-// Live handle indirection: modules capture `db` at require time, so a restore
-// must swap the underlying connection without re-requiring anything. The proxy
-// always forwards to the current handle.
+// Forwards to the current connection so a restore can swap it without re-requires.
 const dbProxy = new Proxy({}, {
   get(_, prop) {
     const target = db;
@@ -280,8 +251,7 @@ function reopenDb() {
     const fresh = new DatabaseSyncClass(DB_PATH);
     fresh.exec('PRAGMA journal_mode = WAL');
     fresh.exec('PRAGMA foreign_keys = ON');
-    // A full restore swaps in an arbitrary (possibly older) database file —
-    // bring the join table back before route queries run against it.
+    // Restored file may predate the join table — rebuild it before queries run.
     try {
       fresh.exec('CREATE TABLE IF NOT EXISTS product_categories (\n product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,\n category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,\n PRIMARY KEY (product_id, category_id)\n)');
       fresh.exec('CREATE INDEX IF NOT EXISTS idx_product_categories_cat ON product_categories(category_id)');
@@ -305,21 +275,16 @@ function audit(userId, action, entity, entityId, details) {
   }
 }
 
-// Copy a database file with account credentials stripped. Backup downloads for
-// non-admin sessions must not hand out password hashes; their merges never
-// touch the users table anyway, and the merge skips empty hashes so a
-// redacted file can never blank a real password.
+// Manager-downloadable backups get password hashes stripped (VACUUM purges bytes).
 function writeRedactedCopy(src, dst) {
   if (!DatabaseSyncClass) throw new Error('sqlite unavailable for redacted backup');
   fs.copyFileSync(src, dst);
   const conn = new DatabaseSyncClass(dst);
   try {
-    // Leave WAL mode first so the redaction lands in the main file (a
-    // readFileSync would otherwise miss changes still sitting in dst-wal).
+    // Leave WAL first so the redaction lands in the main file.
     conn.exec('PRAGMA journal_mode = DELETE');
     conn.exec("UPDATE users SET password_hash = '' WHERE password_hash IS NOT NULL AND password_hash != ''");
-    // Rewriting rows leaves the old bytes in free pages — VACUUM purges them
-    // so the download cannot leak hashes through unreferenced page space.
+    // VACUUM purges the old hash bytes from free pages.
     conn.exec('VACUUM');
   } finally {
     try { conn.close(); } catch (_) { /* already closed */ }

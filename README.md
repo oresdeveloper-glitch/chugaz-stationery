@@ -1,86 +1,56 @@
-﻿# CHUGAZ STATIONERY - POS & Inventory
+﻿# CHUGAZ STATIONERY — POS & Inventory
 
-A full-stack Point of Sale and Inventory Management System for CHUGAZ STATIONERY.
+Point of sale, stock control and online orders for CHUGAZ STATIONERY, Mbeya.
 
-## Features
-- **POS System** - Sales, cart, checkout, receipts
-- **Inventory Management** - Products, categories, suppliers, stock tracking
-- **Customer Management** - Accounts, addresses, orders, credit
-- **Staff Dashboard** - Orders, sales, reports, expenses
-- **Email Verification** - SMTP configurable via Settings
-- **Lipa Na Mpesa** - Payment instructions configurable
-- **Role-based Access** - Admin, Manager, Cashier, Clerk
-- **Multi-office Support**
+## Stack
 
-## Tech Stack
-- **Frontend**: React 18 + Vite + React Router
-- **Backend**: Node.js + Express + SQLite (better-sqlite3)
-- **Auth**: JWT with refresh tokens
-- **Database**: SQLite (better-sqlite3)
-- **Email**: Nodemailer (SMTP configurable)
+- Backend: Node.js, Express, SQLite (`node:sqlite`), JWT auth, Nodemailer
+- Frontend: React 18 + Vite
+- Hosted on Vercel — a push to `main` deploys (`api/index.js` is the
+  serverless entry; `backend/server.js` is the same app for local use)
 
-## Environment Variables
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PORT` | Server port | `7860` |
-| `NODE_ENV` | Environment | `production` |
-| `DB_PATH` | SQLite database path | `/data/backend/stationery.db` |
-| `JWT_SECRET` | JWT signing secret | auto-generated |
-| `JWT_EXPIRY` | Token expiry | `7d` |
-| `SMTP_HOST` | SMTP server | - |
-| `SMTP_PORT` | SMTP port | `587` |
-| `SMTP_USER` | SMTP username | - |
-| `SMTP_PASS` | SMTP password | - |
-| `SMTP_FROM` | Sender email | - |
+## Run locally
 
-## Deployment
-### Local
 ```bash
-npm install
-cd backend && npm install
-cd ../frontend && npm install
-npm run dev          # frontend (port 5173)
-node backend/server.js  # backend (port 4000)
+npm install && (cd backend && npm install) && (cd frontend && npm install)
+node backend/server.js         # API on http://localhost:7860
+(cd frontend && npm run dev)   # UI on http://localhost:5173
 ```
 
-### Docker
+## Docker
+
 ```bash
-docker build -t chugaz-stationery .
-docker run -p 7860:7860 -v ./data:/data chugaz-stationery
+docker compose up -d --build   # app on port 7860
 ```
 
-### Hugging Face Spaces
-1. Create new Space â†’ Docker
-2. Connect this GitHub repo
-3. Set Environment Variables in Space Settings:
-   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
-   - `JWT_SECRET` (random 32-char string)
-3. Space will auto-build and deploy
+## Settings
 
-## Default Login
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | `admin@shop.com` | `admin123` |
-| Manager | `manager@shop.com` | `manager123` |
-| Cashier | `cashier@shop.com` | `cashier123` |
-| Clerk | `clerk@shop.com` | `clerk123` |
+Shop details, SMTP (for email verification codes) and M-Pesa payment
+instructions are configured at runtime in Admin → Settings. Env vars you
+may set: `PORT`, `DB_PATH`, `JWT_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`,
+and the `SMTP_*` family.
 
-## API Endpoints
-- `GET /api/health` - Health check
-- `GET /api/system/settings` - Get settings (admin)
-- `PUT /api/system/settings` - Update settings (admin)
-- `POST /api/system/test-email` - Test SMTP (admin)
-- `POST /api/auth/login` - Staff login
-- `POST /api/shop/register` - Customer registration
-- `POST /api/shop/verify-email` - Email verification
-- `POST /api/shop/resend-verification` - Resend code
-- `GET /api/shop/info` - Public stationery info
+## Test logins (fresh database)
 
-## Lipa Na Mpesa
-Configure payment instructions in **Admin â†’ Settings â†’ Lipa Namba**:
-```
-356322054 - CHUGAZ STATIONERY
-```
+| Role    | Email               | Password    |
+|---------|---------------------|-------------|
+| Admin   | `admin@shop.com`    | `admin123`  |
+| Manager | `manager@shop.com`  | `manager123`|
+| Cashier | `cashier@shop.com`  | `cashier123`|
+| Clerk   | `clerk@shop.com`    | `clerk123`  |
+| Customer| `customer@shop.com` | `cust123`   |
 
-## License
-MIT
+Office cashiers `cashier-a@shop.com` and `cashier-b@shop.com` (password
+`cashier123`) are created automatically as well.
+
+## Phone install
+
+The customer shop is a PWA. Open the site in the phone browser and choose
+"Add to Home screen" (manifest lives in `frontend/public/manifest.json`).
+
+## Data note
+
+The database is one SQLite file (`backend/data/stationery.db`). On Vercel it
+sits in `/tmp`, so each serverless instance starts empty — the app seeds the
+catalog on boot and staff browsers keep a rolling backup that is merged back
+after a reset.

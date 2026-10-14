@@ -1,8 +1,6 @@
 const { db } = require('./db');
 
-// Fan a notification out to every active manager and admin. Called inside
-// sale/order transactions: it must NEVER throw (a failed notification can
-// never block or roll back a sale), hence the internal try/catch.
+// Fan a notification out to managers/admins; must never throw (runs inside sale transactions).
 function notifyManagers({ kind = 'sale', title, body }) {
   try {
     if (!title) return 0;
