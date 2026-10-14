@@ -35,8 +35,13 @@ export default function StaffOrders() {
   useEffect(() => { load(); }, [filter]);
   useEffect(() => onLive(() => { if (selected) refreshSelected(); else load(); }), [filter, q, selected]);
 
-  const refreshSelected = async () => {
-    if (selected) setSelected(await api(`/orders/${selected.id}`));
+  const setSelectedLatest = latest();
+  const refreshSelected = () => {
+    if (!selected) return;
+    setSelectedLatest(
+      () => api(`/orders/${selected.id}`),
+      (o) => setSelected(o),
+    ).catch((e) => { setSelected(null); toast(e.message, 'error'); });
     load();
   };
 

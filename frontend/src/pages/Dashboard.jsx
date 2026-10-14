@@ -55,7 +55,7 @@ function KpiCard({ label, value, currency, color = 'blue', icon, spark, sparkKey
       <div className="value" style={{ color: c }}>
         {fmt(value)} {currency && <span className="kpi-currency">{currency}</span>}
       </div>
-      {spark && spark.length > 1 && <div className="kpi-spark"><Spark data={spark} key={sparkKey} color={c} /></div>}
+      {spark && spark.length > 1 && <div className="kpi-spark"><Spark data={spark} seriesKey={sparkKey} color={c} /></div>}
       <div className="kpi-foot">
         <TrendChip pct={trend} good={trendGood} />
         {sub && <span className="sub">{sub}</span>}
@@ -92,6 +92,7 @@ export default function Dashboard() {
   const isAdmin = canRole(user, 'admin');
 
   const [data, setData] = useState(null);
+  const [loadError, setLoadError] = useState(null);
   const [range, setRange] = useState(isCashier ? 'today' : 'month');
   const [refreshing, setRefreshing] = useState(false);
   const [clock, setClock] = useState(new Date());
@@ -103,9 +104,14 @@ export default function Dashboard() {
   const setDash = latest();
   const load = (r) => setDash(
     async () => { setRefreshing(true); return api(`/reports/dashboard?range=${r || rangeRef.current}`); },
-    (d) => { setData(d); setUpdated(new Date()); setRefreshing(false); },
+    (d) => {
+      // Shape-check the payload so a partial/broken response shows a retry
+      // card instead of a half-crashed page full of undefineds.
+      if (!d || !d.kpi || !d.series || !d.alerts) { setLoadError('Dashboard data is incomplete'); setRefreshing(false); return; }
+      setData(d); setLoadError(null); setUpdated(new Date()); setRefreshing(false);
+    },
     () => setRefreshing(false),
-  ).catch((e) => { toast(e.message, 'error'); setRefreshing(false); });
+  ).catch((e) => { setLoadError(e.message); toast(e.message, 'error'); setRefreshing(false); });
 
   useEffect(() => { load(rangeRef.current); }, []);
   useEffect(() => onLive(() => { load(rangeRef.current); }), []);
@@ -114,7 +120,18 @@ export default function Dashboard() {
     return () => clearInterval(id);
   }, []);
 
-  if (!data) return <div className="card">Loading dashboard...</div>;
+  if (!data) {
+    if (loadError) {
+      return (
+        <div className="card" style={{ padding: 24, textAlign: 'center' }}>
+          <h2 style={{ marginBottom: 8 }}>Dashboard unavailable</h2>
+          <p className="muted" style={{ marginBottom: 16 }}>{loadError}</p>
+          <button className="btn primary" onClick={() => { setLoadError(null); load(rangeRef.current); }}>Try again</button>
+        </div>
+      );
+    }
+    return <div className="card">Loading dashboard...</div>;
+  }
 
   const cur = data.kpi.currency;
   const k = data.kpi.cur;
@@ -172,7 +189,7 @@ export default function Dashboard() {
         <div className="dash-actions">
           <Link to="/pos" className="btn primary"><I name="bolt" size={14} /> New sale</Link>
           <Link to="/orders" className="btn"><I name="list" size={14} /> Online orders{data.kpi.pending_orders.count > 0 && <span className="badge red">{data.kpi.pending_orders.count}</span>}</Link>
-          <Link to="/purchases" className="btn"><I name="inbox" size={14} /> Receive stock</Link>
+          {isAdmin && <Link to="/purchases" className="btn"><I name="inbox" size={14} /> Receive stock</Link>}
           <Link to="/products" className="btn"><I name="plus" size={14} /> Add product</Link>
           <Link to="/expenses" className="btn">¤ Add expense</Link>
           <Link to="/reports" className="btn"><I name="chart" size={14} /> Reports</Link>

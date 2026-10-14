@@ -4,7 +4,8 @@ const { requireRole } = require('../auth');
 
 const router = express.Router();
 
-router.get('/dashboard', (req, res) => {
+// Wrapped so a single bad query can't take the flagship page down uncaught.
+function dashboardHandler(req, res) {
  const RANGES = {
   today: { curStart: "date('now')", curEnd: "date('now')", prevStart: "date('now','-1 day')", prevEnd: "date('now','-1 day')", label: 'Today', prevLabel: 'Yesterday' },
   '7d': { curStart: "date('now','-6 day')", curEnd: "date('now')", prevStart: "date('now','-13 day')", prevEnd: "date('now','-7 day')", label: 'Last 7 days', prevLabel: 'Previous 7 days' },
@@ -87,7 +88,9 @@ router.get('/dashboard', (req, res) => {
   if (bucketMode === 'day') return dayStr;
   const dt = new Date(dayStr + 'T00:00:00');
   if (bucketMode === 'month') return dt.toISOString().slice(0, 7);
-  const d = new Date(dt.getTime() + ((4 - dt.getDay()) * 864e5) % (7 * 864e5));
+  // Monday-start weeks: bucket to the week's Thursday (Sunday belongs to the prior week).
+  const dow = dt.getDay() === 0 ? 7 : dt.getDay();
+  const d = new Date(dt.getTime() + (4 - dow) * 864e5);
   d.setHours(0, 0, 0, 0);
   return d.toISOString().slice(0, 10);
  };
@@ -232,8 +235,15 @@ router.get('/dashboard', (req, res) => {
   recent_sales: recentSales,
   recent_orders: recentOrders,
   recent_movements: recentMovements,
-  recent_payments: recentPayments,
- });
+   recent_payments: recentPayments,
+  });
+}
+
+router.get('/dashboard', (req, res) => {
+ try { dashboardHandler(req, res); } catch (e) {
+  console.error('[reports] dashboard failed:', e);
+  res.status(500).json({ error: 'Dashboard data unavailable' });
+ }
 });
 
 router.get('/sales-summary', requireRole('manager', 'admin'), (req, res) => {

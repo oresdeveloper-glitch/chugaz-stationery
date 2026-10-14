@@ -12,6 +12,8 @@ export function niceMax(v) {
 
 // Dual-series line/area chart with gridlines and hover tooltips.
 export function LineChart({ data, xKey, series, height = 240, currency = 'TSh', labelEvery }) {
+  data = Array.isArray(data) ? data : [];
+  series = Array.isArray(series) ? series : [];
   const W = 720;
   const H = height;
   const padL = 52;
@@ -71,6 +73,7 @@ export function LineChart({ data, xKey, series, height = 240, currency = 'TSh', 
 
 // Donut chart with legend.
 export function Donut({ data, valueKey, labelKey, size = 190, currency = 'TSh', colors = PALETTE }) {
+  data = Array.isArray(data) ? data : [];
   const total = data.reduce((s, d) => s + (Number(d[valueKey]) || 0), 0);
   if (total <= 0) return <div className="muted small" style={{ padding: 12 }}>No data for this period</div>;
   const r = 42;
@@ -120,6 +123,7 @@ export function Donut({ data, valueKey, labelKey, size = 190, currency = 'TSh', 
 
 // Simple stacked bar showing two values (e.g. POS vs Online).
 export function SplitBar({ items, currency = 'TSh' }) {
+  items = Array.isArray(items) ? items : [];
   const total = items.reduce((s, i) => s + Number(i.revenue), 0) || 1;
   return (
     <div>
@@ -141,9 +145,10 @@ export function SplitBar({ items, currency = 'TSh' }) {
   );
 }
 
-// Tiny inline sparkline for KPI cards.
-export function Spark({ data, key = 'sales', color = 'var(--primary)', width = 120, height = 34 }) {
-  const vals = data.map((d) => Number(d[key]) || 0);
+// Tiny inline sparkline for KPI cards. seriesKey (not `key` — React reserves that prop).
+export function Spark({ data, seriesKey = 'sales', color = 'var(--primary)', width = 120, height = 34 }) {
+  const rows = Array.isArray(data) ? data : [];
+  const vals = rows.map((d) => Number(d[seriesKey]) || 0);
   if (vals.length < 2) return <div className="spark empty" style={{ width, height }} />;
   const min = Math.min(...vals, 0);
   const max = Math.max(...vals, 1);
@@ -162,6 +167,8 @@ export function Spark({ data, key = 'sales', color = 'var(--primary)', width = 1
 
 // Grouped bar chart (e.g. cash inflow vs outflow per day).
 export function BarChart({ data, xKey, series, height = 220, currency = 'TSh', labelEvery }) {
+  data = Array.isArray(data) ? data : [];
+  series = Array.isArray(series) ? series : [];
   const W = 720;
   const H = height;
   const padL = 52;
@@ -216,6 +223,7 @@ export function BarChart({ data, xKey, series, height = 220, currency = 'TSh', l
 
 // Horizontal bar rows (e.g. revenue by category).
 export function HBarList({ data, valueKey, labelKey, currency = 'TSh', max }) {
+  data = Array.isArray(data) ? data : [];
   const peak = max || Math.max(...data.map((d) => Number(d[valueKey]) || 0), 1);
   return (
     <div className="hbar-list">

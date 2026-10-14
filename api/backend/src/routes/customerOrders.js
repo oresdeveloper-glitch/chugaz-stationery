@@ -108,7 +108,9 @@ router.post('/', (req, res) => {
   const sf = settings();
 
   let orderUserId;
-  const created = transact(() => {
+  let created;
+  try {
+   created = transact(() => {
     let user = null;
     if (isGuest) {
       orderUserId = ensureGuestUserId();
@@ -233,8 +235,11 @@ router.post('/', (req, res) => {
    body: `${(isGuest ? gName : (contactName || (user && user.name))) || 'Customer'} · ${total} · ${ft === 'delivery' ? 'Delivery' : 'Pickup'} · ${method}`,
   });
   try { db.prepare(`INSERT INTO order_status_history (order_id, from_status, to_status, action, changed_by, changed_by_name, changed_by_role, office_id, office_name, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(orderId, null, 'pending', 'create', orderUserId, isGuest ? gName : req.user.name, isGuest ? 'customer' : req.user.role, isGuest ? null : (req.user.office_id || null), isGuest ? null : (req.user.office || null), `Order placed ${orderNumber}`); } catch {}
-  return orderId;
-  });
+   return orderId;
+   });
+  } catch (e) {
+   return res.status(400).json({ error: e.message });
+  }
 
   res.status(201).json(getOrder(created, orderUserId));
 });

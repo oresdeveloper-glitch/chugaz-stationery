@@ -114,6 +114,7 @@ router.post('/', requireRole('cashier', 'clerk', 'manager', 'admin'), (req, res)
   let totalDiscount = 0;
 
   const prepared = [];
+  const requested = new Map();
   for (const it of items) {
    const qty = Number(it.quantity) || 0;
    if (!Number.isFinite(qty) || qty <= 0) throw new Error('Quantity must be positive');
@@ -140,8 +141,11 @@ router.post('/', requireRole('cashier', 'clerk', 'manager', 'admin'), (req, res)
    const lineSubtotal = r2(qty * price);
    const discVal = r2(lineSubtotal * (lineDiscount / 100));
    const available = product.current_stock - (product.reserved_stock || 0);
+   // The same product can appear on several lines — check the summed need, not each line alone.
+   const want = (requested.get(product.id) || 0) + qty;
+   requested.set(product.id, want);
 
-   if (!allowNegative && qty > available) {
+   if (!allowNegative && want > available) {
     throw new Error(`Insufficient stock for ${product.name} (available: ${available})`);
    }
 
@@ -206,7 +210,7 @@ router.post('/', requireRole('cashier', 'clerk', 'manager', 'admin'), (req, res)
   notifyManagers({
     kind: 'sale',
     title: `Sale ${invoiceNumber}`,
-    body: `${req.user.name} A� ${total} A� ${prepared.length} item(s) A� ${String(method || 'cash').replace('_', ' ')}${cust && cust.name ? ` A� ${cust.name}` : ''}`,
+    body: `${req.user.name} · ${total} · ${prepared.length} item(s) · ${String(method || 'cash').replace('_', ' ')}${cust && cust.name ? ` · ${cust.name}` : ''}`,
   });
   if (lowStock.length) {
    notifyManagers({
@@ -246,7 +250,9 @@ router.post('/:id/return', requireRole('cashier', 'clerk', 'manager', 'admin'), 
  if (!sale) return res.status(404).json({ error: 'Sale not found' });
  if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'No items to return' });
 
- const created = transact(() => {
+ let created;
+ try {
+  created = transact(() => {
   const info = db.prepare('INSERT INTO sale_returns (sale_id, reason, created_by) VALUES (?,?,?)').run(req.params.id, reason || null, req.user.id);
   const returnId = Number(info.lastInsertRowid);
   const insItem = db.prepare('INSERT INTO sale_return_items (return_id, sale_item_id, product_id, quantity, unit_price, total) VALUES (?,?,?,?,?,?)');
@@ -281,6 +287,9 @@ router.post('/:id/return', requireRole('cashier', 'clerk', 'manager', 'admin'), 
   audit(req.user.id, 'RETURN', 'sale', Number(req.params.id), { return_id: returnId, refund: refundAmount });
   return { id: returnId, refund_amount: refundAmount };
  });
+ } catch (e) {
+  return res.status(400).json({ error: e.message });
+ }
 
  res.status(201).json(created);
 });

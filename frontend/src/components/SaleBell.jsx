@@ -69,9 +69,11 @@ export default function SaleBell() {
   }, [toast]);
 
   const markAllRead = async () => {
-    setCount(0);
-    setList((l) => l.map((n) => ({ ...n, is_read: 1 })));
-    try { await api('/notifications/read', { method: 'POST', body: {} }); } catch (e) { /* ignore */ }
+    try {
+      await api('/notifications/read', { method: 'POST', body: {} });
+      setCount(0);
+      setList((l) => l.map((n) => ({ ...n, is_read: 1 })));
+    } catch (e) { /* keep the badge; the next poll refreshes the true state */ }
   };
 
   const toggle = () => {

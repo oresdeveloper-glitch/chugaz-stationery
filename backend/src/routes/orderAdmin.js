@@ -62,13 +62,23 @@ function releaseReservation(order) {
 
 function deductStock(order, userId) {
  const items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(order.id);
- const dec = db.prepare('UPDATE products SET current_stock = current_stock - ?, reserved_stock = reserved_stock - ? WHERE id=?');
- const move = db.prepare('INSERT INTO stock_movements (product_id, movement_type, quantity, reference_id, notes, created_by) VALUES (?,?,?,?,?,?)');
+ // The same product can appear on several lines — sum the need per product first.
+ const need = new Map();
  for (const i of items) {
   const p = db.prepare('SELECT * FROM products WHERE id=?').get(i.product_id);
   if (!p) throw new Error(`Product missing for ${i.product_name}`);
   const baseNeeded = u.baseUnitsFromPieces(u.piecesWanted(i.quantity, i.unit, p), p);
-  if (p.current_stock < baseNeeded) throw new Error(`Insufficient stock for ${i.product_name}`);
+  need.set(i.product_id, (need.get(i.product_id) || 0) + baseNeeded);
+ }
+ for (const [pid, qty] of need) {
+  const p = db.prepare('SELECT name, current_stock FROM products WHERE id=?').get(pid);
+  if (!p || p.current_stock < qty) throw new Error(`Insufficient stock for ${(p && p.name) || pid} (available: ${(p && p.current_stock) || 0})`);
+ }
+ const dec = db.prepare('UPDATE products SET current_stock = current_stock - ?, reserved_stock = reserved_stock - ? WHERE id=?');
+ const move = db.prepare('INSERT INTO stock_movements (product_id, movement_type, quantity, reference_id, notes, created_by) VALUES (?,?,?,?,?,?)');
+ for (const i of items) {
+  const p = db.prepare('SELECT * FROM products WHERE id=?').get(i.product_id);
+  const baseNeeded = u.baseUnitsFromPieces(u.piecesWanted(i.quantity, i.unit, p), p);
   dec.run(baseNeeded, baseNeeded, i.product_id);
   move.run(i.product_id, 'out', baseNeeded, `ORD${order.id}`, `Online order ${order.order_number} confirmed`, userId);
  }
@@ -144,29 +154,33 @@ router.put('/:id/status', (req, res) => {
 
  if (status === order.order_status) return res.json(getOrder(order.id));
 
- transact(() => {
-  // Deduct stock when confirming a pending order
-  if (status === 'confirmed' && ['pending', 'rejected', 'cancelled'].includes(order.order_status)) {
-   deductStock(order, req.user.id);
-  }
-  // Releasing reservation when cancelled / rejected while still reserved
-  if (['cancelled', 'rejected'].includes(status) && ['pending', 'confirmed', 'processing', 'ready_for_pickup', 'out_for_delivery'].includes(order.order_status)) {
-   releaseReservation(order);
-   if (order.payment_method === 'credit' && status === 'cancelled') {
-    db.prepare('UPDATE users SET balance = balance - ? WHERE id=?').run(order.total, order.user_id);
+ try {
+  transact(() => {
+   // Deduct stock when confirming a pending order
+   if (status === 'confirmed' && ['pending', 'rejected', 'cancelled'].includes(order.order_status)) {
+    deductStock(order, req.user.id);
    }
-  }
-  db.prepare("UPDATE orders SET order_status=?, updated_at=datetime('now') WHERE id=?").run(status, order.id);
-  logHistory(order.id, order.order_status, status, 'status_change', req.user, null);
-  // Counter-pay orders ('Pay at stationery'): completing the order means the cash was collected at the counter — verify payment automatically.
-  if (status === 'completed' && order.payment_method === 'pay_at_shop' && !['paid', 'refunded', 'partial_refund'].includes(order.payment_status)) {
-   db.prepare("UPDATE order_payments SET payment_status='paid', paid_at=datetime('now') WHERE order_id=? AND payment_status='pending'").run(order.id);
-   db.prepare("UPDATE orders SET payment_status='paid', updated_at=datetime('now') WHERE id=?").run(order.id);
-   logHistory(order.id, order.payment_status, 'paid', 'verify_pay_at_stationery_auto', req.user, 'Counter payment verified automatically on completion');
-   audit(req.user.id, 'VERIFY_PAY_AT_STATIONERY_AUTO', 'order', Number(order.id), { method: order.payment_method, total: order.total, by: req.user.name, role: req.user.role, office: req.user.office });
-  }
-  audit(req.user.id, 'ORDER_STATUS', 'order', Number(order.id), { from: order.order_status, to: status, by: req.user.name, role: req.user.role, office: req.user.office });
- });
+   // Releasing reservation when cancelled / rejected while still reserved
+   if (['cancelled', 'rejected'].includes(status) && ['pending', 'confirmed', 'processing', 'ready_for_pickup', 'out_for_delivery'].includes(order.order_status)) {
+    releaseReservation(order);
+    if (order.payment_method === 'credit' && status === 'cancelled') {
+     db.prepare('UPDATE users SET balance = balance - ? WHERE id=?').run(order.total, order.user_id);
+    }
+   }
+   db.prepare("UPDATE orders SET order_status=?, updated_at=datetime('now') WHERE id=?").run(status, order.id);
+   logHistory(order.id, order.order_status, status, 'status_change', req.user, null);
+   // Counter-pay orders ('Pay at stationery'): completing the order means the cash was collected at the counter — verify payment automatically.
+   if (status === 'completed' && order.payment_method === 'pay_at_shop' && !['paid', 'refunded', 'partial_refund'].includes(order.payment_status)) {
+    db.prepare("UPDATE order_payments SET payment_status='paid', paid_at=datetime('now') WHERE order_id=? AND payment_status='pending'").run(order.id);
+    db.prepare("UPDATE orders SET payment_status='paid', updated_at=datetime('now') WHERE id=?").run(order.id);
+    logHistory(order.id, order.payment_status, 'paid', 'verify_pay_at_stationery_auto', req.user, 'Counter payment verified automatically on completion');
+    audit(req.user.id, 'VERIFY_PAY_AT_STATIONERY_AUTO', 'order', Number(order.id), { method: order.payment_method, total: order.total, by: req.user.name, role: req.user.role, office: req.user.office });
+   }
+   audit(req.user.id, 'ORDER_STATUS', 'order', Number(order.id), { from: order.order_status, to: status, by: req.user.name, role: req.user.role, office: req.user.office });
+  });
+ } catch (e) {
+  return res.status(400).json({ error: e.message });
+ }
  res.json(getOrder(order.id));
 });
 

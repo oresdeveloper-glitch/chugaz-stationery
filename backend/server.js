@@ -9,6 +9,7 @@ const { requireAuth, requireRole, optionalAuth } = require('./src/auth');
 
 const app = express();
 const PORT = process.env.PORT || 7860;
+const HTTPS_PORT = Number(process.env.HTTPS_PORT || 4001);
 const isHuggingFace = process.env.SPACE_ID || process.env.HF_SPACE || process.env.HUGGINGFACE_SPACE;
 const isProduction = process.env.NODE_ENV === 'production' || isHuggingFace;
 
@@ -180,7 +181,6 @@ if (!module.parent) {
       console.log(`App also running on http://localhost:${ALT_PORT}`);
     });
   }
-  const HTTPS_PORT = Number(process.env.HTTPS_PORT || 4001);
   if ((process.env.SERVE_FRONTEND || '1') === '1') {
     (async () => {
       try {

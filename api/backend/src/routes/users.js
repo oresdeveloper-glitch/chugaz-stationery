@@ -6,6 +6,11 @@ const { checkEmailReal } = require('../mailer');
 
 const router = express.Router();
 
+// Express 4 doesn't forward async rejections to the error middleware.
+function asyncRoute(fn) {
+ return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+
 router.get('/', requireRole('manager', 'admin'), (req, res) => {
  res.json(db.prepare(`
   SELECT u.id, u.name, u.email, u.status, u.created_at, u.office_id, r.name AS role, o.name AS office
@@ -17,7 +22,7 @@ router.get('/roles', (req, res) => {
  res.json(db.prepare('SELECT * FROM roles').all());
 });
 
-router.post('/', requireRole('admin'), async (req, res) => {
+router.post('/', requireRole('admin'), asyncRoute(async (req, res) => {
  const { name, email, password, role_id, office_id } = req.body;
  if (!name || !email || !password) return res.status(400).json({ error: 'Name, email and password required' });
  if (!role_id) return res.status(400).json({ error: 'Role required' });
@@ -32,11 +37,11 @@ router.post('/', requireRole('admin'), async (req, res) => {
    .run(name, check.clean, hash, role_id, office_id ? Number(office_id) : null);
   audit(req.user.id, 'CREATE', 'user', Number(info.lastInsertRowid), { email: check.clean });
   res.status(201).json({ id: Number(info.lastInsertRowid) });
- } catch (e) {
-  if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Email already exists' });
-  throw e;
- }
-});
+  } catch (e) {
+   if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Email already exists' });
+   throw e;
+  }
+}));
 
 router.put('/:id', requireRole('admin'), (req, res) => {
  const { name, email, role_id, status, password, office_id } = req.body;
@@ -62,7 +67,21 @@ router.put('/:id', requireRole('admin'), (req, res) => {
 
 router.delete('/:id', requireRole('admin'), (req, res) => {
  if (req.params.id == req.user.id) return res.status(400).json({ error: 'You cannot delete your own account' });
- db.prepare('DELETE FROM users WHERE id=?').run(req.params.id);
+ // A user with sales/orders/audit history hits FK constraints — deactivate instead.
+ const id = Number(req.params.id);
+ const busy = db.prepare(`SELECT
+   (SELECT COUNT(*) FROM sales WHERE created_by=?) s,
+   (SELECT COUNT(*) FROM orders WHERE user_id=?) o,
+   (SELECT COUNT(*) FROM audit_logs WHERE user_id=?) a`).get(id, id, id);
+ if ((busy.s + busy.o + busy.a) > 0) {
+  return res.status(409).json({ error: 'This user has activity — set their status to inactive instead of deleting' });
+ }
+ try {
+  db.prepare('DELETE FROM users WHERE id=?').run(id);
+ } catch (e) {
+  if (String(e.message).includes('FOREIGN KEY')) return res.status(409).json({ error: 'This user is referenced elsewhere — set their status to inactive instead' });
+  throw e;
+ }
  res.json({ ok: true });
 });
 

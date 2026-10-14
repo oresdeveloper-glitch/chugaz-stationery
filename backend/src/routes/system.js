@@ -9,6 +9,11 @@ const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 
 const router = express.Router();
 
+// Express 4 doesn't forward async rejections to the error middleware.
+function asyncRoute(fn) {
+ return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+
 router.get('/settings', (req, res) => {
  const rows = db.prepare('SELECT key, value FROM settings').all();
  const settings = {};
@@ -26,7 +31,7 @@ router.put('/settings', requireRole('admin'), (req, res) => {
  res.json({ ok: true });
 });
 
-router.post('/test-email', requireRole('admin'), async (req, res) => {
+router.post('/test-email', requireRole('admin'), asyncRoute(async (req, res) => {
  const { sendTestEmail } = require('../mailer');
  const to = req.body.to || db.prepare("SELECT value FROM settings WHERE key='shop_email'").get()?.value;
  if (!to) return res.status(400).json({ error: 'No recipient — enter an email or set the stationery email in settings' });
@@ -38,7 +43,7 @@ router.post('/test-email', requireRole('admin'), async (req, res) => {
  res.status(400).json({ error: result.reason === 'smtp_not_configured'
   ? 'SMTP is not configured — fill the host, user and password first'
   : `Send failed: ${result.reason}` });
-});
+}));
 
 function sendBackup(res, data) {
  res.setHeader('Content-Type', 'application/octet-stream');
