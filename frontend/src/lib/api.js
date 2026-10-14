@@ -216,6 +216,21 @@ export const fmt = (n) => {
 };
 export const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-US') : '');
 export const fmtDateTime = (d) => (d ? new Date(d).toLocaleString('en-US') : '');
+// Compact relative time for tables and feeds: "just now", "12m ago", "Mar 3".
+export const fmtAgo = (iso) => {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (!t) return '';
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 45) return 'just now';
+  const m = s / 60;
+  if (m < 60) return `${Math.round(m)}m ago`;
+  const h = m / 60;
+  if (h < 24) return `${Math.round(h)}h ago`;
+  const d = h / 24;
+  if (d < 7) return `${Math.round(d)}d ago`;
+  return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
 
 // Subscribe to the app-wide live channel; debounced so bursts trigger ONE refetch.
 export function onLive(cb, ms = 800) {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, fmt, getUser, onLive, latest } from '../lib/api';
+import { api, fmt, fmtAgo, fmtDateTime, getUser, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { LineChart, Donut, SplitBar, HBarList, BarChart, Spark } from '../components/charts';
 import { canRole } from '../lib/roles';
@@ -28,7 +28,40 @@ function TrendChip({ pct, good = true }) {
   if (pct === null || pct === undefined) return null;
   const up = pct > 0;
   const ok = good ? up : !up;
-  return <span className={`kpi-trend ${ok ? 'up' : 'down'}`}>{up ? '▲' : '▼'} {Math.abs(pct)}%</span>;
+  return <span className={`kpi-trend ${ok ? 'up' : 'down'}`} title="vs the previous period of the same length">{up ? '▲' : '▼'} {Math.abs(pct)}%</span>;
+}
+
+// Subtle uppercase divider that groups the long management view into
+// readable sections, the way a real back-office dashboard is laid out.
+function Section({ title }) {
+  return <div className="dash-section"><h3>{title}</h3></div>;
+}
+
+// Shape-matching shimmer placeholders so the first paint looks like the
+// loaded dashboard instead of a text card that snaps into charts.
+function DashSkeleton() {
+  return (
+    <div>
+      <div className="page-header dash-header">
+        <div>
+          <div className="skel-card" style={{ width: 150, height: 26, marginBottom: 8 }} />
+          <div className="skel-card" style={{ width: 260, height: 14 }} />
+        </div>
+      </div>
+      <div className="dash-skel-grid">
+        {[0, 1, 2, 3].map((i) => <div key={i} className="skel-card skel-kpi" />)}
+      </div>
+      <div className="grid grid-2">
+        <div className="skel-card skel-chart" />
+        <div className="skel-card skel-chart" />
+      </div>
+    </div>
+  );
+}
+
+function greetText() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 }
 
 const KPI_ICON = { blue: 'chart', green: 'box', amber: 'bell', red: 'receipt' };
@@ -130,7 +163,7 @@ export default function Dashboard() {
         </div>
       );
     }
-    return <div className="card">Loading dashboard...</div>;
+    return <DashSkeleton />;
   }
 
   const cur = data.kpi.currency;
@@ -149,14 +182,18 @@ export default function Dashboard() {
 
   return (
     <div>
-      {/* Header - practical */}
+      {/* Header */}
       <div className="page-header dash-header">
         <div>
-          <h1>Dashboard</h1>
-          <div className="muted small">
-            {user?.name} · {user?.role} · {dateLabel} · {timeLabel}
+          <h1>{greetText()}, {(user?.name || '').split(' ')[0] || 'there'}</h1>
+          <div className="dash-greet">
+            <span className="role-chip">{role}</span>
+            <span className="muted small">{dateLabel} · {timeLabel}</span>
           </div>
-          <div className="muted small" style={{marginTop:4}}>Products, stock, sales and orders at a glance.</div>
+          <div className={`dash-live ${refreshing ? 'syncing' : ''}`}>
+            <span className="dash-live-dot" />
+            {updated ? `Updated ${fmtAgo(updated.toISOString())}${refreshing ? ' · syncing' : ''}` : 'Connecting…'}
+          </div>
         </div>
         <div className="dash-toolbar">
           <div className="range-pills">
@@ -199,6 +236,7 @@ export default function Dashboard() {
       {/* ---------- CASHIER dashboard ---------- */}
       {isCashier && (
         <>
+          <Section title="Today" />
           <div className="stats-grid">
             <KpiCard label={`Sales · ${data.range.label}`} value={k.sales} currency={cur} color="amber"
               spark={trendData} sparkKey="sales" trend={data.kpi.trend.sales}
@@ -215,6 +253,7 @@ export default function Dashboard() {
               sub={`${fmt(data.kpi.pending_orders.total)} ${cur} pending`} />
           </div>
 
+          <Section title="Sales patterns" />
           <div className="grid grid-2" style={{ marginBottom: 16 }}>
             <div className="card">
               <div className="card-head">
@@ -264,25 +303,34 @@ export default function Dashboard() {
             </div>
           )}
 
+          <Section title="Recent activity" />
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-head"><h2>Recent sales</h2><Link to="/sales" className="muted small">View all →</Link></div>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Invoice</th><th>Customer</th><th className="num">Total</th><th className="num">Paid</th><th>Status</th><th>Date</th></tr></thead>
-                <tbody>
-                  {data.recent_sales.map((s) => (
-                    <tr key={s.id}>
-                      <td style={{ fontWeight: 600 }}>{s.invoice_number}</td>
-                      <td>{s.customer_name || 'Walk-in'}</td>
-                      <td className="num">{fmt(s.total)}</td>
-                      <td className="num">{fmt(s.paid_amount)}</td>
-                      <td><span className={`badge ${s.payment_status === 'paid' ? 'amber' : s.payment_status === 'partial' ? 'amber' : 'red'}`}>{s.payment_status}</span></td>
-                      <td className="muted">{new Date(s.sale_date).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {data.recent_sales.length === 0 ? (
+              <div className="empty-state">
+                <div className="ico-wrap"><I name="receipt" size={24} /></div>
+                <h3>No sales yet</h3>
+                <p>Sales rung up on the till will appear here straight away.</p>
+              </div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Invoice</th><th>Customer</th><th className="num">Total</th><th className="num">Paid</th><th>Status</th><th>When</th></tr></thead>
+                  <tbody>
+                    {data.recent_sales.map((s) => (
+                      <tr key={s.id}>
+                        <td style={{ fontWeight: 600 }}>{s.invoice_number}</td>
+                        <td>{s.customer_name || 'Walk-in'}</td>
+                        <td className="num">{fmt(s.total)}</td>
+                        <td className="num">{fmt(s.paid_amount)}</td>
+                        <td><span className={`badge ${s.payment_status === 'paid' ? 'amber' : s.payment_status === 'partial' ? 'amber' : 'red'}`}>{s.payment_status}</span></td>
+                        <td className="muted small" title={fmtDateTime(s.sale_date)}>{fmtAgo(s.sale_date)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -290,6 +338,7 @@ export default function Dashboard() {
       {/* ---------- CLERK dashboard ---------- */}
       {isClerk && (
         <>
+          <Section title="Orders & stock" />
           <div className="stats-grid">
             <KpiCard label="Orders today" value={data.kpi.orders_today.total} currency={cur} color="amber"
               trend={data.kpi.trend.orders}
@@ -334,12 +383,19 @@ export default function Dashboard() {
             </div>
           )}
 
+          <Section title="Recent activity" />
           <div className="grid grid-2" style={{ marginBottom: 16 }}>
             <div className="card">
               <div className="card-head"><h2>Recent online orders</h2><Link to="/orders" className="muted small">View all →</Link></div>
-              {data.recent_orders.length === 0 ? <div className="muted">No orders yet.</div> : (
+              {data.recent_orders.length === 0 ? (
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="cart" size={24} /></div>
+                  <h3>No orders yet</h3>
+                  <p>Orders placed on the shop site will land here for handling.</p>
+                </div>
+              ) : (
                 <div className="table-wrap"><table>
-                  <thead><tr><th>Order</th><th>Customer</th><th className="num">Total</th><th>Status</th></tr></thead>
+                  <thead><tr><th>Order</th><th>Customer</th><th className="num">Total</th><th>Status</th><th>Placed</th></tr></thead>
                   <tbody>
                     {data.recent_orders.map((o) => (
                       <tr key={o.id}>
@@ -347,6 +403,7 @@ export default function Dashboard() {
                         <td>{o.user_name}</td>
                         <td className="num">{fmt(o.total)}</td>
                         <td><span className={`badge ${o.order_status === 'completed' ? 'amber' : o.order_status === 'pending' ? 'amber' : o.order_status === 'cancelled' || o.order_status === 'rejected' ? 'red' : 'blue'}`}>{o.order_status}</span></td>
+                        <td className="muted small" title={o.order_date ? fmtDateTime(o.order_date) : ''}>{fmtAgo(o.order_date)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -355,42 +412,65 @@ export default function Dashboard() {
             </div>
             <div className="card">
               <div className="card-head"><h2>Recent sales</h2><Link to="/sales" className="muted small">View all →</Link></div>
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Invoice</th><th>Customer</th><th className="num">Total</th><th>Status</th><th>Date</th></tr></thead>
-                  <tbody>
-                    {data.recent_sales.slice(0, 6).map((s) => (
-                      <tr key={s.id}>
-                        <td style={{ fontWeight: 600 }}>{s.invoice_number}</td>
-                        <td>{s.customer_name || 'Walk-in'}</td>
-                        <td className="num">{fmt(s.total)}</td>
-                        <td><span className={`badge ${s.payment_status === 'paid' ? 'amber' : s.payment_status === 'partial' ? 'amber' : 'red'}`}>{s.payment_status}</span></td>
-                        <td className="muted">{new Date(s.sale_date).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {data.recent_sales.length === 0 ? (
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="receipt" size={24} /></div>
+                  <h3>No sales yet</h3>
+                  <p>Sales rung up on the till will appear here straight away.</p>
+                </div>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Invoice</th><th>Customer</th><th className="num">Total</th><th>Status</th><th>When</th></tr></thead>
+                    <tbody>
+                      {data.recent_sales.slice(0, 6).map((s) => (
+                        <tr key={s.id}>
+                          <td style={{ fontWeight: 600 }}>{s.invoice_number}</td>
+                          <td>{s.customer_name || 'Walk-in'}</td>
+                          <td className="num">{fmt(s.total)}</td>
+                          <td><span className={`badge ${s.payment_status === 'paid' ? 'amber' : s.payment_status === 'partial' ? 'amber' : 'red'}`}>{s.payment_status}</span></td>
+                          <td className="muted small" title={fmtDateTime(s.sale_date)}>{fmtAgo(s.sale_date)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
 
+          <Section title="Performance" />
           <div className="grid grid-2" style={{ marginBottom: 16 }}>
             <div className="card">
               <div className="card-head"><h2>Top sellers</h2><span className="muted small">{data.range.label}</span></div>
-              <div className="table-wrap"><table>
-                <thead><tr><th>Product</th><th className="num">Qty</th><th className="num">Revenue</th></tr></thead>
-                <tbody>
-                  {data.top.products.map((p) => (
-                    <tr key={p.id}><td>{p.name}</td><td className="num">{fmt(p.qty)}</td><td className="num">{fmt(p.revenue)}</td></tr>
-                  ))}
-                </tbody>
-              </table></div>
+              {data.top.products.length === 0 ? (
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="box" size={24} /></div>
+                  <h3>Nothing sold in this period</h3>
+                  <p>Try a wider range, or check back once sales come in.</p>
+                </div>
+              ) : (
+                <div className="table-wrap"><table>
+                  <thead><tr><th>Product</th><th className="num">Qty</th><th className="num">Revenue</th></tr></thead>
+                  <tbody>
+                    {data.top.products.map((p) => (
+                      <tr key={p.id}><td>{p.name}</td><td className="num">{fmt(p.qty)}</td><td className="num">{fmt(p.revenue)}</td></tr>
+                    ))}
+                  </tbody>
+                </table></div>
+              )}
             </div>
             <div className="card">
               <div className="card-head"><h2>Revenue by category</h2><span className="muted small">{data.range.label}</span></div>
               {data.breakdown.by_category.length ? (
                 <HBarList data={data.breakdown.by_category} valueKey="revenue" labelKey="category" currency={cur} />
-              ) : <div className="muted small">No sales in this period.</div>}
+              ) : (
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="chart" size={24} /></div>
+                  <h3>No sales in this period</h3>
+                  <p>Category revenue shows up once something sells.</p>
+                </div>
+              )}
             </div>
           </div>
         </>
@@ -399,6 +479,7 @@ export default function Dashboard() {
       {/* ---------- MANAGER / ADMIN dashboard ---------- */}
       {isMgmt && (
         <>
+          <Section title={`Overview · ${data.range.label}`} />
           {/* Row 1 : performance KPIs for selected range */}
           <div className="stats-grid">
             <KpiCard label={`Sales · ${data.range.label}`} value={k.sales} currency={cur} color="amber"
@@ -430,6 +511,7 @@ export default function Dashboard() {
               sub={`${data.kpi.low_stock.out_count} out of stock · ${data.kpi.inventory.product_count} products`} />}
           </div>
 
+          <Section title="Cash & payments" />
           {/* Charts row A : cash flow + payment methods */}
           <div className="grid grid-2" style={{ marginBottom: 16 }}>
             <div className="card">
@@ -451,6 +533,7 @@ export default function Dashboard() {
             </div>
           </div>
 
+          <Section title="Sales performance" />
           {/* Charts row B : sales & profit + channels */}
           <div className="grid grid-2" style={{ marginBottom: 16 }}>
             <div className="card">
@@ -482,7 +565,13 @@ export default function Dashboard() {
               </div>
               {data.breakdown.by_category.length ? (
                 <HBarList data={data.breakdown.by_category} valueKey="revenue" labelKey="category" currency={cur} />
-              ) : <div className="muted small">No sales in this period.</div>}
+              ) : (
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="chart" size={24} /></div>
+                  <h3>No sales in this period</h3>
+                  <p>Category revenue shows up once something sells.</p>
+                </div>
+              )}
             </div>
             <div className="card">
               <div className="card-head">
@@ -495,6 +584,7 @@ export default function Dashboard() {
             </div>
           </div>
 
+          <Section title="Money owed" />
           {/* Aging */}
           <div className="grid grid-2" style={{ marginBottom: 16 }}>
             <div className="card">
@@ -549,6 +639,7 @@ export default function Dashboard() {
             </div>
           )}
 
+          <Section title="Performance" />
           {/* Performance */}
           <div className="grid grid-2" style={{ marginBottom: 16 }}>
             <div className="card">
@@ -564,7 +655,13 @@ export default function Dashboard() {
             </div>
             <div className="card">
               <div className="card-head"><h2>Top customers</h2><span className="muted small">{data.range.label} · by revenue</span></div>
-              {data.top.customers.length === 0 ? <div className="muted">No customers in this period.</div> : (
+              {data.top.customers.length === 0 ? (
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="users" size={24} /></div>
+                  <h3>No customers in this period</h3>
+                  <p>Named-customer sales will rank here once they land.</p>
+                </div>
+              ) : (
                 <div className="table-wrap"><table>
                   <thead><tr><th>Customer</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">Outstanding</th></tr></thead>
                   <tbody>
@@ -581,7 +678,13 @@ export default function Dashboard() {
           <div className="grid grid-2" style={{ marginBottom: 16 }}>
             <div className="card">
               <div className="card-head"><h2>Cashier performance</h2><span className="muted small">{data.range.label}</span></div>
-              {data.breakdown.by_cashier.length === 0 ? <div className="muted">No sales in this period.</div> : (
+              {data.breakdown.by_cashier.length === 0 ? (
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="users" size={24} /></div>
+                  <h3>No sales in this period</h3>
+                  <p>Per-cashier totals appear once they run sales through the till.</p>
+                </div>
+              ) : (
                 <div className="table-wrap"><table>
                   <thead><tr><th>Cashier</th><th>Office</th><th className="num">Sales</th><th className="num">Total</th><th className="num">Unpaid</th></tr></thead>
                   <tbody>
@@ -598,18 +701,31 @@ export default function Dashboard() {
               <div className="card-head"><h2>Stock value by category</h2><span className="muted small">Current inventory</span></div>
               {data.inventory_by_category.length ? (
                 <HBarList data={data.inventory_by_category} valueKey="cost_value" labelKey="category" currency={cur} />
-              ) : <div className="muted">No stock recorded.</div>}
+              ) : (
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="box" size={24} /></div>
+                  <h3>No stock recorded</h3>
+                  <p>Receive stock or add products to see category values here.</p>
+                </div>
+              )}
             </div>
           )}
           </div>
 
+          <Section title="Recent activity" />
           {/* Recent activity */}
           <div className="grid grid-2" style={{ marginBottom: 16 }}>
             <div className="card">
               <div className="card-head"><h2>Recent online orders</h2><Link to="/orders" className="muted small">View all →</Link></div>
-              {data.recent_orders.length === 0 ? <div className="muted">No orders yet.</div> : (
+              {data.recent_orders.length === 0 ? (
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="cart" size={24} /></div>
+                  <h3>No orders yet</h3>
+                  <p>Orders placed on the shop site will land here for handling.</p>
+                </div>
+              ) : (
                 <div className="table-wrap"><table>
-                  <thead><tr><th>Order</th><th>Customer</th><th className="num">Total</th><th>Status</th></tr></thead>
+                  <thead><tr><th>Order</th><th>Customer</th><th className="num">Total</th><th>Status</th><th>Placed</th></tr></thead>
                   <tbody>
                     {data.recent_orders.map((o) => (
                       <tr key={o.id}>
@@ -617,6 +733,7 @@ export default function Dashboard() {
                         <td>{o.user_name}</td>
                         <td className="num">{fmt(o.total)}</td>
                         <td><span className={`badge ${o.order_status === 'completed' ? 'amber' : o.order_status === 'pending' ? 'amber' : o.order_status === 'cancelled' || o.order_status === 'rejected' ? 'red' : 'blue'}`}>{o.order_status}</span></td>
+                        <td className="muted small" title={o.order_date ? fmtDateTime(o.order_date) : ''}>{fmtAgo(o.order_date)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -625,13 +742,19 @@ export default function Dashboard() {
             </div>
             <div className="card">
               <div className="card-head"><h2>Recent payments</h2><span className="muted small">Sales & purchases</span></div>
-              {data.recent_payments.length === 0 ? <div className="muted">No payments yet.</div> : (
+              {data.recent_payments.length === 0 ? (
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="truck" size={24} /></div>
+                  <h3>No payments yet</h3>
+                  <p>Money received against sales and paid to suppliers shows here.</p>
+                </div>
+              ) : (
                 <div className="table-wrap"><table>
-                  <thead><tr><th>Date</th><th>Method</th><th className="num">Amount</th><th>Context</th></tr></thead>
+                  <thead><tr><th>When</th><th>Method</th><th className="num">Amount</th><th>Context</th></tr></thead>
                   <tbody>
                     {data.recent_payments.map((p) => (
                       <tr key={p.id}>
-                        <td className="muted small">{new Date(p.payment_date).toLocaleString()}</td>
+                        <td className="muted small" title={fmtDateTime(p.payment_date)}>{fmtAgo(p.payment_date)}</td>
                         <td>{p.payment_method}</td>
                         <td className="num" style={{ color: Number(p.amount) < 0 ? 'var(--danger)' : undefined }}>{fmt(p.amount)}</td>
                         <td className="muted small">{p.customer_name || p.supplier_name || p.sale_invoice || p.purchase_invoice || ':'}</td>
@@ -645,23 +768,31 @@ export default function Dashboard() {
 
           <div className="card">
             <div className="card-head"><h2>Recent sales</h2><Link to="/sales" className="muted small">View all →</Link></div>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Invoice</th><th>Customer</th><th className="num">Total</th><th className="num">Paid</th><th>Status</th><th>Date</th></tr></thead>
-                <tbody>
-                  {data.recent_sales.map((s) => (
-                    <tr key={s.id}>
-                      <td style={{ fontWeight: 600 }}>{s.invoice_number}</td>
-                      <td>{s.customer_name || 'Walk-in'}</td>
-                      <td className="num">{fmt(s.total)}</td>
-                      <td className="num">{fmt(s.paid_amount)}</td>
-                      <td><span className={`badge ${s.payment_status === 'paid' ? 'amber' : s.payment_status === 'partial' ? 'amber' : 'red'}`}>{s.payment_status}</span></td>
-                      <td className="muted">{new Date(s.sale_date).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {data.recent_sales.length === 0 ? (
+              <div className="empty-state">
+                <div className="ico-wrap"><I name="receipt" size={24} /></div>
+                <h3>No sales yet</h3>
+                <p>Sales rung up on the till will appear here straight away.</p>
+              </div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Invoice</th><th>Customer</th><th className="num">Total</th><th className="num">Paid</th><th>Status</th><th>When</th></tr></thead>
+                  <tbody>
+                    {data.recent_sales.map((s) => (
+                      <tr key={s.id}>
+                        <td style={{ fontWeight: 600 }}>{s.invoice_number}</td>
+                        <td>{s.customer_name || 'Walk-in'}</td>
+                        <td className="num">{fmt(s.total)}</td>
+                        <td className="num">{fmt(s.paid_amount)}</td>
+                        <td><span className={`badge ${s.payment_status === 'paid' ? 'amber' : s.payment_status === 'partial' ? 'amber' : 'red'}`}>{s.payment_status}</span></td>
+                        <td className="muted small" title={fmtDateTime(s.sale_date)}>{fmtAgo(s.sale_date)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </>
       )}

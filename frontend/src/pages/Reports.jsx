@@ -126,7 +126,9 @@ export default function Reports() {
 
       {tab !== 'cashierDaily' && !data && busy && (
         <div className="card" style={{ padding: 14 }}>
-          <span className="muted small">Loading report…</span>
+          <div className="skel-card" style={{ height: 20, width: '40%', marginBottom: 10 }} />
+          <div className="skel-card" style={{ height: 14, width: '70%', marginBottom: 8 }} />
+          <div className="skel-card" style={{ height: 14, width: '55%' }} />
         </div>
       )}
 

@@ -1013,7 +1013,7 @@ input:focus, select:focus, textarea:focus {
 .skel-row, .skel-card, .skel-line {
   background: var(--skel-b);
   background-size: 400% 100%;
-  
+  animation: skelShimmer 1.4s linear infinite;
   border-radius: 8px;
 }
 @keyframes skelShimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }

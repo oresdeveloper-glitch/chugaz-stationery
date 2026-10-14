@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { api, fmt, fmtDateTime, getUser, lockPrintRedirect, unlockPrintRedirect, onLive, latest } from '../lib/api';
+import { api, fmt, fmtAgo, fmtDateTime, getUser, lockPrintRedirect, unlockPrintRedirect, onLive, latest } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { useToast } from '../components/Toast';
 import I from '../components/icons';
@@ -241,7 +241,13 @@ export default function StaffOrders() {
   return (
     <div>
       <div className="page-header">
-        <h1>Customer orders</h1>
+        <div>
+          <h1>Customer orders</h1>
+          <div className="muted small">
+            {(stats.pending || 0) > 0 ? `${stats.pending} pending · ` : ''}
+            {Object.values(stats).reduce((a, b) => a + b, 0)} total · live, updates as orders come in
+          </div>
+        </div>
       </div>
 
       <div className="toolbar">
@@ -260,9 +266,17 @@ export default function StaffOrders() {
       <div className="card">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Order</th><th>Customer</th><th className="num">Items</th><th className="num">Total</th><th>Status</th><th>Payment</th><th className="num">Return req</th>{isAdminView && <th>Last handled by</th>}<th></th></tr></thead>
+            <thead><tr><th>Order</th><th>Customer</th><th className="num">Items</th><th className="num">Total</th><th>Status</th><th>Payment</th><th className="num">Return req</th><th>Placed</th>{isAdminView && <th>Last handled by</th>}<th></th></tr></thead>
             <tbody>
-              {orders.length === 0 && <tr><td colSpan={isAdminView ? 9 : 8} className="muted" style={{ textAlign: 'center' }}>No orders.</td></tr>}
+              {orders.length === 0 && (
+                <tr><td colSpan={isAdminView ? 10 : 9}>
+                  <div className="empty-state">
+                    <div className="ico-wrap"><I name="cart" size={24} /></div>
+                    <h3>No orders here</h3>
+                    <p>{q ? 'Nothing matches that search — try a different order number or customer name.' : 'New customer orders will appear in this queue as they come in.'}</p>
+                  </div>
+                </td></tr>
+              )}
               {orders.map((o) => (
                 <tr key={o.id}>
                   <td style={{ fontWeight: 600 }}>{o.order_number}</td>
@@ -271,7 +285,8 @@ export default function StaffOrders() {
                   <td className="num">{fmt(o.total)}</td>
                   <td><span className={`badge ${COLOR(o.order_status)}`}>{LABEL(o.order_status)}</span></td>
                   <td><span className={`badge ${o.payment_status === 'paid' ? 'amber' : o.payment_status === 'refunded' || o.payment_status === 'partial_refund' ? 'gray' : 'red'}`}>{o.payment_status}</span></td>
-                  <td className="num">{o.return_requests > 0 ? <span className="badge red">{o.return_requests}</span> : ':'}</td>
+                  <td className="num">{o.return_requests > 0 ? <span className="badge red">{o.return_requests}</span> : '–'}</td>
+                  <td className="muted small" title={o.order_date ? fmtDateTime(o.order_date) : ''}>{fmtAgo(o.order_date)}</td>
                   {isAdminView && <td className="muted small" style={{maxWidth:160, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}} title={o.last_handler || '—'}>{o.last_handler || <span className="muted">—</span>}</td>}
                   <td><button className="btn sm" onClick={async () => {
                     try {
