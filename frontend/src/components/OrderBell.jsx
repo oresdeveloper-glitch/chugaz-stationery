@@ -3,7 +3,6 @@ import { api, fmt } from '../lib/api';
 import { useToast } from './Toast';
 
 const SEEN_KEY = 'sst_notify_seen_orders';
-const POLL_MS = 10000;
 
 function beep() {
   try {
@@ -56,8 +55,20 @@ export default function OrderBell() {
     };
 
     tick();
-    const id = setInterval(tick, POLL_MS);
-    return () => { stopped = true; clearInterval(id); };
+    // Event-driven only: the push channel fires chugaz-nudge the moment an
+    // order is generated or its status changes, and focus/visibility catches
+    // up whatever was missed while the stream was down. No timer polls.
+    const onNudge = () => tick();
+    const onWake = () => { if (!document.hidden) tick(); };
+    window.addEventListener('chugaz-nudge', onNudge);
+    window.addEventListener('focus', onWake);
+    document.addEventListener('visibilitychange', onWake);
+    return () => {
+      stopped = true;
+      window.removeEventListener('chugaz-nudge', onNudge);
+      window.removeEventListener('focus', onWake);
+      document.removeEventListener('visibilitychange', onWake);
+    };
   }, [toast]);
 
   if (!count) return null;

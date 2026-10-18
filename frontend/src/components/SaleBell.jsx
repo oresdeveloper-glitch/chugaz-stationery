@@ -4,7 +4,6 @@ import { useToast } from './Toast';
 import I from './icons';
 
 const SEEN_KEY = 'sst_notify_seen_sales';
-const POLL_MS = 5000;
 
 function beep() {
   try {
@@ -64,8 +63,22 @@ export default function SaleBell() {
     };
 
     tick();
-    const id = setInterval(tick, POLL_MS);
-    return () => { stopped = true; clearInterval(id); };
+    // Event-driven only: the push channel fires chugaz-nudge the moment a
+    // sale or order is generated on this instance (so a sale from another
+    // till toasts even while this tab sits in the background, exactly like
+    // the old ticker did), and focus/visibility catches up whatever was
+    // missed while the stream was down. No timer polls the API.
+    const onNudge = () => tick();
+    const onWake = () => { if (!document.hidden) tick(); };
+    window.addEventListener('chugaz-nudge', onNudge);
+    window.addEventListener('focus', onWake);
+    document.addEventListener('visibilitychange', onWake);
+    return () => {
+      stopped = true;
+      window.removeEventListener('chugaz-nudge', onNudge);
+      window.removeEventListener('focus', onWake);
+      document.removeEventListener('visibilitychange', onWake);
+    };
   }, [toast]);
 
   const markAllRead = async () => {
@@ -73,7 +86,7 @@ export default function SaleBell() {
       await api('/notifications/read', { method: 'POST', body: {} });
       setCount(0);
       setList((l) => l.map((n) => ({ ...n, is_read: 1 })));
-    } catch (e) { /* keep the badge; the next poll refreshes the true state */ }
+    } catch (e) { /* keep the badge; the next push refreshes the true state */ }
   };
 
   const toggle = () => {

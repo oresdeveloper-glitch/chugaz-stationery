@@ -56,6 +56,56 @@ export default function App() {
     return () => window.removeEventListener('focus', onFocus);
   }, []);
 
+  // Push channel: the server sends an SSE event the moment the data-version
+  // hash changes, so every open page updates the instant new data is
+  // generated - nothing in this app polls on a timer. The event is only a
+  // hint; it fires the same chugaz-nudge the write path uses, and the pinned
+  // /sync tick below remains the single source of truth. EventSource cannot
+  // send headers, so the pinned instance rides along as ?marker= and the
+  // server answers 409 on mismatch; the browser retries the stream until it
+  // lands on our instance, and a pin change reopens it via chugaz-pin.
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return undefined;
+    let es = null;
+    let down = null;
+    const announce = (open) => {
+      try { window.dispatchEvent(new CustomEvent('chugaz-sse', { detail: { open } })); } catch (e) { /* ignore */ }
+    };
+    // Grace period before flipping the indicator to "reconnecting" so the brief
+    // reconnects of a healthy stream don't flicker the dashboard badge.
+    const markUp = () => { if (down) { clearTimeout(down); down = null; } announce(true); };
+    const markDown = () => { if (down) clearTimeout(down); down = setTimeout(() => announce(false), 10000); };
+    const nudge = () => { try { window.dispatchEvent(new Event('chugaz-nudge')); } catch (e) { /* ignore */ } };
+    const open = () => {
+      if (es) { try { es.close(); } catch (e) { /* ignore */ } es = null; }
+      try {
+        const pin = getDbPin();
+        es = new EventSource(pin ? `/api/events?marker=${encodeURIComponent(pin)}` : '/api/events');
+        es.onopen = markUp;
+        es.onmessage = (e) => {
+          try {
+            const d = JSON.parse(e.data);
+            // hello = (re)connect catch-up: anything generated while the
+            // stream was down is picked up by the /sync version comparison.
+            if (d && (d.type === 'change' || d.type === 'hello')) nudge();
+          } catch (err) { /* ignore malformed frame */ }
+        };
+        es.onerror = markDown;
+      } catch (e) { es = null; }
+    };
+    open();
+    // Re-pin (convergence or affinity recovery): reopen so the stream keeps
+    // following the instance our reads are pinned to.
+    const onPin = () => open();
+    window.addEventListener('chugaz-pin', onPin);
+    return () => {
+      if (down) clearTimeout(down);
+      window.removeEventListener('chugaz-pin', onPin);
+      if (es) es.close();
+      announce(false);
+    };
+  }, []);
+
   // After a write, force a couple of extra version checks so a lagging
   // instance can't leave stale totals on the dashboard.
   useEffect(() => {
@@ -68,15 +118,17 @@ export default function App() {
     return () => window.removeEventListener('chugaz-mutated', onMut);
   }, []);
 
-  // Poll a cheap version hash; announce 'chugaz-live' when it changes so every
-  // open page refetches. Flap suppression: a previously-seen version must hold
-  // 2 ticks before a resync fires, so instance bouncing never storms events.
+  // Check a cheap version hash on demand - when the push channel signals a
+  // change, after a local write, or when the tab regains focus - and announce
+  // 'chugaz-live' so every open page refetches. No interval runs anywhere.
+  // Flap suppression: a previously-seen version must hold 2 checks before a
+  // resync fires, so instance bouncing never storms events.
   useEffect(() => {
     let last = null;
     let seen = [];
     let suppressed = false;
     let hold = 0;
-    let ticks = 0;
+    let lastConv = 0;
     let stopped = false;
     const announce = (v) => {
       try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'], version: v } })); } catch (e) { /* ignore */ }
@@ -87,9 +139,10 @@ export default function App() {
         const s = await api('/sync');
         const v = s && s.version;
         if (v == null) return;
-        ticks += 1;
-        // Every 4th tick, check for a richer instance and re-merge if found.
-        if (ticks % 4 === 0) {
+        // At most once a minute (event-triggered, never on a timer), check
+        // for a richer instance and re-merge if found.
+        if (Date.now() - lastConv >= 60000) {
+          lastConv = Date.now();
           try {
             const u = getUser();
             const pin = getDbPin();
@@ -134,7 +187,6 @@ export default function App() {
       } catch (e) { /* ignore */ }
     };
     tick();
-    const id = setInterval(tick, 4000);
     const onVis = () => { if (!document.hidden) tick(); };
     const onNudge = () => tick();
     document.addEventListener('visibilitychange', onVis);
@@ -142,7 +194,6 @@ export default function App() {
     window.addEventListener('chugaz-nudge', onNudge);
     return () => {
       stopped = true;
-      clearInterval(id);
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('focus', onVis);
       window.removeEventListener('chugaz-nudge', onNudge);

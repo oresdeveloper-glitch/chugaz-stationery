@@ -90,7 +90,7 @@ export default function Pos() {
   };
 
   // latest() guards the Today total against a stale response overwriting the
-  // fresh one: after a sale the poller resyncs several times, and without the
+  // fresh one: after a sale the app resyncs a couple of times, and without the
   // guard an older in-flight fetch could resolve last and snap the total back
   // to a pre-sale (or empty-instance) figure.
   const setShiftLatest = latest();

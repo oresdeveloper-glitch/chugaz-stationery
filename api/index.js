@@ -27,7 +27,11 @@ app.use((req, res, next) => {
     const row = m.db.prepare("SELECT value FROM settings WHERE key='db_marker'").get();
     const marker = row && row.value ? row.value : null;
     if (marker) res.setHeader('X-Db-Marker', marker);
-    const expect = req.get('X-Expect-Db-Marker');
+    // EventSource cannot send custom headers, so the SSE channel passes its
+    // pinned marker as ?marker= instead; the same 409 rule applies to it - the
+    // browser then retries the stream until it lands on the pinned instance.
+    const q = req.path === '/api/events' ? req.query.marker : null;
+    const expect = req.get('X-Expect-Db-Marker') || (typeof q === 'string' && q ? q : null);
     if (marker && expect && expect !== marker) {
       return res.status(409).json({ error: 'instance_mismatch', code: 'instance_mismatch', db_marker: marker });
     }
@@ -106,6 +110,66 @@ app.get('/api/sync', (req, res) => {
     }
   } catch (_) { version = null; }
   res.json({ ok: true, version, data_version: dataVersion, db_marker: res.getHeader('X-Db-Marker') || null, sales, orders, categories });
+});
+
+// Live push channel (SSE). The browser opens this once and the server sends
+// an event the instant the data-version hash changes, so every open page
+// learns about a new sale/order/stock write as soon as it is generated - the
+// client runs no polling timers at all. The event is only a HINT: the client
+// re-runs its authoritative pinned /sync check before announcing anything, so
+// a push from a diverged instance can never show wrong numbers - it can only
+// make the truth arrive sooner. EventSource cannot send custom headers, so
+// affinity passes the pinned marker as ?marker= (same 409 rule as
+// X-Expect-Db-Marker above). Unauthenticated, exactly like /api/sync (same
+// information level: hash-change notices, no data payloads).
+app.get('/api/events', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('retry: 2500\n\n');
+  let ownMarker = null;
+  try {
+    // eslint-disable-next-line no-eval
+    const m = eval('require')('./backend/src/db');
+    if (m && m.dbReady) {
+      const row = m.db.prepare("SELECT value FROM settings WHERE key='db_marker'").get();
+      ownMarker = row && row.value ? row.value : null;
+    }
+  } catch (_) { /* degraded db: hello still carries version */ }
+  const readVersion = () => {
+    try {
+      // eslint-disable-next-line no-eval
+      const m = eval('require')('./backend/src/db');
+      if (!m || !m.dbReady) return null;
+      const r = m.db.prepare(SYNC_SQL).get();
+      return r && r.v != null ? String(r.v) : null;
+    } catch (_) { return null; }
+  };
+  let last = readVersion();
+  let closed = false;
+  let iv = null;
+  const stop = () => {
+    if (closed) return;
+    closed = true;
+    if (iv) clearInterval(iv);
+    try { res.end(); } catch (_) { /* already gone */ }
+  };
+  res.write('data: ' + JSON.stringify({ type: 'hello', version: last, db_marker: ownMarker }) + '\n\n');
+  iv = setInterval(() => {
+    if (closed) return;
+    const v = readVersion();
+    if (v !== last) {
+      last = v;
+      try { res.write('data: ' + JSON.stringify({ type: 'change', version: v }) + '\n\n'); } catch (_) { stop(); }
+    } else {
+      try { res.write(': ping\n\n'); } catch (_) { stop(); }
+    }
+  }, 1500);
+  req.on('close', stop);
+  req.on('error', stop);
 });
 
 function safeRoute(routePath) {

@@ -130,9 +130,16 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [clock, setClock] = useState(new Date());
   const [updated, setUpdated] = useState(null);
+  const [pushLive, setPushLive] = useState(false);
   const toast = useToast();
   const rangeRef = useRef(range);
   rangeRef.current = range;
+
+  useEffect(() => {
+    const onSse = (e) => setPushLive(!!(e.detail && e.detail.open));
+    window.addEventListener('chugaz-sse', onSse);
+    return () => window.removeEventListener('chugaz-sse', onSse);
+  }, []);
 
   const setDash = latest();
   const load = (r) => setDash(
@@ -190,9 +197,9 @@ export default function Dashboard() {
             <span className="role-chip">{role}</span>
             <span className="muted small">{dateLabel} · {timeLabel}</span>
           </div>
-          <div className={`dash-live ${refreshing ? 'syncing' : ''}`}>
+          <div className={`dash-live ${refreshing ? 'syncing' : ''}`} title={pushLive ? 'Updates stream in the moment anything changes' : 'Push stream reconnecting — data still refreshes when you refocus this tab or after a write'}>
             <span className="dash-live-dot" />
-            {updated ? `Updated ${fmtAgo(updated.toISOString())}${refreshing ? ' · syncing' : ''}` : 'Connecting…'}
+            {pushLive ? 'Live' : 'Reconnecting'} · {updated ? `updated ${fmtAgo(updated.toISOString())}${refreshing ? ' · syncing' : ''}` : 'connecting…'}
           </div>
         </div>
         <div className="dash-toolbar">

@@ -91,11 +91,19 @@ export function getDbPin() {
   return dbPin;
 }
 export function setDbPin(m) {
-  dbPin = m || null;
+  const cur = getDbPin();
+  const next = m || null;
+  const changed = cur !== next;
+  dbPin = next;
   try {
     if (dbPin) localStorage.setItem(DB_PIN_KEY, dbPin);
     else localStorage.removeItem(DB_PIN_KEY);
   } catch (_) { /* private mode etc. — pin just stays in-memory */ }
+  // The SSE stream carries the pin as ?marker= (EventSource cannot set
+  // headers), so reopen it whenever the pinned instance changes.
+  if (changed) {
+    try { window.dispatchEvent(new Event('chugaz-pin')); } catch (_) { /* ignore */ }
+  }
 }
 
 const AFFINITY_TRIES = 5;
@@ -183,7 +191,7 @@ async function request(path, options = {}, shop = false) {
    if (data && data.code) err.code = data.code;
    throw err;
   }
-  // Write landed: nudge the live poller so open dashboards resync right away.
+  // Write landed: nudge the live check so open dashboards resync right away.
   if (!idempotent) {
     try { window.dispatchEvent(new Event('chugaz-mutated')); } catch {}
     try { if (onWriteFn) onWriteFn(); } catch {}
