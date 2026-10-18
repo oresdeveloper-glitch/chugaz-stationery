@@ -443,6 +443,26 @@ p { margin: 0 0 8px; line-height: 1.6; }
 .skel-row { height: 38px; border-radius: 6px; margin: 6px 0; background: var(--skel-b); }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
+/* Route chunk loading (React.lazy fallback) */
+.route-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 45vh;
+  color: var(--muted);
+  font-size: 14px;
+}
+.route-loading-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(82, 112, 92, 0.25);
+  border-top-color: var(--accent);
+  animation: routeSpin 0.7s linear infinite;
+}
+@keyframes routeSpin { to { transform: rotate(360deg); } }
+
 /* Focus rings for accessibility */
 .staff-topbar button:focus-visible,
 .staff-search input:focus-visible,

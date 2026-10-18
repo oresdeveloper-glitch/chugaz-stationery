@@ -8,8 +8,8 @@ const CATS_KEY = 'sst_db_cats';
 const DB_NAME = 'sst-keep';
 const STORE = 'kv';
 const BACKUP_KEY = 'backup';
-const BACKUP_INTERVAL_MS = 10 * 60 * 1000;
-// A write near a cold reset may miss the 10-minute snapshot — schedule an 8s follow-up.
+const BACKUP_INTERVAL_MS = 3 * 60 * 1000;
+// A write near a cold reset may miss the 3-minute snapshot — schedule an 8s follow-up.
 const POST_WRITE_BACKUP_MS = 8 * 1000;
 
 let scheduled = false;
@@ -55,7 +55,9 @@ async function idbGet(key) {
 
 async function health() {
   try {
-    const res = await fetch(`${apiBase()}/api/health`);
+    const res = await fetch(`${apiBase()}/api/health`, {
+      signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(12000) : undefined,
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -69,13 +71,16 @@ function authHeaders() {
 }
 
 // Pin a request to one instance via X-Expect-Db-Marker; null when it never lands there.
-async function fetchPinned(url, opts, expect, tries = 6) {
+// Bounded: 3 tries with a timeout each, so a reset instance can never hang a
+// backup/restore for tens of seconds (the caller treats null as "skip safely").
+async function fetchPinned(url, opts, expect, tries = 3) {
   for (let i = 0; i < tries; i++) {
     let res;
     try {
       res = await fetch(url, {
         ...opts,
         headers: { ...(opts.headers || {}), ...(expect ? { 'X-Expect-Db-Marker': expect } : {}) },
+        signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(12000) : undefined,
       });
     } catch (e) {
       return null;

@@ -1,40 +1,54 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { getUser, clearAuth, isSessionValid, api, getDbPin } from './lib/api';
 import { dbKeepInit, convergeInstances } from './lib/dbkeep';
 import Login from './pages/Login.jsx';
 import Layout from './components/Layout.jsx';
-import Dashboard from './pages/Dashboard.jsx';
-import Products from './pages/Products.jsx';
-import Inventory from './pages/Inventory.jsx';
-import Pos from './pages/Pos.jsx';
-import Sales from './pages/Sales.jsx';
-import Suppliers from './pages/Suppliers.jsx';
-import Purchases from './pages/Purchases.jsx';
-import Customers from './pages/Customers.jsx';
-import Expenses from './pages/Expenses.jsx';
-import Reports from './pages/Reports.jsx';
-import Users from './pages/Users.jsx';
-import Settings from './pages/Settings.jsx';
-import StaffOrders from './pages/StaffOrders.jsx';
-import ScanScreen from './pages/ScanScreen.jsx';
-import Messages from './pages/Messages.jsx';
 import Forbidden from './pages/Forbidden.jsx';
 import RequireRole from './components/RequireRole.jsx';
 import { ToastProvider } from './components/Toast.jsx';
 import { ShopProvider } from './shop/ShopContext.jsx';
-import ShopLayout from './shop/ShopLayout.jsx';
-import Catalog from './pages/shop/Catalog.jsx';
-import ProductDetail from './pages/shop/ProductDetail.jsx';
-import Cart from './pages/shop/Cart.jsx';
-import Checkout from './pages/shop/Checkout.jsx';
-import MyOrders from './pages/shop/MyOrders.jsx';
-import OrderDetail from './pages/shop/OrderDetail.jsx';
-import Invoice from './pages/shop/Invoice.jsx';
-import Profile from './pages/shop/Profile.jsx';
-import Addresses from './pages/shop/Addresses.jsx';
-import Contact from './pages/shop/Contact.jsx';
-import Splash from './pages/shop/Splash.jsx';
+
+// Route chunks: shell + login paint first, each page downloads only when first
+// opened. This also pulls @zxing (the barcode scanner, only used by ScanScreen)
+// out of the initial bundle, which was the single biggest chunk.
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
+const Products = lazy(() => import('./pages/Products.jsx'));
+const Inventory = lazy(() => import('./pages/Inventory.jsx'));
+const Pos = lazy(() => import('./pages/Pos.jsx'));
+const Sales = lazy(() => import('./pages/Sales.jsx'));
+const Suppliers = lazy(() => import('./pages/Suppliers.jsx'));
+const Purchases = lazy(() => import('./pages/Purchases.jsx'));
+const Customers = lazy(() => import('./pages/Customers.jsx'));
+const Expenses = lazy(() => import('./pages/Expenses.jsx'));
+const Reports = lazy(() => import('./pages/Reports.jsx'));
+const Users = lazy(() => import('./pages/Users.jsx'));
+const Settings = lazy(() => import('./pages/Settings.jsx'));
+const StaffOrders = lazy(() => import('./pages/StaffOrders.jsx'));
+const ScanScreen = lazy(() => import('./pages/ScanScreen.jsx'));
+const Messages = lazy(() => import('./pages/Messages.jsx'));
+const ShopLayout = lazy(() => import('./shop/ShopLayout.jsx'));
+const Catalog = lazy(() => import('./pages/shop/Catalog.jsx'));
+const ProductDetail = lazy(() => import('./pages/shop/ProductDetail.jsx'));
+const Cart = lazy(() => import('./pages/shop/Cart.jsx'));
+const Checkout = lazy(() => import('./pages/shop/Checkout.jsx'));
+const MyOrders = lazy(() => import('./pages/shop/MyOrders.jsx'));
+const OrderDetail = lazy(() => import('./pages/shop/OrderDetail.jsx'));
+const Invoice = lazy(() => import('./pages/shop/Invoice.jsx'));
+const Profile = lazy(() => import('./pages/shop/Profile.jsx'));
+const Addresses = lazy(() => import('./pages/shop/Addresses.jsx'));
+const Contact = lazy(() => import('./pages/shop/Contact.jsx'));
+const Splash = lazy(() => import('./pages/shop/Splash.jsx'));
+
+// Suspense fallback while a route chunk loads (one small spinner, no layout jump).
+function RouteLoading() {
+  return (
+    <div className="route-loading" role="status">
+      <span className="route-loading-dot" />
+      Loading…
+    </div>
+  );
+}
 
 function RequireAuth({ children }) {
   const [user, setUser] = useState(() => {
@@ -76,12 +90,13 @@ export default function App() {
     const markUp = () => { if (down) { clearTimeout(down); down = null; } announce(true); };
     const markDown = () => { if (down) clearTimeout(down); down = setTimeout(() => announce(false), 10000); };
     const nudge = () => { try { window.dispatchEvent(new Event('chugaz-nudge')); } catch (e) { /* ignore */ } };
+    let errs = 0;
     const open = () => {
       if (es) { try { es.close(); } catch (e) { /* ignore */ } es = null; }
       try {
         const pin = getDbPin();
         es = new EventSource(pin ? `/api/events?marker=${encodeURIComponent(pin)}` : '/api/events');
-        es.onopen = markUp;
+        es.onopen = () => { errs = 0; markUp(); };
         es.onmessage = (e) => {
           try {
             const d = JSON.parse(e.data);
@@ -90,16 +105,32 @@ export default function App() {
             if (d && (d.type === 'change' || d.type === 'hello')) nudge();
           } catch (err) { /* ignore malformed frame */ }
         };
-        es.onerror = markDown;
+        es.onerror = () => {
+          markDown();
+          // A recycled instance answers every reconnect with 409, so no onopen
+          // ever arrives: after 3 failed opens run one /sync check - its
+          // affinity fast-recovery re-pins the session, which fires chugaz-pin
+          // (stream reopen + backup restore). An idle tab heals itself, no timer.
+          errs += 1;
+          if (errs >= 3) { errs = 0; nudge(); }
+        };
       } catch (e) { es = null; }
     };
     open();
-    // Re-pin (convergence or affinity recovery): reopen so the stream keeps
-    // following the instance our reads are pinned to.
-    const onPin = () => open();
+    // The pin changed (instance recycled, affinity recovery, convergence):
+    // reopen the stream on the new instance AND run the backup-merge check
+    // immediately, so a wiped disk gets its data back without waiting for a
+    // tab focus. Debounced because recovery can re-pin twice in a row.
+    let keepTimer = null;
+    const onPin = () => {
+      open();
+      clearTimeout(keepTimer);
+      keepTimer = setTimeout(() => { try { dbKeepInit(); } catch (e) { /* ignore */ } }, 400);
+    };
     window.addEventListener('chugaz-pin', onPin);
     return () => {
       if (down) clearTimeout(down);
+      if (keepTimer) clearTimeout(keepTimer);
       window.removeEventListener('chugaz-pin', onPin);
       if (es) es.close();
       announce(false);
@@ -202,6 +233,7 @@ export default function App() {
   return (
     <ToastProvider>
       <BrowserRouter>
+        <Suspense fallback={<RouteLoading />}>
         <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/forbidden" element={<RequireAuth><Forbidden /></RequireAuth>} />
@@ -245,6 +277,7 @@ export default function App() {
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </BrowserRouter>
     </ToastProvider>
   );

@@ -53,7 +53,11 @@ export function clearShopAuth() {
 export async function refreshToken(token) {
   try {
     const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
-    const res = await fetch(`${base}/api/auth/refresh`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`${base}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(15000) : undefined,
+    });
     if (!res.ok) return null;
     const d = await res.json().catch(() => null);
     return d && d.token ? d.token : null;
@@ -106,7 +110,11 @@ export function setDbPin(m) {
   }
 }
 
-const AFFINITY_TRIES = 5;
+// One re-try against the pinned instance, then fall back to any instance.
+// A dead pin (recycled serverless disk) heals in 3 requests total instead of
+// 7 - stacked cold starts here were what made pages hang before "failed to
+// fetch". The unpinned answer simply re-pins the session (see below).
+const AFFINITY_TRIES = 1;
 
 async function request(path, options = {}, shop = false) {
   const headers = { ...(options.headers || {}) };
@@ -137,7 +145,15 @@ async function request(path, options = {}, shop = false) {
     // Read the pin via getDbPin(): the in-memory var starts null on a fresh load.
     const pin = getDbPin();
     if (pin && affinity) h['X-Expect-Db-Marker'] = pin;
-    return fetch(url, { ...options, headers: h });
+    const sig = options.signal ||
+      ((typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(15000) : undefined);
+    return fetch(url, { ...options, headers: h, signal: sig }).catch((e) => {
+      // Never surface the browser's raw "Failed to fetch" - say what happened.
+      if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+        throw new Error('The server took too long to respond. Please try again.');
+      }
+      throw new Error('Could not reach the server. Check your connection and try again.');
+    });
   };
 
   let res = await send();
