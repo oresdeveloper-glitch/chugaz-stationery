@@ -128,31 +128,21 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [range, setRange] = useState(isCashier ? 'today' : 'month');
-  const [refreshing, setRefreshing] = useState(false);
   const [clock, setClock] = useState(new Date());
-  const [updated, setUpdated] = useState(null);
-  const [pushLive, setPushLive] = useState(false);
   const toast = useToast();
   const rangeRef = useRef(range);
   rangeRef.current = range;
 
-  useEffect(() => {
-    const onSse = (e) => setPushLive(!!(e.detail && e.detail.open));
-    window.addEventListener('chugaz-sse', onSse);
-    return () => window.removeEventListener('chugaz-sse', onSse);
-  }, []);
-
   const setDash = latest();
   const load = (r) => setDash(
-    async () => { setRefreshing(true); return api(`/reports/dashboard?range=${r || rangeRef.current}`); },
+    async () => api(`/reports/dashboard?range=${r || rangeRef.current}`),
     (d) => {
       // Shape-check the payload so a partial/broken response shows a retry
       // card instead of a half-crashed page full of undefineds.
-      if (!d || !d.kpi || !d.series || !d.alerts) { setLoadError('Dashboard data is incomplete'); setRefreshing(false); return; }
-      setData(d); setLoadError(null); setUpdated(new Date()); setRefreshing(false);
+      if (!d || !d.kpi || !d.series || !d.alerts) { setLoadError('Dashboard data is incomplete'); return; }
+      setData(d); setLoadError(null);
     },
-    () => setRefreshing(false),
-  ).catch((e) => { setLoadError(e.message); toast(e.message, 'error'); setRefreshing(false); });
+  ).catch((e) => { setLoadError(e.message); toast(e.message, 'error'); });
 
   // Run the wipe/restore check before the very first fetch: after a disk
   // reset the KPI would otherwise paint 0 totals until the merge lands.
@@ -199,10 +189,6 @@ export default function Dashboard() {
           <div className="dash-greet">
             <span className="role-chip">{role}</span>
             <span className="muted small">{dateLabel} · {timeLabel}</span>
-          </div>
-          <div className={`dash-live ${refreshing ? 'syncing' : ''}`} title={pushLive ? 'Updates stream in the moment anything changes' : 'Push stream reconnecting — data still refreshes when you refocus this tab or after a write'}>
-            <span className="dash-live-dot" />
-            {pushLive ? 'Live' : 'Reconnecting'} · {updated ? `updated ${fmtAgo(updated.toISOString())}${refreshing ? ' · syncing' : ''}` : 'connecting…'}
           </div>
         </div>
         <div className="dash-toolbar">

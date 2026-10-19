@@ -1407,22 +1407,6 @@ tbody tr:hover td { background: color-mix(in srgb, var(--primary) 9%, transparen
   background: color-mix(in srgb, var(--primary) 12%, transparent);
   color: var(--primary);
 }
-.dash-live {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
-  margin-top: 5px;
-}
-.dash-live-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--success, #16a34a);
-  animation: livePulse 2.4s ease-out infinite;
-}
-.dash-live.syncing .dash-live-dot { background: var(--warning, #d97706); }
-@keyframes livePulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success, #16a34a) 55%, transparent); }
-  70% { box-shadow: 0 0 0 7px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
 .dash-section { display: flex; align-items: center; gap: 10px; margin: 24px 0 12px; }
 .dash-section:first-child { margin-top: 4px; }
 .dash-section h3 {
