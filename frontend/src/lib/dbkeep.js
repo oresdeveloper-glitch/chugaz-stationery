@@ -5,6 +5,7 @@ registerOnWrite(schedulePostWriteBackup);
 
 const MARKER_KEY = 'sst_db_marker';
 const CATS_KEY = 'sst_db_cats';
+const SO_KEY = 'sst_db_so';
 const DB_NAME = 'sst-keep';
 const STORE = 'kv';
 const BACKUP_KEY = 'backup';
@@ -13,11 +14,42 @@ const BACKUP_INTERVAL_MS = 3 * 60 * 1000;
 const POST_WRITE_BACKUP_MS = 8 * 1000;
 
 let scheduled = false;
-let checking = false;
+let checkingP = null;
 let backing = false;
 let converging = false;
 let liveBackupTimer = null;
 let postWriteTimer = null;
+let restoreRetry = 0;
+let restoreRetryTimer = null;
+
+// High-water mark of the transaction counts this browser has ever seen
+// ("sales:orders"). Monotonic on purpose: a disk wipe only lowers the live
+// numbers, never this memory, so every check can recognise "the data
+// vanished" even when a fresh instance re-seeded 26 categories and a stale
+// stamp made the marker look unchanged.
+function readSo() {
+  try {
+    const p = (localStorage.getItem(SO_KEY) || '').split(':');
+    return { sales: Number(p[0]) || 0, orders: Number(p[1]) || 0 };
+  } catch (_) {
+    return { sales: 0, orders: 0 };
+  }
+}
+function bumpSo(sales, orders) {
+  try {
+    const prev = readSo();
+    localStorage.setItem(SO_KEY, `${Math.max(prev.sales, Number(sales) || 0)}:${Math.max(prev.orders, Number(orders) || 0)}`);
+  } catch (_) { /* private mode etc. */ }
+}
+function bumpCats(n) {
+  if (n == null) return;
+  try {
+    const last = Number(localStorage.getItem(CATS_KEY) || 0);
+    localStorage.setItem(CATS_KEY, String(Math.max(Number(n) || 0, last)));
+  } catch (_) { /* private mode etc. */ }
+}
+// Known-good totals for the wipe detector (read by the dashboard's first load).
+export function knownCounts() { return readSo(); }
 
 function apiBase() {
   return (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
@@ -93,10 +125,15 @@ async function fetchPinned(url, opts, expect, tries = 3) {
   return null;
 }
 
-// Admins and managers can download (redacted for managers) and merge backups.
-function canKeep() {
+// Every staff session keeps a snapshot and merges it back after a disk reset
+// (customers never hold server data). The server strips password hashes from
+// non-admin downloads and only admins rewrite accounts, so widening the mesh
+// simply multiplies the number of replicas that can heal the shop.
+export function canKeep() {
   const user = getUser();
-  return !!user && (user.role === 'admin' || user.role === 'manager') && !!getToken();
+  return !!user && !!getToken() &&
+    (user.role === 'admin' || user.role === 'manager' ||
+      user.role === 'cashier' || user.role === 'clerk');
 }
 
 async function backupNow() {
@@ -108,12 +145,31 @@ async function backupNow() {
     // Marker drift means the server reset — never overwrite the IndexedDB copy with an empty instance.
     const stored = localStorage.getItem(MARKER_KEY);
     if (stored && pin && stored !== pin) return;
+    // Count the instance before snapshotting it. A freshly-reset instance
+    // re-seeds the catalog (26 categories), so marker checks alone cannot
+    // see that every sale is gone - and replacing the good snapshot with
+    // that emptier copy was the irrecoverable-loss path. Refuse any downgrade.
+    let counts = null;
+    try {
+      const s = await api('/sync');
+      if (s) counts = { sales: Number(s.sales) || 0, orders: Number(s.orders) || 0 };
+    } catch (_) { /* counts unknown - fall back to the stored high-water */ }
+    const snap = await idbGet(BACKUP_KEY);
+    const known = readSo();
+    const keepSales = Math.max(Number(snap && snap.sales) || 0, known.sales);
+    const keepOrders = Math.max(Number(snap && snap.orders) || 0, known.orders);
+    if (counts && (counts.sales < keepSales || (counts.sales === keepSales && counts.orders < keepOrders))) return;
     const res = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, pin);
     if (!res || !res.ok) return;
     const marker = res.headers.get('X-Db-Marker') || pin;
     if (!marker) return;
     const blob = await res.blob();
-    await idbPut(BACKUP_KEY, { blob, marker, at: Date.now() });
+    await idbPut(BACKUP_KEY, {
+      blob, marker, at: Date.now(),
+      sales: counts ? counts.sales : keepSales,
+      orders: counts ? counts.orders : keepOrders,
+    });
+    if (counts) bumpSo(counts.sales, counts.orders);
     localStorage.setItem(MARKER_KEY, marker);
   } catch (e) {
     console.warn('[dbkeep] backup failed:', e && e.message ? e.message : e);
@@ -195,6 +251,22 @@ export async function convergeInstances() {
       let leader = mine;
       for (const s of seen.values()) if (cmp(s, leader) > 0) leader = s;
 
+      // Total wipe: every live instance is poorer than what this browser
+      // holds. Stamping the empty leader as the session marker used to break
+      // drift detection and let the next backup overwrite the only good
+      // copy, so merge the snapshot back into the served instance instead.
+      const snap = await idbGet(BACKUP_KEY);
+      if (snap && snap.blob) {
+        const known = readSo();
+        const l = [Number(leader.sales) || 0, Number(leader.orders) || 0];
+        const k = [Math.max(Number(snap.sales) || 0, known.sales), Math.max(Number(snap.orders) || 0, known.orders)];
+        if (l[0] < k[0] || (l[0] === k[0] && l[1] < k[1])) {
+          const rr = await restoreFromBackup(getDbPin() || leader.db_marker);
+          if (rr === 'failed') scheduleRestoreRetry();
+          return 'restored';
+        }
+      }
+
       // Push the leader's rows into every other instance; the merge is name-keyed and idempotent.
       const fwd = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, leader.db_marker);
       if (!fwd || !fwd.ok) return 'fail';
@@ -228,20 +300,36 @@ export async function convergeInstances() {
   }
 }
 
-// After any successful admin/manager write, schedule one urgent backup so the new row is captured.
+// After any successful staff write, schedule one urgent backup so the new row is captured.
 export function schedulePostWriteBackup() {
   if (!canKeep()) return;
   clearTimeout(postWriteTimer);
   postWriteTimer = setTimeout(backupNow, POST_WRITE_BACKUP_MS);
 }
 
+// Bounded retry: a failed merge (cold instance, brief 5xx) gets up to three
+// more automatic attempts a few seconds later; success resets the counter.
+function scheduleRestoreRetry() {
+  if (restoreRetry >= 3) return;
+  restoreRetry += 1;
+  clearTimeout(restoreRetryTimer);
+  restoreRetryTimer = setTimeout(() => { try { dbKeepInit(); } catch (_) { /* ignore */ } }, 4000);
+}
+
 // On mount/focus/login: detect an ephemeral-disk reset and merge the last backup back in.
-export async function dbKeepInit() {
-  if (checking) return;
-  checking = true;
+export function dbKeepInit() {
+  // Concurrent callers (mount, focus, pin change, wipe-recovery) await the
+  // SAME in-flight check, so a recovery can never race past a restore.
+  if (checkingP) return checkingP;
+  checkingP = runKeepCheck().finally(() => { checkingP = null; });
+  return checkingP;
+}
+
+async function runKeepCheck() {
   try {
     const h = await health();
     if (!h || !h.db_marker) return;
+    bumpSo(h.sales, h.orders);
     const canKeepSess = canKeep();
     if (canKeepSess) scheduleBackups();
     if (!getDbPin()) setDbPin(h.db_marker);
@@ -251,37 +339,47 @@ export async function dbKeepInit() {
 
     if (!stored) {
       localStorage.setItem(MARKER_KEY, h.db_marker);
-      if (cats != null) localStorage.setItem(CATS_KEY, String(cats));
+      bumpCats(cats);
       return;
     }
 
     if (stored === h.db_marker) {
-      // Same marker but fewer categories: the instance lost rows — merge the snapshot back.
+      // Same marker but rows are missing: fewer categories, or - the case a
+      // seeded catalog hides - transaction counts below what this browser has
+      // ever seen. Merge the snapshot back so the totals never sit at 0.
       const lastCats = Number(localStorage.getItem(CATS_KEY) || 0);
-      if (canKeepSess && cats != null && lastCats > 0 && cats < lastCats) {
-        try { await restoreFromBackup(h.db_marker); } catch (_) { /* keep init non-fatal */ }
+      const known = readSo();
+      const sales = Number(h.sales) || 0;
+      const orders = Number(h.orders) || 0;
+      const lostCats = canKeepSess && cats != null && lastCats > 0 && cats < lastCats;
+      const lostTx = canKeepSess &&
+        ((known.sales > 0 && sales < known.sales) || (known.orders > 0 && orders < known.orders));
+      if (lostCats || lostTx) {
+        try {
+          const r = await restoreFromBackup(h.db_marker);
+          if (r === 'ok') restoreRetry = 0;
+          else if (r === 'failed') scheduleRestoreRetry();
+        } catch (_) { /* keep init non-fatal */ }
       }
-      if (cats != null) localStorage.setItem(CATS_KEY, String(Math.max(cats, lastCats)));
+      bumpCats(cats);
       return;
     }
 
     if (canKeepSess) {
       const result = await restoreFromBackup(h.db_marker);
-      if (cats != null) localStorage.setItem(CATS_KEY, String(cats));
-      if (result === 'ok') return;
-      if (result === 'failed') return;
+      bumpCats(cats);
+      if (result === 'ok') { restoreRetry = 0; return; }
+      if (result === 'failed') { scheduleRestoreRetry(); return; }
       localStorage.setItem(MARKER_KEY, h.db_marker);
       const virgin = Number(h.sales || 0) === 0 && Number(h.orders || 0) === 0;
       if (!virgin) backupNow();
       return;
     }
-    if (cats != null) localStorage.setItem(CATS_KEY, String(cats));
+    bumpCats(cats);
     // Non-keep sessions: stamp the new marker only when no snapshot exists yet.
     const entry = await idbGet(BACKUP_KEY);
     if (!entry || !entry.blob) localStorage.setItem(MARKER_KEY, h.db_marker);
   } catch (e) {
     console.warn('[dbkeep] check failed:', e && e.message ? e.message : e);
-  } finally {
-    checking = false;
   }
 }

@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { getUser, clearAuth, isSessionValid, api, getDbPin } from './lib/api';
-import { dbKeepInit, convergeInstances } from './lib/dbkeep';
+import { dbKeepInit, convergeInstances, knownCounts, canKeep } from './lib/dbkeep';
 import Login from './pages/Login.jsx';
 import Layout from './components/Layout.jsx';
 import Forbidden from './pages/Forbidden.jsx';
@@ -167,7 +167,18 @@ export default function App() {
     const tick = async () => {
       if (stopped || document.hidden) return;
       try {
-        const s = await api('/sync');
+        let s = await api('/sync');
+        // Wipe signature: live transaction counts fell below what this browser
+        // has ever seen (ephemeral-disk reset, or affinity parked us on an
+        // empty twin). Restore FIRST and re-read, so no page ever announces -
+        // and fetches - the freshly-wiped 0 totals.
+        const known = knownCounts();
+        const curSales = s ? Number(s.sales) || 0 : 0;
+        const curOrders = s ? Number(s.orders) || 0 : 0;
+        if (s && ((known.sales > 0 && curSales < known.sales) || (known.orders > 0 && curOrders < known.orders))) {
+          try { await dbKeepInit(); } catch (e) { /* ignore */ }
+          try { const s2 = await api('/sync'); if (s2 && s2.version != null) s = s2; } catch (e) { /* ignore */ }
+        }
         const v = s && s.version;
         if (v == null) return;
         // At most once a minute (event-triggered, never on a timer), check
@@ -175,10 +186,9 @@ export default function App() {
         if (Date.now() - lastConv >= 60000) {
           lastConv = Date.now();
           try {
-            const u = getUser();
             const pin = getDbPin();
             // Converge whenever any live instance holds more sales than our pinned one.
-            if (u && (u.role === 'admin' || u.role === 'manager') && pin) {
+            if (canKeep() && pin) {
               const mine = Number(s.sales) || 0;
               let richer = false;
               for (let i = 0; i < 6 && !richer; i++) {

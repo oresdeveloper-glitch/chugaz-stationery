@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, fmtAgo, fmtDateTime, getUser, onLive, latest } from '../lib/api';
+import { dbKeepInit } from '../lib/dbkeep';
 import { useToast } from '../components/Toast';
 import { LineChart, Donut, SplitBar, HBarList, BarChart, Spark } from '../components/charts';
 import { canRole } from '../lib/roles';
@@ -153,7 +154,9 @@ export default function Dashboard() {
     () => setRefreshing(false),
   ).catch((e) => { setLoadError(e.message); toast(e.message, 'error'); setRefreshing(false); });
 
-  useEffect(() => { load(rangeRef.current); }, []);
+  // Run the wipe/restore check before the very first fetch: after a disk
+  // reset the KPI would otherwise paint 0 totals until the merge lands.
+  useEffect(() => { (async () => { try { await dbKeepInit(); } catch (e) { /* ignore */ } load(rangeRef.current); })(); }, []);
   useEffect(() => onLive(() => { load(rangeRef.current); }), []);
   useEffect(() => {
     const id = setInterval(() => setClock(new Date()), 1000);

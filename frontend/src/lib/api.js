@@ -110,11 +110,33 @@ export function setDbPin(m) {
   }
 }
 
-// One re-try against the pinned instance, then fall back to any instance.
-// A dead pin (recycled serverless disk) heals in 3 requests total instead of
-// 7 - stacked cold starts here were what made pages hang before "failed to
-// fetch". The unpinned answer simply re-pins the session (see below).
+// One re-try against the pinned instance, then a fleet probe that re-pins to
+// the instance holding the most data. A dead pin (recycled serverless disk)
+// must never heal by gambling on a random instance - that lottery is what
+// parked sessions on an EMPTY twin and left dashboards reading 0.
 const AFFINITY_TRIES = 1;
+
+// Probe the fleet in parallel and pin to the instance with the most data
+// (sales, then orders, then categories). The anyInstance probes never
+// recurse: they skip the affinity path entirely.
+async function rePinToRichest() {
+  try {
+    const rs = await Promise.all([0, 1, 2].map(() => request('/sync', { anyInstance: true }, false)));
+    const w = (x) => [Number(x.sales) || 0, Number(x.orders) || 0, Number(x.categories) || 0];
+    let best = null;
+    for (const s of rs) {
+      if (!s || !s.db_marker) continue;
+      if (!best) { best = s; continue; }
+      const a = w(s), b = w(best);
+      if (a[0] !== b[0]) { if (a[0] > b[0]) best = s; }
+      else if (a[1] !== b[1]) { if (a[1] > b[1]) best = s; }
+      else if (a[2] > b[2]) best = s;
+    }
+    setDbPin(best ? best.db_marker : null);
+  } catch (_) {
+    setDbPin(null);
+  }
+}
 
 async function request(path, options = {}, shop = false) {
   const headers = { ...(options.headers || {}) };
@@ -166,8 +188,13 @@ async function request(path, options = {}, shop = false) {
       if (!data || data.code !== 'instance_mismatch') break;
       data = null;
       if (attempt === AFFINITY_TRIES) {
-        setDbPin(null);
+        // The pinned instance is gone (recycled disk). Pin to the instance
+        // that actually holds the data before the next send; if even that
+        // pin 409s (load-balancer fluke), accept any instance once.
+        if (shop) setDbPin(null);
+        else await rePinToRichest();
         res = await send();
+        if (res.status === 409) { setDbPin(null); res = await send(); }
         break;
       }
       await new Promise((r) => setTimeout(r, 60 + Math.random() * 140));

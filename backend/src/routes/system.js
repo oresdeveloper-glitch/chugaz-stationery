@@ -51,8 +51,10 @@ function sendBackup(res, data) {
  res.send(data);
 }
 
-// Admins get the raw file; manager snapshots come with password hashes stripped.
-router.get('/backup', requireRole('admin', 'manager'), (req, res) => {
+// Admins get the raw file; every other staff role gets password hashes
+// stripped. Cashiers and clerks may hold snapshots too: each extra browser
+// that can merge data back after a disk reset is one more replica of the shop.
+router.get('/backup', requireRole('admin', 'manager', 'cashier', 'clerk'), (req, res) => {
  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (_) {}
  if (req.user.role === 'admin') {
   sendBackup(res, fs.readFileSync(DB_PATH));
@@ -95,8 +97,9 @@ router.post('/restore', requireRole('admin'), uploadMem.single('file'), (req, re
  }
 });
 
-// Managers may merge DATA back after a disk reset; accounts/settings stay admin-only.
-router.post('/restore-merge', requireRole('admin', 'manager'), uploadMem.single('file'), (req, res) => {
+// Any staff session may merge DATA back after a disk reset; accounts and
+// settings stay admin-only (non-admin merges never write password hashes).
+router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'), uploadMem.single('file'), (req, res) => {
   const mergeAll = req.user.role === 'admin';
   const file = req.file || (Array.isArray(req.files) ? req.files[0] : null);
   if (!file) return res.status(400).json({ error: 'No backup file uploaded' });
