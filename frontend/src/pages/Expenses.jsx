@@ -2,16 +2,19 @@ import { useEffect, useState } from 'react';
 import { api, fmt, fmtDate, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
+import EmptyState from '../components/EmptyState';
+import SkeletonRows from '../components/SkeletonRows';
 
 export default function Expenses() {
   const [expenses, setExpenses] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [modal, setModal] = useState(null);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
   const setExpensesLatest = latest();
   const load = () => setExpensesLatest(() => api('/expenses'), setExpenses).catch((e) => toast(e.message, 'error'));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load().finally(() => setLoaded(true)); }, []);
   useEffect(() => onLive(load), []);
 
   const total = expenses.reduce((s, e) => s + Number(e.amount), 0);
@@ -44,6 +47,11 @@ export default function Expenses() {
       </div>
       <div className="grid grid-2">
         <div className="card">
+          {!loaded ? <SkeletonRows rows={6} /> : expenses.length === 0 ? (
+            <EmptyState icon="doc" title="No expenses recorded"
+              message="Track rent, utilities, salaries and other costs to see where the money goes."
+              action="+ Add expense" onAction={() => setModal({ title: '', category: '', amount: 0, expense_date: new Date().toISOString().slice(0, 10), notes: '' })} />
+          ) : (
           <div className="table-wrap">
             <table>
               <thead><tr><th>Title</th><th>Category</th><th>Date</th><th className="num">Amount</th><th>By</th><th></th></tr></thead>
@@ -51,7 +59,7 @@ export default function Expenses() {
                 {expenses.map((e) => (
                   <tr key={e.id}>
                     <td style={{ fontWeight: 600 }}>{e.title}</td>
-                    <td>{e.category || ':'}</td>
+                    <td>{e.category || '—'}</td>
                     <td className="muted">{fmtDate(e.expense_date)}</td>
                     <td className="num">{fmt(e.amount)}</td>
                     <td className="muted">{e.created_by_name}</td>
@@ -62,10 +70,14 @@ export default function Expenses() {
               <tfoot><tr><td colSpan={3} style={{ fontWeight: 700 }}>Total</td><td className="num" style={{ fontWeight: 700 }}>{fmt(total)}</td><td colSpan={2} /></tr></tfoot>
             </table>
           </div>
+          )}
         </div>
         <div className="card">
           <h2>By category</h2>
-          {Object.entries(byCategory).map(([cat, amt]) => (
+          {Object.keys(byCategory).length === 0 ? (
+            <EmptyState icon="chart" title="Nothing to break down yet"
+              message="Once expenses are recorded, totals per category appear here." />
+          ) : Object.entries(byCategory).map(([cat, amt]) => (
             <div key={cat} className="cart-line">
               <span>{cat}</span>
               <span style={{ fontWeight: 600 }}>{fmt(amt)}</span>

@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { api, fmt, fmtDateTime, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
+import EmptyState from '../components/EmptyState';
+import SkeletonRows from '../components/SkeletonRows';
 
 export default function Inventory() {
   const [params, setParams] = useSearchParams();
@@ -10,6 +12,7 @@ export default function Inventory() {
   const [movements, setMovements] = useState([]);
   const [low, setLow] = useState([]);
   const [products, setProducts] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [filter, setFilter] = useState('');
   const [adj, setAdj] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -24,7 +27,7 @@ export default function Inventory() {
     ]);
     return [m, l, p];
   }, ([m, l, p]) => { setMovements(m); setLow(l); setProducts(p); }).catch((e) => toast(e.message, 'error'));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load().finally(() => setLoaded(true)); }, []);
   useEffect(() => onLive(load), []);
 
   const typeBadge = (t) =>
@@ -68,47 +71,65 @@ export default function Inventory() {
 
       {tab === 'movements' && (
         <div className="card">
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Date</th><th>Product</th><th>Type</th><th className="num">Qty</th><th>Reference</th><th>Notes</th><th>By</th></tr></thead>
-              <tbody>
-                {movements.filter((m) => !filter || m.product_id == filter).map((m) => (
-                  <tr key={m.id}>
-                    <td className="muted">{fmtDateTime(m.created_at)}</td>
-                    <td>{m.product_name}</td>
-                    <td>{typeBadge(m.movement_type)}</td>
-                    <td className="num">{fmt(m.quantity)}</td>
-                    <td className="muted">{m.reference_id ? `#${m.reference_id}` : ':'}</td>
-                    <td className="muted small">{m.notes}</td>
-                    <td className="muted">{m.created_by_name}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {!loaded ? <SkeletonRows rows={6} /> : (() => {
+            const rows = movements.filter((m) => !filter || m.product_id == filter);
+            if (rows.length === 0) {
+              return <EmptyState icon="list" title={filter ? 'No movements for this product' : 'No stock movements yet'}
+                message={filter
+                  ? 'Sales, purchases and adjustments for the chosen product will appear here.'
+                  : 'Every sale, purchase and adjustment writes a stock movement — this is the full trail.'} />;
+            }
+            return (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Date</th><th>Product</th><th>Type</th><th className="num">Qty</th><th>Reference</th><th>Notes</th><th>By</th></tr></thead>
+                <tbody>
+                  {rows.map((m) => (
+                    <tr key={m.id}>
+                      <td className="muted">{fmtDateTime(m.created_at)}</td>
+                      <td>{m.product_name}</td>
+                      <td>{typeBadge(m.movement_type)}</td>
+                      <td className="num">{fmt(m.quantity)}</td>
+                      <td className="muted">{m.reference_id ? `#${m.reference_id}` : '—'}</td>
+                      <td className="muted small">{m.notes}</td>
+                      <td className="muted">{m.created_by_name}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            );
+          })()}
         </div>
       )}
 
       {tab === 'low' && (
         <div className="card">
-          <p className="muted">Products at or below their reorder level ({low.length} found).</p>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th className="num">In stock</th><th className="num">Reorder level</th><th>Status</th></tr></thead>
-              <tbody>
-                {low.map((p) => (
-                  <tr key={p.id}>
-                    <td style={{ fontWeight: 600 }}>{p.name}</td>
-                    <td className="muted">{p.sku}</td>
-                    <td>{p.category_name || ':'}</td>
-                    <td className="num" style={{ color: p.current_stock <= 0 ? 'var(--danger)' : 'var(--warning)', fontWeight: 700 }}>{fmt(p.current_stock)}</td>
-                    <td className="num">{fmt(p.reorder_level)}</td>
-                    <td>{p.current_stock <= 0 ? <span className="badge red">Out of stock</span> : <span className="badge amber">Low stock</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {!loaded ? <SkeletonRows rows={5} /> : low.length === 0 ? (
+            <EmptyState icon="check" title="All stocked up"
+              message="Every product is above its reorder level. Low-stock items will appear here automatically." />
+          ) : (
+            <>
+            <p className="muted">Products at or below their reorder level ({low.length} found).</p>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th className="num">In stock</th><th className="num">Reorder level</th><th>Status</th></tr></thead>
+                <tbody>
+                  {low.map((p) => (
+                    <tr key={p.id}>
+                      <td style={{ fontWeight: 600 }}>{p.name}</td>
+                      <td className="muted">{p.sku}</td>
+                      <td>{p.category_name || '—'}</td>
+                      <td className="num" style={{ color: p.current_stock <= 0 ? 'var(--danger)' : 'var(--warning)', fontWeight: 700 }}>{fmt(p.current_stock)}</td>
+                      <td className="num">{fmt(p.reorder_level)}</td>
+                      <td>{p.current_stock <= 0 ? <span className="badge red">Out of stock</span> : <span className="badge amber">Low stock</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            </>
+          )}
         </div>
       )}
 

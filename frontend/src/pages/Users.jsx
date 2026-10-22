@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react';
 import { api, fmtDateTime, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
+import EmptyState from '../components/EmptyState';
+import SkeletonRows from '../components/SkeletonRows';
 import { getUser } from '../lib/api';
 
 export default function Users() {
   const [users, setUsers] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [roles, setRoles] = useState([]);
   const [offices, setOffices] = useState([]);
   const [modal, setModal] = useState(null);
@@ -18,7 +21,7 @@ export default function Users() {
     const [u, r, o] = await Promise.all([api('/users'), api('/users/roles'), api('/offices')]);
     return [u, r, o];
   }, ([u, r, o]) => { setUsers(u); setRoles(r); setOffices(o); }).catch((e) => toast(e.message, 'error'));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load().finally(() => setLoaded(true)); }, []);
   useEffect(() => onLive(load), []);
 
   const save = async (e) => {
@@ -48,6 +51,11 @@ export default function Users() {
         <button className="btn primary" onClick={() => setModal({ name: '', email: '', password: '', role_id: roles.find((r) => r.name === 'cashier')?.id || 3 })}>+ Add user</button>
       </div>
       <div className="card">
+        {!loaded ? <SkeletonRows rows={5} /> : users.length === 0 ? (
+          <EmptyState icon="user" title="No staff accounts yet"
+            message="Create accounts for cashiers and managers, each with their own role and permissions."
+            action="+ Add user" onAction={() => setModal({ name: '', email: '', password: '', role_id: roles.find((r) => r.name === 'cashier')?.id || 3 })} />
+        ) : (
         <div className="table-wrap"><table>
           <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Office</th><th>Status</th><th>Created</th><th></th></tr></thead>
           <tbody>
@@ -67,6 +75,7 @@ export default function Users() {
             ))}
           </tbody>
         </table></div>
+        )}
       </div>
 
       <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.id ? 'Edit user' : 'Add user'}>

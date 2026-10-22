@@ -5,6 +5,7 @@ import { useShop } from '../../shop/ShopContext';
 import { useToast } from '../../components/Toast';
 import I from '../../components/icons';
 import SafeImg from '../../shop/SafeImg';
+import EmptyState from '../../components/EmptyState';
 
 function CartInner() {
   const [cart, setCart] = useState(null);
@@ -50,7 +51,13 @@ function CartInner() {
       </div>
     );
   }
-  if (!cart) return <div className="card">Loading...</div>;
+  if (!cart) return (
+    <div className="card">
+      <div className="skel-card" style={{ height: 74, marginBottom: 10 }} />
+      <div className="skel-card" style={{ height: 74, marginBottom: 10 }} />
+      <div className="skel-card" style={{ height: 74 }} />
+    </div>
+  );
   const currency = info?.currency || 'TSh';
   const threshold = Number(info?.free_delivery_threshold) || 0;
   const fee = Number(info?.delivery_fee) || 0;
@@ -60,9 +67,10 @@ function CartInner() {
     <div>
       <div className="page-header"><h1>Shopping cart</h1>{cart.count > 0 && <button className="btn sm danger" onClick={clear}>Clear cart</button>}</div>
       {cart.items.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: 40 }}>
-          <p>Your cart is empty.</p>
-          <Link to="/shop" className="btn primary">Browse products</Link>
+        <div className="card">
+          <EmptyState icon="cart" title="Your cart is empty"
+            message="Browse the catalogue and add stationery to see it here."
+            action="Browse products" to="/shop" />
         </div>
       ) : (
         <div className="grid grid-2" style={{ alignItems: 'start', gap: 18 }}>
@@ -91,12 +99,12 @@ function CartInner() {
               </div>
             ))}
           </div>
-          <div className="card" style={{ position: 'sticky', top: 16 }}>
+          <div className="card mobile-cta">
             <h2>Order summary</h2>
             <div className="cart-total-row"><span>Subtotal</span><span>{fmt(cart.subtotal)} {currency}</span></div>
             <div className="cart-total-row">
               <span>Delivery</span>
-              <span>{freeDelivery ? <span style={{ color: 'var(--primary)' }}>Free</span> : fee > 0 ? fmt(fee) : ':'}</span>
+              <span>{freeDelivery ? <span style={{ color: 'var(--primary)' }}>Free</span> : fee > 0 ? fmt(fee) : '—'}</span>
             </div>
             {threshold > 0 && !freeDelivery && <div className="small muted">Free delivery on orders over {fmt(threshold)}</div>}
             <div className="cart-total-row cart-grand"><span>Total</span><span>{fmt(cart.subtotal + (freeDelivery ? 0 : fee))} {currency}</span></div>

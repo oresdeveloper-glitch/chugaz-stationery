@@ -3,10 +3,13 @@ import { api, fmt, fmtDateTime, getUser, onLive, latest } from '../lib/api';
 import { canRole } from '../lib/roles';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
+import EmptyState from '../components/EmptyState';
+import SkeletonRows from '../components/SkeletonRows';
 
 export default function Customers() {
   const isAdmin = canRole(getUser(), 'admin');
   const [customers, setCustomers] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [modal, setModal] = useState(null);
   const [history, setHistory] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -14,7 +17,7 @@ export default function Customers() {
 
   const setCustomersLatest = latest();
   const load = () => setCustomersLatest(() => api('/customers'), setCustomers).catch((e) => toast(e.message, 'error'));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load().finally(() => setLoaded(true)); }, []);
   useEffect(() => onLive(load), []);
 
   const save = async (e) => {
@@ -46,6 +49,11 @@ export default function Customers() {
         <button className="btn primary" onClick={() => setModal({})}>+ Add customer</button>
       </div>
       <div className="card">
+        {!loaded ? <SkeletonRows rows={6} /> : customers.length === 0 ? (
+          <EmptyState icon="users" title="No customers yet"
+            message="Add your first customer to track balances, credit limits and per-customer discounts."
+            action={isAdmin ? '+ Add customer' : undefined} onAction={() => setModal({})} />
+        ) : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th className="num">Credit limit</th><th className="num">Balance</th><th className="num">Discount %</th><th></th></tr></thead>
@@ -53,8 +61,8 @@ export default function Customers() {
               {customers.map((c) => (
                 <tr key={c.id}>
                   <td style={{ fontWeight: 600 }}>{c.name}</td>
-                  <td>{c.phone || ':'}</td>
-                  <td>{c.email || ':'}</td>
+                  <td>{c.phone || '—'}</td>
+                  <td>{c.email || '—'}</td>
                   <td className="num">{fmt(c.credit_limit)}</td>
                   <td className="num" style={{ color: c.balance > 0 ? 'var(--danger)' : 'inherit', fontWeight: 600 }}>{fmt(c.balance)}</td>
                   <td className="num">{c.discount_rate}%</td>
@@ -68,6 +76,7 @@ export default function Customers() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.id ? 'Edit customer' : 'Add customer'}>

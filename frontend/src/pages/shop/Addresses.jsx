@@ -2,16 +2,18 @@ import { useEffect, useState } from 'react';
 import { shopApi } from '../../lib/api';
 import RequireShopAuth from '../../shop/RequireShopAuth';
 import { useToast } from '../../components/Toast';
+import EmptyState from '../../components/EmptyState';
 
 function AddressesInner() {
   const [addresses, setAddresses] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [editing, setEditing] = useState(null);
   const toast = useToast();
 
   const load = async () => {
     try { setAddresses(await shopApi('/addresses')); } catch (e) { toast(e.message, 'error'); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load().finally(() => setLoaded(true)); }, []);
 
   const save = async (e) => {
     e.preventDefault();
@@ -38,7 +40,19 @@ function AddressesInner() {
         <button className="btn primary" onClick={() => setEditing({ address_name: '', recipient_name: '', phone: '', address: '', city: '', postal_code: '', is_default: false })}>+ Add address</button>
       </div>
 
-      {addresses.map((a) => (
+      {!loaded ? (
+        <div className="card">
+          <div className="skel-card" style={{ height: 74, marginBottom: 10 }} />
+          <div className="skel-card" style={{ height: 74 }} />
+        </div>
+      ) : addresses.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="pin" title="No saved addresses yet"
+            message="Save a delivery address once and it will be ready at every checkout."
+            action="+ Add address" onAction={() => setEditing({ address_name: '', recipient_name: '', phone: '', address: '', city: '', postal_code: '', is_default: false })} />
+        </div>
+      ) : null}
+      {loaded && addresses.map((a) => (
         <div className="card" key={a.id} style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <b>{a.recipient_name}</b> {a.is_default && <span className="badge blue">default</span>}<br />
@@ -50,7 +64,6 @@ function AddressesInner() {
           </div>
         </div>
       ))}
-      {addresses.length === 0 && <div className="card muted">No saved addresses yet.</div>}
 
       {editing && (
         <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setEditing(null)}>

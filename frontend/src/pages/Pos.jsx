@@ -317,7 +317,13 @@ export default function Pos() {
                 <span className="pos-cat-count">{visible.length}</span>
               </div>
               <div className="pos-products">
-                {visible.length === 0 && <div className="muted" style={{ padding: 24, textAlign: 'center' }}>No products found.</div>}
+                {visible.length === 0 && (
+                  <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
+                    <div className="ico-wrap"><I name="search" size={24} /></div>
+                    <h3>No products found</h3>
+                    <p>Try a different search term or switch the category filter.</p>
+                  </div>
+                )}
                 {visible.map((p) => (
                   <button type="button" className="pos-tile" key={p.id} onClick={() => addToCart(p)}>
                     <div className="pimg">{p.image ? <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || "P"} /> : <span style={{fontWeight:700,color:"var(--muted)"}}>{p.name?.[0] || "P"}</span>}</div>

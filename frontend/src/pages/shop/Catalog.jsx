@@ -127,9 +127,23 @@ export default function Catalog() {
           </select>
         </div>
 
-        {loading ? <div className="card">Loading...</div> : (
+        {loading ? (
+          <div className="catalog-grid" aria-hidden="true">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="skel-card" style={{ height: 268, borderRadius: 14 }} />
+            ))}
+          </div>
+        ) : (
           <div className="catalog-grid">
-            {products.length === 0 && <p className="muted">No products found.</p>}
+            {products.length === 0 && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div className="empty-state">
+                  <div className="ico-wrap"><I name="store" size={24} /></div>
+                  <h3>{q ? 'No products match your search' : 'Nothing in this aisle yet'}</h3>
+                  <p>{q ? `We couldn't find anything for “${q}”. Try another word or clear the filters.` : 'Stock for this category will show up here as soon as it is added.'}</p>
+                </div>
+              </div>
+            )}
             {products.map((p) => (
               <Link key={p.id} to={`/shop/product/${p.id}`} className="catalog-card" style={p.in_stock === false ? { opacity: 0.62 } : {}}>
                 <div className="catalog-img">

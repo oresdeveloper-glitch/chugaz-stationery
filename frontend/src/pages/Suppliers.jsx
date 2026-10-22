@@ -2,16 +2,19 @@ import { useEffect, useState } from 'react';
 import { api, fmt, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
+import EmptyState from '../components/EmptyState';
+import SkeletonRows from '../components/SkeletonRows';
 
 export default function Suppliers() {
   const [suppliers, setSuppliers] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [modal, setModal] = useState(null);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
   const setSuppliersLatest = latest();
   const load = () => setSuppliersLatest(() => api('/suppliers'), setSuppliers).catch((e) => toast(e.message, 'error'));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load().finally(() => setLoaded(true)); }, []);
   useEffect(() => onLive(load), []);
 
   const save = async (e) => {
@@ -39,6 +42,11 @@ export default function Suppliers() {
         <button className="btn primary" onClick={() => setModal({})}>+ Add supplier</button>
       </div>
       <div className="card">
+        {!loaded ? <SkeletonRows rows={5} /> : suppliers.length === 0 ? (
+          <EmptyState icon="truck" title="No suppliers yet"
+            message="Add the businesses you buy stock from to link purchases and track balances."
+            action="+ Add supplier" onAction={() => setModal({})} />
+        ) : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Tax number</th><th className="num">Balance</th><th></th></tr></thead>
@@ -46,9 +54,9 @@ export default function Suppliers() {
               {suppliers.map((s) => (
                 <tr key={s.id}>
                   <td style={{ fontWeight: 600 }}>{s.name}</td>
-                  <td>{s.phone || ':'}</td>
-                  <td>{s.email || ':'}</td>
-                  <td className="muted">{s.tax_number || ':'}</td>
+                  <td>{s.phone || '—'}</td>
+                  <td>{s.email || '—'}</td>
+                  <td className="muted">{s.tax_number || '—'}</td>
                   <td className="num" style={{ color: s.balance > 0 ? 'var(--danger)' : 'inherit' }}>{fmt(s.balance)}</td>
                   <td><div style={{ display: 'flex', gap: 4 }}>
                     <button className="btn sm" onClick={() => setModal({ ...s })}>Edit</button>
@@ -59,6 +67,7 @@ export default function Suppliers() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.id ? 'Edit supplier' : 'Add supplier'}>

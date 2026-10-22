@@ -3,11 +3,14 @@ import { useSearchParams } from 'react-router-dom';
 import { api, fmt, fmtDateTime, getUser, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
+import EmptyState from '../components/EmptyState';
+import SkeletonRows from '../components/SkeletonRows';
 
 export default function Sales() {
   const me = getUser();
   const isSeller = me && (me.role === 'cashier' || me.role === 'clerk');
   const [sales, setSales] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [staff, setStaff] = useState([]);
   const [seller, setSeller] = useState('');
   const [detail, setDetail] = useState(null);
@@ -28,7 +31,7 @@ export default function Sales() {
     ].filter(Boolean).join('&');
     return api(`/sales${q ? '?' + q : ''}`);
   }, setSales).catch((e) => toast(e.message, 'error'));
-  useEffect(() => { load(); }, [statusFilter, seller]);
+  useEffect(() => { load().finally(() => setLoaded(true)); }, [statusFilter, seller]);
   useEffect(() => onLive(() => { load(); }), [statusFilter, seller]);
   useEffect(() => {
     if (!isSeller) api('/users').then(setStaff).catch(() => {});
@@ -71,7 +74,7 @@ export default function Sales() {
           {['outstanding', 'paid', 'partial', 'unpaid'].map((f) => (
             <button key={f} className={`btn ${statusFilter === f ? 'active' : ''}`} onClick={() => setParams(statusFilter === f ? {} : { status: f })}>{f}</button>
           ))}
-          {statusFilter && <button className="btn" onClick={() => setParams({})}>x clear</button>}
+          {statusFilter && <button className="btn" onClick={() => setParams({})}>Clear filter</button>}
           {!isSeller && (
             <select value={seller} onChange={(e) => setSeller(e.target.value)} style={{ maxWidth: 240, marginLeft: 8 }} aria-label="Filter by cashier">
               <option value="">All cashiers</option>
@@ -83,6 +86,13 @@ export default function Sales() {
         </div>
       </div>
       <div className="card">
+        {!loaded ? <SkeletonRows rows={7} /> : sales.length === 0 ? (
+          <EmptyState icon="receipt"
+            title={statusFilter ? `No ${statusFilter} sales` : 'No sales yet'}
+            message={statusFilter
+              ? 'Nothing matches this filter right now. Try another status or clear the filter.'
+              : 'Sales rung up on the till will appear here with their payment status.'} />
+        ) : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Cashier</th><th className="num">Items</th><th className="num">Total</th><th className="num">Paid</th><th>Method</th><th>Status</th><th></th></tr></thead>
@@ -107,6 +117,7 @@ export default function Sales() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       <Modal open={!!detail} onClose={() => setDetail(null)} title={`Sale ${detail?.invoice_number || ''}`} wide>

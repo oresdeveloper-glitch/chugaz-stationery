@@ -3,9 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import { api, fmt, fmtDateTime, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
+import EmptyState from '../components/EmptyState';
+import SkeletonRows from '../components/SkeletonRows';
 
 export default function Purchases() {
   const [purchases, setPurchases] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [suppliers, setSuppliers] = useState([]);
   const [products, setProducts] = useState([]);
   const [detail, setDetail] = useState(null);
@@ -24,7 +27,7 @@ export default function Purchases() {
     const [p, s, pr] = await Promise.all([api(`/purchases${q}`), api('/suppliers'), api('/products')]);
     return [p, s, pr];
   }, ([p, s, pr]) => { setPurchases(p); setSuppliers(s); setProducts(pr.filter((x) => x.status === 'active')); }).catch((e) => toast(e.message, 'error'));
-  useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => { load().finally(() => setLoaded(true)); }, [statusFilter]);
   useEffect(() => onLive(load), [statusFilter]);
 
   const openDetail = async (id) => {
@@ -80,6 +83,13 @@ export default function Purchases() {
       </div>
 
       <div className="card">
+        {!loaded ? <SkeletonRows rows={6} /> : purchases.length === 0 ? (
+          <EmptyState icon="inbox" title={statusFilter ? `No ${statusFilter} purchases` : 'No purchases yet'}
+            message={statusFilter
+              ? 'Nothing matches this filter right now.'
+              : 'Record stock coming in from suppliers — quantities update automatically.'}
+            action="+ New purchase" onAction={() => setCreating(true)} />
+        ) : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>#</th><th>Date</th><th>Supplier</th><th>Invoice</th><th className="num">Total</th><th className="num">Paid</th><th>Status</th><th>By</th><th></th></tr></thead>
@@ -88,8 +98,8 @@ export default function Purchases() {
                 <tr key={p.id}>
                   <td style={{ fontWeight: 600 }}>{p.id}</td>
                   <td className="muted">{fmtDateTime(p.purchase_date)}</td>
-                  <td>{p.supplier_name || ':'}</td>
-                  <td className="muted">{p.invoice_number || ':'}</td>
+                  <td>{p.supplier_name || '—'}</td>
+                  <td className="muted">{p.invoice_number || '—'}</td>
                   <td className="num">{fmt(p.total)}</td>
                   <td className="num">{fmt(p.paid_amount)}</td>
                   <td>{statusBadge(p.payment_status)}</td>
@@ -103,6 +113,7 @@ export default function Purchases() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       <Modal open={creating} onClose={() => setCreating(false)} title="New purchase (stock-in)" wide>

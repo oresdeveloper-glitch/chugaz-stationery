@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { shopApi, fmt, fmtDateTime, onLive } from '../../lib/api';
 import RequireShopAuth from '../../shop/RequireShopAuth';
 import { useToast } from '../../components/Toast';
+import EmptyState from '../../components/EmptyState';
 import { STATUS_COLOR, STATUS_LABEL } from './OrderDetail';
 
 const FILTERS = ['all', 'pending', 'processing', 'completed', 'cancelled', 'returned'];
@@ -32,9 +33,12 @@ function MyOrdersInner() {
         </div>
       </div>
       {orders.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: 40 }}>
-          <p>No orders yet.</p>
-          <Link to="/shop" className="btn primary">Start shopping</Link>
+        <div className="card">
+          <EmptyState icon="bag" title={filter === 'all' ? 'No orders yet' : `No ${filter} orders`}
+            message={filter === 'all'
+              ? 'Anything you order from the stationery will show up here, with live status.'
+              : 'Nothing matches this filter right now.'}
+            action={filter === 'all' ? 'Start shopping' : undefined} to="/shop" />
         </div>
       ) : (
         <div className="card">

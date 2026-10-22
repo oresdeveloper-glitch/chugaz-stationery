@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, fmtDateTime, onLive, latest } from '../lib/api';
 import { useToast } from '../components/Toast';
+import EmptyState from '../components/EmptyState';
 
 export default function Messages() {
   const [messages, setMessages] = useState([]);
@@ -40,7 +41,10 @@ export default function Messages() {
       </div>
       <div className="grid grid-2" style={{ alignItems: 'start' }}>
         <div className="card">
-          {messages.length === 0 && <div className="muted">No messages yet.</div>}
+          {messages.length === 0 && (
+            <EmptyState icon="mail" title="No messages yet"
+              message="Messages customers send from the shop's Contact page land here." />
+          )}
           {messages.map((m) => (
             <button key={m.id} onClick={() => setSelected(m)} style={{ display: 'block', width: '100%', textAlign: 'left', padding: 12, borderBottom: '1px solid var(--border)', background: m.is_read ? 'transparent' : 'rgba(59,130,246,0.06)', cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -66,7 +70,10 @@ export default function Messages() {
             </div>
           </div>
         ) : (
-          <div className="card muted" style={{ textAlign: 'center', padding: 40 }}>Select a message to read it.</div>
+          <div className="card">
+            <EmptyState icon="mail" title="No message selected"
+              message="Pick a message from the list to read it and reply." />
+          </div>
         )}
       </div>
     </div>
