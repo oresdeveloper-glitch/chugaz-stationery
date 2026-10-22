@@ -526,4 +526,48 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
   res.json({ ok: true, merged: M });
 });
 
+// Admin escape hatch: wipe every transaction (sales, orders, purchases,
+// expenses, payments, returns, stock movements) while keeping accounts,
+// products, categories, customers, suppliers and on-hand stock. The client
+// recovery mesh would otherwise merge the deleted rows straight back from
+// browser snapshots, so the wipe also stamps a `reset_at` epoch in settings:
+// /health and /sync advertise it, every browser that sees a newer epoch
+// forgets its snapshot instead of restoring it, and instance ranking puts
+// the epoch above raw row counts so an un-reset twin can never resurrect
+// the deleted history. The orchestrating admin client calls this once per
+// live instance with the SAME epoch so the fleet agrees.
+const RESET_TABLES = [
+  'sale_return_items', 'sale_returns', 'payments', 'sale_items', 'sales',
+  'purchase_return_items', 'purchase_returns', 'purchase_items', 'purchases',
+  'order_status_history', 'order_returns', 'order_payments', 'order_items',
+  'orders', 'stock_movements', 'expenses', 'notifications',
+];
+
+router.post('/reset-transactions', requireRole('admin'), (req, res) => {
+  if (!req.body || req.body.confirm !== 'RESET') {
+    return res.status(400).json({ error: "Type RESET to confirm — this deletes every sale, order, purchase, expense, payment, return and stock movement. Accounts, products, categories, customers and suppliers are kept." });
+  }
+  const epoch = Number(req.body.reset_at);
+  const resetAt = Number.isFinite(epoch) && epoch > 0 ? Math.floor(epoch) : Date.now();
+  const tableExists = (t) => {
+    try { return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t); } catch (_) { return false; }
+  };
+  const deleted = {};
+  db.exec('BEGIN');
+  try {
+    db.exec('PRAGMA defer_foreign_keys = ON');
+    for (const t of RESET_TABLES) {
+      if (!tableExists(t)) continue;
+      deleted[t] = db.prepare(`DELETE FROM ${t}`).run().changes;
+    }
+    db.prepare("INSERT INTO settings (key, value) VALUES ('reset_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(resetAt));
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (_) {}
+    return res.status(500).json({ error: 'Reset failed: ' + e.message });
+  }
+  audit(req.user.id, 'RESET_TRANSACTIONS', 'database', null, { reset_at: resetAt, deleted });
+  res.json({ ok: true, reset_at: resetAt, deleted });
+});
+
 module.exports = router;

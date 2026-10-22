@@ -1,5 +1,6 @@
 ﻿import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { resetTransactions } from '../lib/dbkeep';
 import { useToast } from '../components/Toast';
 import { THEMES, applyTheme, getTheme } from '../theme';
 import I from '../components/icons';
@@ -10,6 +11,8 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testTo, setTestTo] = useState('');
+  const [confirmText, setConfirmText] = useState('');
+  const [resetting, setResetting] = useState(false);
   const toast = useToast();
 
   const load = async () => {
@@ -49,6 +52,19 @@ export default function Settings() {
       toast('Database restored');
       load();
     } catch (err) { toast(err.message, 'error'); }
+  };
+
+  const clearTransactions = async () => {
+    if (confirmText !== 'RESET') return toast('Type RESET to confirm first', 'error');
+    if (!confirm('Delete every sale, order, purchase, expense, payment, return and stock movement on ALL live instances? Accounts, products, categories, customers and suppliers are kept. This cannot be undone.')) return;
+    setResetting(true);
+    try {
+      const r = await resetTransactions();
+      toast(`Transactions cleared on ${r.cleared} instance(s)${r.failed ? ` — ${r.failed} instance(s) could not be reached` : ''}`, r.failed ? 'error' : 'info');
+      setConfirmText('');
+      load();
+    } catch (e) { toast(e.message, 'error'); }
+    finally { setResetting(false); }
   };
 
   const set = (k, v) => setSettings({ ...settings, [k]: v });
@@ -172,6 +188,17 @@ export default function Settings() {
             <input type="file" accept=".db" onChange={(e) => setFile(e.target.files[0])} />
             <button className="btn danger" onClick={restore}>Restore</button>
           </div>
+        </div>
+
+        <div className="card">
+          <h2>Danger zone</h2>
+          <p className="muted">
+            Clear every transaction — sales, orders, purchases, expenses, payments, returns and stock movements — on all live instances at once,
+            to start the books over from scratch. Accounts, products, categories, customers and suppliers are kept, and open dashboards
+            forget the deleted data too, so it cannot come back on its own.
+          </p>
+          <div className="field"><label>Type RESET to confirm</label><input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="RESET" autoComplete="off" /></div>
+          <button className="btn danger" disabled={resetting || confirmText !== 'RESET'} onClick={clearTransactions}>{resetting ? 'Clearing…' : 'Clear all transactions'}</button>
         </div>
       </div>
     </div>

@@ -116,13 +116,16 @@ export function setDbPin(m) {
 // parked sessions on an EMPTY twin and left dashboards reading 0.
 const AFFINITY_TRIES = 1;
 
-// Probe the fleet in parallel and pin to the instance with the most data
-// (sales, then orders, then categories). The anyInstance probes never
-// recurse: they skip the affinity path entirely.
+// Probe the fleet in parallel and pin to the instance with the most data.
+// A fresher deliberate-reset epoch outranks raw counts: after an admin
+// "clear transactions" wipe, an un-reset twin still holding the OLD sales
+// must never win the pin (it would serve the deleted history). Ranking is
+// reset_at, then sales, then orders, then categories. The anyInstance
+// probes never recurse: they skip the affinity path entirely.
 async function rePinToRichest() {
   try {
     const rs = await Promise.all([0, 1, 2].map(() => request('/sync', { anyInstance: true }, false)));
-    const w = (x) => [Number(x.sales) || 0, Number(x.orders) || 0, Number(x.categories) || 0];
+    const w = (x) => [Number(x.reset_at) || 0, Number(x.sales) || 0, Number(x.orders) || 0, Number(x.categories) || 0];
     let best = null;
     for (const s of rs) {
       if (!s || !s.db_marker) continue;
@@ -130,7 +133,8 @@ async function rePinToRichest() {
       const a = w(s), b = w(best);
       if (a[0] !== b[0]) { if (a[0] > b[0]) best = s; }
       else if (a[1] !== b[1]) { if (a[1] > b[1]) best = s; }
-      else if (a[2] > b[2]) best = s;
+      else if (a[2] !== b[2]) { if (a[2] > b[2]) best = s; }
+      else if (a[3] > b[3]) best = s;
     }
     setDbPin(best ? best.db_marker : null);
   } catch (_) {

@@ -92,17 +92,21 @@ app.use('/api/system', staff, require('./src/routes/system'));
 app.get('/api/health', (req, res) => {
   try {
     const m = require('./src/db');
-    let users = null, db_marker = null, sales = null, orders = null, categories = null;
+    let users = null, db_marker = null, sales = null, orders = null, categories = null, reset_at = null;
     if (m.dbReady) {
       try { users = m.db.prepare('SELECT COUNT(*) c FROM users').get().c; } catch (_) {}
       try { db_marker = m.db.prepare("SELECT value FROM settings WHERE key='db_marker'").get()?.value || null; } catch (_) {}
       try { sales = m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; } catch (_) {}
       try { orders = m.db.prepare('SELECT COUNT(*) c FROM orders').get().c; } catch (_) {}
       try { categories = m.db.prepare('SELECT COUNT(*) c FROM categories').get().c; } catch (_) {}
+      // Epoch of the last deliberate admin transaction-wipe. A browser that
+      // has seen a NEWER epoch than its own stamp must forget its snapshot
+      // instead of merging the deleted rows back (see POST /reset-transactions).
+      try { reset_at = Number(m.db.prepare("SELECT value FROM settings WHERE key='reset_at'").get()?.value) || null; } catch (_) {}
     }
-    res.json({ ok: true, db: m.dbReady ? 'connected' : 'degraded', users, db_marker, sales, orders, categories });
+    res.json({ ok: true, db: m.dbReady ? 'connected' : 'degraded', users, db_marker, sales, orders, categories, reset_at });
   } catch (_) {
-    res.json({ ok: true, db: 'connected', users: null, db_marker: null, sales: null, orders: null });
+    res.json({ ok: true, db: 'connected', users: null, db_marker: null, sales: null, orders: null, reset_at: null });
   }
 });
 
@@ -110,7 +114,7 @@ const SYNC_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT
 const SYNC_DATA_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT SUM(total) FROM sales),0) || ':' || COALESCE((SELECT SUM(paid_amount) FROM sales),0) || ':' || (SELECT COUNT(*) FROM sale_returns) || '|' || (SELECT COUNT(*) FROM orders) || ':' || COALESCE((SELECT MAX(updated_at) FROM orders),'') || '|' || (SELECT COUNT(*) FROM order_status_history) || '|' || (SELECT COUNT(*) FROM stock_movements) || '|' || (SELECT COUNT(*) FROM products) || ':' || COALESCE((SELECT SUM(selling_price) FROM products),0) || ':' || COALESCE((SELECT SUM(current_stock) FROM products),0) || '|' || (SELECT COUNT(*) FROM purchases) || '|' || (SELECT COUNT(*) FROM expenses) || '|' || (SELECT COUNT(*) FROM customers) || '|' || (SELECT COUNT(*) FROM users) || '|' || (SELECT COUNT(*) FROM payments) || '|' || (SELECT COUNT(*) FROM notifications) || '|' || (SELECT COUNT(*) FROM contact_messages) || '|' || (SELECT COUNT(*) FROM order_returns) || ':' || COALESCE((SELECT MAX(processed_at) FROM order_returns),'') || '|' || '0' || '|' || (SELECT COUNT(*) FROM categories) || ':' || (SELECT COUNT(*) FROM product_categories) || ':' || (SELECT COUNT(*) FROM brands) || ':' || (SELECT COUNT(*) FROM suppliers) || '|' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(sku,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(image,''))+LENGTH(COALESCE(description,''))+LENGTH(COALESCE(unit,''))),0) FROM products) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(phone,''))+LENGTH(COALESCE(email,''))),0) FROM customers) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(email,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(avatar,''))),0) FROM users) AS v";
 
 app.get('/api/sync', (req, res) => {
-  let version = null, dataVersion = null, sales = null, orders = null, categories = null;
+  let version = null, dataVersion = null, sales = null, orders = null, categories = null, reset_at = null;
   try {
     const m = require('./src/db');
     if (m.dbReady) {
@@ -133,9 +137,13 @@ app.get('/api/sync', (req, res) => {
       try { sales = m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; } catch (_) {}
       try { orders = m.db.prepare('SELECT COUNT(*) c FROM orders').get().c; } catch (_) {}
       try { categories = m.db.prepare('SELECT COUNT(*) c FROM categories').get().c; } catch (_) {}
+      // Deliberate-wipe epoch: instance ranking must put a fresher reset_at
+      // above raw counts, or an un-reset twin (old sales) would win the
+      // election and the deleted history would come back.
+      try { reset_at = Number(m.db.prepare("SELECT value FROM settings WHERE key='reset_at'").get()?.value) || null; } catch (_) {}
     }
   } catch (_) { version = null; }
-  res.json({ ok: true, version, data_version: dataVersion, db_marker: res.getHeader('X-Db-Marker') || null, sales, orders, categories });
+  res.json({ ok: true, version, data_version: dataVersion, db_marker: res.getHeader('X-Db-Marker') || null, sales, orders, categories, reset_at });
 });
 
 // Live push channel (SSE). The browser opens this once and the server sends

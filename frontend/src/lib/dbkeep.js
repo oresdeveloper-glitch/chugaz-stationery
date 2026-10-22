@@ -6,6 +6,9 @@ registerOnWrite(schedulePostWriteBackup);
 const MARKER_KEY = 'sst_db_marker';
 const CATS_KEY = 'sst_db_cats';
 const SO_KEY = 'sst_db_so';
+// Epoch of the last deliberate admin transaction-wipe this browser has
+// acknowledged (server advertises it as `reset_at` on /health and /sync).
+const RESET_KEY = 'sst_reset_at';
 const DB_NAME = 'sst-keep';
 const STORE = 'kv';
 const BACKUP_KEY = 'backup';
@@ -51,6 +54,13 @@ function bumpCats(n) {
 // Known-good totals for the wipe detector (read by the dashboard's first load).
 export function knownCounts() { return readSo(); }
 
+function readResetAt() {
+  try { return Number(localStorage.getItem(RESET_KEY)) || 0; } catch (_) { return 0; }
+}
+function storeResetAt(n) {
+  try { localStorage.setItem(RESET_KEY, String(n)); } catch (_) { /* private mode etc. */ }
+}
+
 function apiBase() {
   return (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
 }
@@ -83,6 +93,32 @@ async function idbGet(key) {
     r.onsuccess = () => resolve(r.result || null);
     r.onerror = () => reject(r.error);
   });
+}
+
+async function idbDel(key) {
+  const s = await openStore();
+  return new Promise((resolve, reject) => {
+    const tx = s.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// A deliberate admin wipe stamps a NEWER `reset_at` than this browser has
+// ever acknowledged. When that happens, the local snapshot and the high-water
+// marks are FORGOTTEN — otherwise the recovery mesh would dutifully merge
+// every deleted sale/order/expense straight back in. Runs for every session
+// (pure client-side forget: no server writes), before bumpSo could max the
+// stale high-water back into place.
+async function applyResetEpoch(h) {
+  const server = Number(h && h.reset_at) || 0;
+  if (!server || server <= readResetAt()) return false;
+  storeResetAt(server);
+  try { await idbDel(BACKUP_KEY); } catch (_) { /* private mode etc. */ }
+  try { localStorage.setItem(SO_KEY, `${Number(h.sales) || 0}:${Number(h.orders) || 0}`); } catch (_) { /* private mode etc. */ }
+  console.info('[dbkeep] deliberate reset epoch', server, '— snapshot and high-water forgotten');
+  return true;
 }
 
 async function health() {
@@ -237,8 +273,12 @@ export async function convergeInstances() {
       }
       if (seen.size <= 1) return 'same';
 
-      // Elect the canonical leader: most sales wins, so the session pins to the instance that has the data.
+      // Elect the canonical leader. A fresher deliberate-reset epoch outranks
+      // raw counts: an un-reset twin still holding the OLD sales must never
+      // win the election after an admin wipe, or the deleted history would be
+      // announced (and pushed) back into the fleet.
       const weight = (s) => [
+        Number(s.reset_at) || 0,
         Number(s.sales) || 0,
         Number(s.orders) || 0,
         Number(s.categories) || 0,
@@ -254,9 +294,20 @@ export async function convergeInstances() {
       // Total wipe: every live instance is poorer than what this browser
       // holds. Stamping the empty leader as the session marker used to break
       // drift detection and let the next backup overwrite the only good
-      // copy, so merge the snapshot back into the served instance instead.
+      // copy, so merge the snapshot back into the served instance instead —
+      // unless the leader carries a NEWER deliberate-reset epoch than this
+      // browser has acknowledged: then the wipe was intentional and the
+      // snapshot must be forgotten, never merged.
       const snap = await idbGet(BACKUP_KEY);
       if (snap && snap.blob) {
+        const leaderReset = Number(leader.reset_at) || 0;
+        if (leaderReset > readResetAt()) {
+          await applyResetEpoch({ reset_at: leaderReset, sales: leader.sales, orders: leader.orders });
+          setDbPin(leader.db_marker);
+          localStorage.setItem(MARKER_KEY, leader.db_marker);
+          try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'] } })); } catch (e) { /* ignore */ }
+          return 'reset';
+        }
         const known = readSo();
         const l = [Number(leader.sales) || 0, Number(leader.orders) || 0];
         const k = [Math.max(Number(snap.sales) || 0, known.sales), Math.max(Number(snap.orders) || 0, known.orders)];
@@ -329,6 +380,9 @@ async function runKeepCheck() {
   try {
     const h = await health();
     if (!h || !h.db_marker) return;
+    // Deliberate admin wipe first: forget old state so neither bumpSo below
+    // nor the lostTx restore further down can resurrect the deleted rows.
+    await applyResetEpoch(h);
     bumpSo(h.sales, h.orders);
     const canKeepSess = canKeep();
     if (canKeepSess) scheduleBackups();
@@ -382,4 +436,87 @@ async function runKeepCheck() {
   } catch (e) {
     console.warn('[dbkeep] check failed:', e && e.message ? e.message : e);
   }
+}
+
+// Admin "clear transactions": wipe sales/orders/purchases/expenses/payments/
+// returns/movements on EVERY live instance with ONE shared epoch, then
+// forget this browser's snapshot so the recovery mesh can never merge the
+// deleted rows back. Discovery mirrors convergeInstances (serverless runs
+// several instances on independent disks; a straggler that misses the first
+// pass would keep serving the old history and win the epoch-first ranking).
+export async function resetTransactions() {
+  const user = getUser();
+  if (!user || user.role !== 'admin') throw new Error('Only an admin can clear transactions');
+  const epoch = Date.now();
+  const auth = authHeaders();
+  const body = JSON.stringify({ confirm: 'RESET', reset_at: epoch });
+  const targets = new Map();
+  const discover = async () => {
+    targets.clear();
+    try {
+      const mine = await api('/sync');
+      if (mine && mine.db_marker) targets.set(mine.db_marker, Number(mine.reset_at) || 0);
+    } catch (_) { /* unreachable now - a later pass retries */ }
+    for (let i = 0; i < 16 && targets.size < 8; i++) {
+      try {
+        const p = await api('/sync', { anyInstance: true });
+        if (p && p.db_marker && !targets.has(p.db_marker)) targets.set(p.db_marker, Number(p.reset_at) || 0);
+      } catch (_) { /* skip unreachable */ }
+    }
+  };
+  const wipe = async (marker) => {
+    const res = await fetchPinned(`${apiBase()}/api/system/reset-transactions`, {
+      method: 'POST',
+      headers: { ...auth, 'Content-Type': 'application/json' },
+      body,
+    }, marker);
+    return !!(res && res.ok);
+  };
+  await discover();
+  let cleared = 0;
+  const failed = new Set();
+  for (const [marker, seen] of targets) {
+    if (seen >= epoch) continue;
+    if (await wipe(marker)) cleared += 1; else failed.add(marker);
+  }
+  // Instances can scale up mid-purge: re-discover a few times and clear
+  // anything still carrying an older epoch (an already-wiped instance shows
+  // seen >= epoch, so successes are never double-counted).
+  for (let round = 0; round < 3; round++) {
+    await discover();
+    const stale = [...targets.keys()].filter((m) => (targets.get(m) || 0) < epoch);
+    if (!stale.length) break;
+    for (const marker of stale) {
+      if (await wipe(marker)) cleared += 1; else failed.add(marker);
+    }
+  }
+  if (!cleared) throw new Error('The reset did not reach any live instance — an admin session is required');
+  // Forget this browser's copy AFTER the fleet agreed, never before: until
+  // then the snapshot was still the safety net for an instance that refused.
+  storeResetAt(epoch);
+  try { await idbDel(BACKUP_KEY); } catch (_) { /* private mode etc. */ }
+  try { localStorage.setItem(SO_KEY, '0:0'); } catch (_) { /* private mode etc. */ }
+  // Re-pin to an instance that actually carries the new epoch (epoch-first
+  // ranking, same as rePinToRichest) so reads never land on a straggler.
+  try {
+    const rs = await Promise.all([0, 1, 2].map(() => api('/sync', { anyInstance: true })));
+    const w = (x) => [Number(x.reset_at) || 0, Number(x.sales) || 0, Number(x.orders) || 0, Number(x.categories) || 0];
+    let best = null;
+    for (const s of rs) {
+      if (!s || !s.db_marker) continue;
+      if (!best) { best = s; continue; }
+      const a = w(s), b = w(best);
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] === b[i]) continue;
+        if (a[i] > b[i]) best = s;
+        break;
+      }
+    }
+    if (best && best.db_marker) {
+      setDbPin(best.db_marker);
+      localStorage.setItem(MARKER_KEY, best.db_marker);
+    }
+  } catch (_) { /* keep the current pin - convergence will correct it */ }
+  try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'] } })); } catch (_) { /* ignore */ }
+  return { ok: true, epoch, cleared, failed: failed.size };
 }
