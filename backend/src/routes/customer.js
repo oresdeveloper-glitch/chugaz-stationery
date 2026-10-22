@@ -106,7 +106,7 @@ publicRouter.post('/register', asyncRoute(async (req, res) => {
 }));
 
 publicRouter.post('/verify-email', asyncRoute(async (req, res) => {
- const { email, code } = req.body;
+ const { email, code, password, name } = req.body;
  const clean = String(email || '').toLowerCase().trim();
  const ip = clientIp(req);
  const rl = rateLimit(`verify:${ip}:${clean}`, 12, 15 * 60 * 1000);
@@ -130,10 +130,39 @@ publicRouter.post('/verify-email', asyncRoute(async (req, res) => {
  }
  db.prepare('DELETE FROM email_verifications WHERE email=?').run(clean);
  const user = db.prepare(`
-  SELECT u.id, u.name, u.email, u.phone, u.status, r.name AS role
+  SELECT u.id, u.name, u.email, u.phone, u.status, u.token_ver, r.name AS role
   FROM users u JOIN roles r ON r.id = u.role_id WHERE u.email = ?
  `).get(clean);
- if (!user) return res.status(404).json({ error: 'Account not found' });
+ if (!user) {
+  // Recovery sign-in: the emailed code proves mailbox ownership, so the
+  // customer sets their password again on this instance. Used when the row
+  // was lost to a recycled serverless disk (or lives on another instance)
+  // while SMTP is configured — previously an unrecoverable 401 lockout.
+  if (!passwordOk(password)) {
+   return res.status(400).json({ error: `Choose a password to recover your account — ${PASSWORD_RULE}` });
+  }
+  const roleId = db.prepare("SELECT id FROM roles WHERE name='customer'").get();
+  if (!roleId) return res.status(500).json({ error: 'Customer role not configured' });
+  const derived = clean.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 80);
+  const displayName = String(name || derived).trim().slice(0, 80) || derived;
+  let created;
+  try {
+   created = db.prepare("INSERT INTO users (name, email, password_hash, role_id, status) VALUES (?,?,?,?, 'active')")
+    .run(displayName, clean, bcrypt.hashSync(String(password), 10), roleId.id);
+  } catch (_) {
+   // A parallel request recreated it — fall through and use that row.
+   created = null;
+  }
+  const fresh = db.prepare(`
+   SELECT u.id, u.name, u.email, u.phone, u.status, u.token_ver, r.name AS role
+   FROM users u JOIN roles r ON r.id = u.role_id WHERE u.email = ?
+  `).get(clean);
+  if (!fresh) return res.status(500).json({ error: 'Could not recover the account — try again' });
+  audit(fresh.id, 'LOGIN_RECOVER', 'user', fresh.id, { email: clean, ip, created: !!created });
+  audit(fresh.id, 'VERIFY_EMAIL', 'user', fresh.id, { email: clean, ip, recovered: true });
+  res.json({ token: signToken(fresh), user: fresh });
+  return;
+ }
  if (user.status === 'unverified') db.prepare("UPDATE users SET status='active' WHERE id=?").run(user.id);
  user.status = 'active';
  audit(user.id, 'VERIFY_EMAIL', 'user', user.id, { email: clean, ip });
@@ -157,7 +186,7 @@ publicRouter.post('/resend-verification', asyncRoute(async (req, res) => {
  res.json({ ok: true, message: 'A new code is on its way' });
 }));
 
-function handleCustomerLogin(req, res) {
+async function handleCustomerLogin(req, res) {
  const { email, password } = req.body;
  const ip = clientIp(req);
  const clean = String(email || '').toLowerCase().trim();
@@ -191,6 +220,30 @@ function handleCustomerLogin(req, res) {
      audit(user.id, 'LOGIN_RESTORE', 'user', user.id, { email: clean, ip });
     }
    } catch (e) { user = null; }
+  }
+  // Account missing on this instance while SMTP is configured: prove mailbox
+  // ownership with an emailed 6-digit code instead of a dead-end 401. The
+  // ephemeral serverless disk can drop the row (or the pin can land on a
+  // twin instance) after a perfectly good registration — without this the
+  // customer was permanently locked out with "Invalid email or password".
+  if (!user && EMAIL_RE.test(clean) && passwordOk(password) && smtpReady()) {
+   const rl = rateLimit(`recover:${clean}`, 3, 15 * 60 * 1000);
+   if (!rl.ok) {
+    return res.status(429).json({ error: `Too many recovery requests — try again in ${Math.ceil(rl.retryAfterSec / 60)} minute(s)` });
+   }
+   const code = issueVerificationCode(clean);
+   const sent = await sendVerificationCode(clean, code);
+   if (sent.sent) {
+    audit(null, 'LOGIN_RECOVER_SEND', 'user', null, { email: clean, ip });
+    return res.status(403).json({
+     error: 'We could not find this account here — enter the 6-digit code we just emailed you to recover it',
+     code: 'EMAIL_RECOVER',
+     needs_verification: true,
+     email: clean,
+    });
+   }
+   // SMTP configured but delivery failed — fall through to the normal
+   // invalid-credentials answer rather than pretending recovery worked.
   }
   const valid = user && user.role === 'customer' && bcrypt.compareSync(String(password), user.password_hash);
  if (!valid) {
@@ -231,7 +284,7 @@ function handleCustomerLogin(req, res) {
  res.json({ token: signToken(user), user: safeUser });
 }
 
-publicRouter.post('/login', handleCustomerLogin);
+publicRouter.post('/login', asyncRoute(handleCustomerLogin));
 
 // ---- protected (customer) ----
 

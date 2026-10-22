@@ -17,6 +17,11 @@ export default function Login() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const codeRef = useRef(null);
+  // Held only in memory for the duration of a recovery: when the server
+  // cannot find the account (recycled disk / other instance) it emails a
+  // code instead of rejecting — the password typed at sign-in is replayed
+  // with the code so the customer sets access again on this instance.
+  const recoverPwRef = useRef(null);
 
   useEffect(() => {
     if (unverified && codeRef.current) codeRef.current.focus();
@@ -29,6 +34,7 @@ export default function Login() {
 
   const submit = async (e) => {
     e.preventDefault();
+    recoverPwRef.current = null;
     setBusy(true);
     try {
       const { token, user } = await api('/auth/login', { method: 'POST', body: form });
@@ -45,7 +51,12 @@ export default function Login() {
         navigate(params.get('next') || '/');
       }
     } catch (err) {
-      if (err.code === 'EMAIL_UNVERIFIED' || /verify your email/i.test(err.message || '')) {
+      if (err.code === 'EMAIL_RECOVER') {
+        recoverPwRef.current = form.password;
+        setUnverified(form.email);
+        setSeconds(45);
+        toast('We emailed you a recovery code — enter it to get back in', 'info');
+      } else if (err.code === 'EMAIL_UNVERIFIED' || /verify your email/i.test(err.message || '')) {
         setUnverified(form.email);
         toast('Verify your email to finish activating your account', 'error');
       } else {
@@ -87,9 +98,13 @@ export default function Login() {
     e.preventDefault();
     setBusy(true);
     try {
-      const { token, user } = await shopApi('/verify-email', { method: 'POST', body: { email: unverified, code } });
+      const recovering = !!recoverPwRef.current;
+      const body = { email: unverified, code };
+      if (recovering) body.password = recoverPwRef.current;
+      const { token, user } = await shopApi('/verify-email', { method: 'POST', body });
       setShopAuth(token, user);
-      toast('Email verified : welcome!', 'info');
+      recoverPwRef.current = null;
+      toast(recovering ? 'Account recovered : welcome!' : 'Email verified : welcome!', 'info');
       navigate('/shop');
     } catch (err) {
       toast(err.message, 'error');
@@ -112,13 +127,18 @@ export default function Login() {
   };
 
   if (unverified) {
+    const recovering = !!recoverPwRef.current;
     return (
       <div className="auth-wrap">
         <div className="card auth-card">
           <img src="/logo.png" alt="CHUGAZ" className="login-logo" />
-          <h1>Verify your email</h1>
+          <h1>{recovering ? 'Recover your account' : 'Verify your email'}</h1>
           <p className="muted small">
-            We sent a 6-digit code to <b>{unverified}</b>.<br />Enter it to activate your account.
+            {recovering ? (
+              <>We sent a 6-digit recovery code to <b>{unverified}</b>.<br />Enter it to sign back in and keep your password.</>
+            ) : (
+              <>We sent a 6-digit code to <b>{unverified}</b>.<br />Enter it to activate your account.</>
+            )}
           </p>
           <form onSubmit={confirm}>
             <div className="field">

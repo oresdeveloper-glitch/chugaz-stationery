@@ -18,6 +18,16 @@ const DISPOSABLE_DOMAINS = new Set([
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
+// DNS on a flaky resolver can stall for 15s+ per query — registration must
+// never hang that long. Bounded probe; timeouts fall through to the
+// format-only acceptance below (same as an outright DNS outage).
+function dnsProbe(p, ms) {
+ return new Promise((resolve, reject) => {
+  const t = setTimeout(() => reject(new Error('DNS timeout')), ms);
+  p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+ });
+}
+
 // Checks: format -> disposable blocklist -> live DNS (domain can receive mail).
 async function checkEmailReal(email) {
  const clean = String(email || '').toLowerCase().trim();
@@ -26,18 +36,23 @@ async function checkEmailReal(email) {
  if (DISPOSABLE_DOMAINS.has(domain)) {
   return { ok: false, error: 'Disposable or temporary email addresses are not allowed — use your real email' };
  }
+ const definitive = (e) => e && (e.code === 'ENOTFOUND' || e.code === 'ENODATA');
+ let mx = [];
  try {
-  let mx = [];
-  try { mx = await dns.resolveMx(domain); } catch {}
-  if (mx && mx.length) return { ok: true, clean };
-  // some domains accept mail via A record without MX
-  try {
-   const a = await dns.resolve4(domain);
-   if (a && a.length) return { ok: true, clean };
-  } catch {}
+  mx = await dnsProbe(dns.resolveMx(domain), 3000);
+ } catch (e) {
+  // NXDOMAIN/no-MX: keep probing. Timeout or resolver trouble: DNS is
+  // inconclusive, so accept on format instead of rejecting real customers.
+  if (!definitive(e)) return { ok: true, clean };
+ }
+ if (mx && mx.length) return { ok: true, clean };
+ // some domains accept mail via A record without MX
+ try {
+  const a = await dnsProbe(dns.resolve4(domain), 3000);
+  if (a && a.length) return { ok: true, clean };
   return { ok: false, error: 'That email domain cannot receive mail — check the spelling or use another address' };
- } catch {
-  // DNS unavailable on this machine — fall back to format-only check
+ } catch (e) {
+  if (definitive(e)) return { ok: false, error: 'That email domain cannot receive mail — check the spelling or use another address' };
   return { ok: true, clean };
  }
 }

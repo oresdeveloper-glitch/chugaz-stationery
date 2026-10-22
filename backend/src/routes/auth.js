@@ -18,7 +18,7 @@ function findUserByEmail(email) {
  `).get(String(email).toLowerCase().trim());
 }
 
-router.post('/login', (req, res) => {
+router.post('/login', (req, res, next) => {
  const { email, password } = req.body;
  const ip = clientIp(req);
  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
@@ -44,7 +44,7 @@ router.post('/login', (req, res) => {
  if (!user) {
   // Unknown staff email: let the customer handler try (self-heals after a DB reset).
   const { handleCustomerLogin } = require('./customer');
-  return handleCustomerLogin(req, res);
+  return handleCustomerLogin(req, res).catch(next);
  }
  const valid = user && bcrypt.compareSync(String(password), user.password_hash);
  if (!valid) {
@@ -57,7 +57,7 @@ router.post('/login', (req, res) => {
   // Single login page: hand customers to the shop handler so unverified
   // handling and guest-cart merge still apply. Lazy require avoids a cycle.
   const { handleCustomerLogin } = require('./customer');
-  return handleCustomerLogin(req, res);
+  return handleCustomerLogin(req, res).catch(next);
  }
  if (user.status !== 'active') return res.status(403).json({ error: 'Account is disabled — contact the administrator' });
 

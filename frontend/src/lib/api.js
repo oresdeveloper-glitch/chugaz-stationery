@@ -162,9 +162,13 @@ async function request(path, options = {}, shop = false) {
 
   const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
   const url = `${base}/api${shop ? '/shop' : ''}${path}`;
-  // Never retry auth endpoints: a 401 there means wrong credentials.
+  // Auth endpoints never get the 401-retry/refresh treatment (a 401 there is
+  // a real credential answer), but they DO get instance affinity: login must
+  // land on the pinned instance that holds the account row, exactly like the
+  // register call that created it. A random-instance login after a disk
+  // recycle was sending customers into "Invalid email or password".
   const recoverable = !path.startsWith('/auth/');
-  const affinity = recoverable && !options.anyInstance;
+  const affinity = !options.anyInstance;
   const idempotent = !options.method || options.method === 'GET' || options.method === 'HEAD';
   const send = () => {
     const h = { ...headers };
