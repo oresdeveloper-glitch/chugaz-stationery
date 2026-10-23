@@ -7,6 +7,7 @@ import { useToast } from '../../components/Toast';
 function ProfileInner() {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [signingOutAll, setSigningOutAll] = useState(false);
   const [error, setError] = useState(null);
   const toast = useToast();
 
@@ -48,6 +49,17 @@ function ProfileInner() {
       setForm({ ...form, password: '', currentPassword: '' });
     } catch (err) { toast(err.message, 'error'); }
     finally { setSaving(false); }
+  };
+
+  const logoutEverywhere = async () => {
+    if (!confirm('Sign out on every device? You will stay signed in here.')) return;
+    setSigningOutAll(true);
+    try {
+      const res = await shopApi('/me/logout-all', { method: 'POST' });
+      if (res?.token) setShopAuth(res.token, getShopUser());
+      toast('Signed out everywhere else');
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setSigningOutAll(false); }
   };
 
   if (error && !form) {
@@ -107,11 +119,17 @@ function ProfileInner() {
           {form.password && (
             <div className="field"><label>Current password — required to confirm</label><input type="password" autoComplete="current-password" value={form.currentPassword || ''} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} required /></div>
           )}
-          <p className="small muted" style={{ marginTop: -2, marginBottom:12 }}>Use 8+ characters with letters and numbers.</p>
+          <p className="small muted" style={{ marginTop: -2, marginBottom:12 }}>10+ characters with a capital letter or symbol, plus letters and numbers.</p>
           <div style={{display:'flex', justifyContent:'flex-end'}}>
             <button className="btn primary" style={{minWidth:140, justifyContent:'center'}} disabled={saving}>{saving ? 'Saving...' : 'Save changes'}</button>
           </div>
         </form>
+      </div>
+
+      <div className="card">
+        <h3 style={{margin:'0 0 6px', fontSize:14, fontWeight:600}}>Sessions</h3>
+        <p className="small muted" style={{marginTop:0, marginBottom:12}}>Signed in somewhere you don't recognise? End every other session at once — this device stays signed in.</p>
+        <button className="btn danger" disabled={signingOutAll} onClick={logoutEverywhere}>{signingOutAll ? 'Signing out…' : 'Sign out everywhere else'}</button>
       </div>
     </div>
   );

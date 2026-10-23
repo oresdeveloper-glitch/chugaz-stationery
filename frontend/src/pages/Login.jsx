@@ -3,13 +3,17 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, shopApi, setAuth, setShopAuth } from '../lib/api';
 import { useToast } from '../components/Toast';
 
-const PASSWORD_RULE = 'Password must be at least 8 characters and contain both letters and numbers';
+const PASSWORD_RULE = 'Password must be at least 10 characters with a capital letter or a symbol, plus letters and numbers';
+const policyOk = (pw) =>
+  typeof pw === 'string' && pw.length >= 10 && /[A-Za-z]/.test(pw) && /[0-9]/.test(pw) &&
+  (/[A-Z]/.test(pw) || /[^A-Za-z0-9]/.test(pw));
 
 export default function Login() {
   const [mode, setMode] = useState(() => (new URLSearchParams(window.location.search).get('mode') === 'register' ? 'register' : 'login'));
   const [form, setForm] = useState({ email: '', password: '' });
   const [reg, setReg] = useState({ name: '', email: '', phone: '', password: '', confirm: '' });
   const [unverified, setUnverified] = useState(null);
+  const [tfaEmail, setTfaEmail] = useState(null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -24,13 +28,28 @@ export default function Login() {
   const recoverPwRef = useRef(null);
 
   useEffect(() => {
-    if (unverified && codeRef.current) codeRef.current.focus();
-  }, [unverified]);
+    if ((unverified || tfaEmail) && codeRef.current) codeRef.current.focus();
+  }, [unverified, tfaEmail]);
   useEffect(() => {
     if (seconds <= 0) return;
     const t = setTimeout(() => setSeconds((s) => s - 1), 1000);
     return () => clearTimeout(t);
   }, [seconds]);
+
+  const signIn = (token, user) => {
+    // One connected account system: every sign-in (customer AND staff —
+    // admin, manager, cashier, clerk) also opens a shop session, so the
+    // storefront always shows your profile, contact details and orders.
+    setShopAuth(token, user);
+    if (user.role === 'customer') {
+      toast(`Welcome back, ${user.name}`);
+      navigate(params.get('next') || '/shop');
+    } else {
+      setAuth(token, user);
+      toast(`Welcome back, ${user.name}`);
+      navigate(params.get('next') || '/');
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -38,20 +57,14 @@ export default function Login() {
     setBusy(true);
     try {
       const { token, user } = await api('/auth/login', { method: 'POST', body: form });
-      // One connected account system: every sign-in (customer AND staff —
-      // admin, manager, cashier, clerk) also opens a shop session, so the
-      // storefront always shows your profile, contact details and orders.
-      setShopAuth(token, user);
-      if (user.role === 'customer') {
-        toast(`Welcome back, ${user.name}`);
-        navigate(params.get('next') || '/shop');
-      } else {
-        setAuth(token, user);
-        toast(`Welcome back, ${user.name}`);
-        navigate(params.get('next') || '/');
-      }
+      signIn(token, user);
     } catch (err) {
-      if (err.code === 'EMAIL_RECOVER') {
+      if (err.code === 'TWO_FACTOR_REQUIRED') {
+        setTfaEmail(err.email || form.email);
+        setCode('');
+        setSeconds(45);
+        toast('We emailed you a 6-digit sign-in code — enter it below', 'info');
+      } else if (err.code === 'EMAIL_RECOVER') {
         recoverPwRef.current = form.password;
         setUnverified(form.email);
         setSeconds(45);
@@ -67,10 +80,24 @@ export default function Login() {
     }
   };
 
+  const confirm2fa = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const { token, user } = await api('/auth/login-2fa', { method: 'POST', body: { email: tfaEmail, code } });
+      signIn(token, user);
+    } catch (err) {
+      toast(err.message, 'error');
+      if (err.code === 'TWO_FACTOR_EXPIRED') { setTfaEmail(null); setCode(''); }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const register = async (e) => {
     e.preventDefault();
     if (reg.password !== reg.confirm) return toast('Passwords do not match', 'error');
-    if (reg.password.length < 8 || !/[A-Za-z]/.test(reg.password) || !/[0-9]/.test(reg.password)) {
+    if (!policyOk(reg.password)) {
       return toast(PASSWORD_RULE, 'error');
     }
     setBusy(true);
@@ -125,6 +152,44 @@ export default function Login() {
       setBusy(false);
     }
   };
+
+  if (tfaEmail) {
+    return (
+      <div className="auth-wrap">
+        <div className="card auth-card">
+          <img src="/logo.png" alt="CHUGAZ" className="login-logo" />
+          <h1>Two-step verification</h1>
+          <p className="muted small">
+            We sent a 6-digit sign-in code to <b>{tfaEmail}</b>.<br />Enter it to finish signing in.
+          </p>
+          <form onSubmit={confirm2fa}>
+            <div className="field">
+              <label>Sign-in code</label>
+              <input
+                ref={codeRef}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                inputMode="numeric"
+                pattern="\d{6}"
+                placeholder="••••••"
+                style={{ textAlign: 'center', fontSize: 24, letterSpacing: 12, fontWeight: 800 }}
+                required
+              />
+            </div>
+            <button className="btn primary" style={{ width: '100%', justifyContent: 'center' }} disabled={busy || code.length !== 6}>
+              {busy ? 'Verifying…' : 'Verify & sign in'}
+            </button>
+          </form>
+          <p className="muted small" style={{ textAlign: 'center', marginTop: 12 }}>
+            <button type="button" className="link" onClick={() => { setTfaEmail(null); setCode(''); setSeconds(0); }} disabled={busy}>
+              Back to sign in
+            </button>
+            {seconds > 0 && <><br />You can request a new code in {seconds}s — just sign in again</>}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (unverified) {
     const recovering = !!recoverPwRef.current;
@@ -199,10 +264,10 @@ export default function Login() {
               <div className="field"><label>Email (must be real : we verify it)</label><input type="email" autoComplete="email" value={reg.email} onChange={(e) => setReg({ ...reg, email: e.target.value })} required /></div>
               <div className="field"><label>Phone</label><input value={reg.phone} onChange={(e) => setReg({ ...reg, phone: e.target.value })} autoComplete="tel" /></div>
               <div className="form-row">
-                <div className="field"><label>Password</label><input type="password" autoComplete="new-password" value={reg.password} onChange={(e) => setReg({ ...reg, password: e.target.value })} required minLength={8} /></div>
+                <div className="field"><label>Password</label><input type="password" autoComplete="new-password" value={reg.password} onChange={(e) => setReg({ ...reg, password: e.target.value })} required minLength={10} /></div>
                 <div className="field"><label>Confirm</label><input type="password" autoComplete="new-password" value={reg.confirm} onChange={(e) => setReg({ ...reg, confirm: e.target.value })} required /></div>
               </div>
-              <p className="muted small" style={{ marginTop: -6 }}>8+ characters with letters and numbers.</p>
+              <p className="muted small" style={{ marginTop: -6 }}>10+ characters with a capital letter or symbol, plus letters and numbers.</p>
               <button className="btn primary" style={{ width: '100%', justifyContent: 'center' }} disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button>
             </form>
             <p className="muted small" style={{ textAlign: 'center', marginTop: 12 }}>

@@ -53,10 +53,23 @@ function clearFailures(key) {
  failures.delete(key);
 }
 
+// Escalating network lock: repeated FAILED logins from one address lock that
+// whole address briefly, so credential-stuffing sprays that stay under the
+// per-account limits still get stopped. Not cleared on success — most offices
+// share one IP and a legitimate sign-in must not vouch for the attacker next
+// to them; the window simply expires.
+function registerIpFailure(ip, { maxFails = 20, failWindowMs = 10 * 60 * 1000, lockMs = 5 * 60 * 1000 } = {}) {
+ return registerFailure(`ipfail:${ip}`, { maxFails, failWindowMs, lockMs });
+}
+
+function ipLockState(ip) {
+ return lockState(`ipfail:${ip}`);
+}
+
 function clientIp(req) {
  const xf = req.headers['x-forwarded-for'];
  if (typeof xf === 'string' && xf.length) return xf.split(',')[0].trim();
  return req.socket?.remoteAddress || 'unknown';
 }
 
-module.exports = { rateLimit, registerFailure, lockState, clearFailures, clientIp };
+module.exports = { rateLimit, registerFailure, lockState, clearFailures, registerIpFailure, ipLockState, clientIp };

@@ -53,11 +53,18 @@ export function clearShopAuth() {
 export async function refreshToken(token) {
   try {
     const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
-    const res = await fetch(`${base}/api/auth/refresh`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(15000) : undefined,
-    });
+    const sig = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(15000) : undefined;
+    // Carry the instance pin: the refresh handler re-reads the live account
+    // row, so it must run on the instance that owns this session — a random
+    // twin would 401 and force a needless sign-out.
+    const pin = getDbPin();
+    const headers = { Authorization: `Bearer ${token}` };
+    if (pin) headers['X-Expect-Db-Marker'] = pin;
+    let res = await fetch(`${base}/api/auth/refresh`, { method: 'POST', headers, signal: sig });
+    if (res.status === 409 && pin) {
+      // Dead pin (recycled disk) — retry once un-pinned instead of logging out.
+      res = await fetch(`${base}/api/auth/refresh`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: sig });
+    }
     if (!res.ok) return null;
     const d = await res.json().catch(() => null);
     return d && d.token ? d.token : null;

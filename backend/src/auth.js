@@ -18,23 +18,35 @@ function loadSecret() {
 }
 
 const JWT_SECRET = loadSecret();
-const STAFF_EXPIRES = '999y';  // no session expiry
-const CUSTOMER_EXPIRES = '999y';
+
+// Token hardening: fixed HS256 only (blocks alg=none / RS->HS confusion),
+// pinned issuer + audience (a token minted for any other purpose is rejected),
+// and a 12-hour expiry instead of centuries. Active sessions survive past 12h
+// through POST /auth/refresh, which re-verifies signature, claims, the live
+// account row and a 30-day absolute age cap carried in the `orig` claim.
+const JWT_ISSUER = 'chugaz-stationery';
+const JWT_AUDIENCE = 'chugaz-stationery-app';
+const STAFF_EXPIRES = '12h';
+const CUSTOMER_EXPIRES = '12h';
+const REFRESH_MAX_AGE_SEC = 30 * 24 * 60 * 60;
+const VERIFY_OPTS = { algorithms: ['HS256'], issuer: JWT_ISSUER, audience: JWT_AUDIENCE };
 
 function signToken(user, opts = {}) {
- const customer = user.role === 'customer';
- return jwt.sign(
-  {
-   id: user.id,
-   email: user.email,
-   name: user.name,
-   role: user.role,
-   office_id: user.office_id ?? null,
-   ver: user.token_ver ?? 0,
-  },
-  JWT_SECRET,
-  { expiresIn: opts.expiresIn || (customer ? CUSTOMER_EXPIRES : STAFF_EXPIRES) }
- );
+ const payload = {
+  id: user.id,
+  email: user.email,
+  name: user.name,
+  role: user.role,
+  office_id: user.office_id ?? null,
+  ver: user.token_ver ?? 0,
+ };
+ if (opts.orig) payload.orig = opts.orig;
+ return jwt.sign(payload, JWT_SECRET, {
+  algorithm: 'HS256',
+  expiresIn: opts.expiresIn || (user.role === 'customer' ? CUSTOMER_EXPIRES : STAFF_EXPIRES),
+  issuer: JWT_ISSUER,
+  audience: JWT_AUDIENCE,
+ });
 }
 
 // Verify token AND confirm the account still exists, is active, and the token
@@ -42,7 +54,7 @@ function signToken(user, opts = {}) {
 function verifyLive(token) {
  let payload;
  try {
-  payload = jwt.verify(token, JWT_SECRET);
+  payload = jwt.verify(token, JWT_SECRET, VERIFY_OPTS);
  } catch {
   return null;
  }
@@ -94,4 +106,19 @@ function requireCustomer(req, res, next) {
  next();
 }
 
-module.exports = { signToken, verifyLive, requireAuth, requireRole, requireCustomer, optionalAuth, ROLE_LEVEL, JWT_SECRET, JWT_SECRET_SOURCE };
+// Refresh path: signature/claims must hold and the session must be younger
+// than the absolute 30-day window (orig, else iat) — expired-but-recent tokens
+// refresh into a fresh 12h one, ancient ones are dead for good.
+function verifyForRefresh(token) {
+ let payload;
+ try {
+  payload = jwt.verify(token, JWT_SECRET, { ...VERIFY_OPTS, ignoreExpiration: true });
+ } catch {
+  return null;
+ }
+ const originSec = (payload.orig || payload.iat) || 0;
+ if (!originSec || Date.now() - originSec * 1000 > REFRESH_MAX_AGE_SEC * 1000) return null;
+ return payload;
+}
+
+module.exports = { signToken, verifyLive, verifyForRefresh, requireAuth, requireRole, requireCustomer, optionalAuth, ROLE_LEVEL, JWT_SECRET, JWT_SECRET_SOURCE, JWT_ISSUER, JWT_AUDIENCE };

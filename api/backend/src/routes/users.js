@@ -1,7 +1,7 @@
 const express = require('express');
 const { db, audit } = require('../db');
 const { requireRole } = require('../auth');
-const bcrypt = require('bcryptjs');
+const { hashPassword, passwordPolicy } = require('../pwd');
 const { checkEmailReal } = require('../mailer');
 
 const router = express.Router();
@@ -26,12 +26,11 @@ router.post('/', requireRole('admin'), asyncRoute(async (req, res) => {
  const { name, email, password, role_id, office_id } = req.body;
  if (!name || !email || !password) return res.status(400).json({ error: 'Name, email and password required' });
  if (!role_id) return res.status(400).json({ error: 'Role required' });
- if (String(password).length < 8 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-  return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
- }
+ const pol = passwordPolicy(password, { email, name });
+ if (!pol.ok) return res.status(400).json({ error: pol.error });
  const check = await checkEmailReal(email);
  if (!check.ok) return res.status(400).json({ error: check.error });
- const hash = bcrypt.hashSync(password, 10);
+ const hash = hashPassword(password);
  try {
   const info = db.prepare('INSERT INTO users (name, email, password_hash, role_id, office_id) VALUES (?,?,?,?,?)')
    .run(name, check.clean, hash, role_id, office_id ? Number(office_id) : null);
@@ -51,12 +50,14 @@ router.put('/:id', requireRole('admin'), (req, res) => {
   return res.status(400).json({ error: 'You cannot disable your own account' });
  }
  if (password) {
-  if (String(password).length < 8 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-   return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
-  }
-  const hash = bcrypt.hashSync(password, 10);
-  db.prepare('UPDATE users SET name=?, email=?, role_id=?, status=?, office_id=?, password_hash=? WHERE id=?')
-   .run(name ?? u.name, (email ?? u.email).toLowerCase().trim(), role_id ?? u.role_id, status ?? u.status, office_id === undefined ? u.office_id : (office_id ? Number(office_id) : null), hash, req.params.id);
+  const pol = passwordPolicy(password, { email: email ?? u.email, name: name ?? u.name });
+  if (!pol.ok) return res.status(400).json({ error: pol.error });
+  const hash = hashPassword(password);
+  // Bumping token_ver signs the target out everywhere: an admin password reset
+  // must kill sessions opened with the old password.
+  const ver = (u.token_ver ?? 0) + 1;
+  db.prepare('UPDATE users SET name=?, email=?, role_id=?, status=?, office_id=?, password_hash=?, token_ver=? WHERE id=?')
+   .run(name ?? u.name, (email ?? u.email).toLowerCase().trim(), role_id ?? u.role_id, status ?? u.status, office_id === undefined ? u.office_id : (office_id ? Number(office_id) : null), hash, ver, req.params.id);
  } else {
   db.prepare('UPDATE users SET name=?, email=?, role_id=?, status=?, office_id=? WHERE id=?')
    .run(name ?? u.name, (email ?? u.email).toLowerCase().trim(), role_id ?? u.role_id, status ?? u.status, office_id === undefined ? u.office_id : (office_id ? Number(office_id) : null), req.params.id);

@@ -94,8 +94,8 @@ export default function Users() {
             </select>
           </div>
           <div className="field"><label>{modal?.id ? 'New password (leave blank to keep)' : 'Password *'}</label>
-            <input type="password" autoComplete="new-password" required={!modal?.id} minLength={modal?.id ? 0 : 8} value={modal?.password || ''} onChange={(e) => setModal({ ...modal, password: e.target.value })} />
-            <p className="small muted" style={{ marginTop: 4 }}>8+ characters with letters and numbers.</p>
+            <input type="password" autoComplete="new-password" required={!modal?.id} minLength={10} value={modal?.password || ''} onChange={(e) => setModal({ ...modal, password: e.target.value })} />
+            <p className="small muted" style={{ marginTop: 4 }}>10+ characters with a capital letter or symbol, plus letters and numbers. Changing a password signs that user out everywhere.</p>
           </div>
           <div className="field"><label>Status</label>
             <select value={modal?.status || 'active'} onChange={(e) => setModal({ ...modal, status: e.target.value })}>

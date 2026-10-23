@@ -5,7 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const { db, audit, transact } = require('../db');
 const { signToken, requireCustomer } = require('../auth');
-const { rateLimit, registerFailure, lockState, clearFailures, clientIp } = require('../security');
+const { rateLimit, registerFailure, lockState, clearFailures, clientIp, registerIpFailure, ipLockState } = require('../security');
+const { hashPassword, verifyPassword, upgradeUserPassword, passwordPolicy, legacyPasswordOk, LEGACY_RULE } = require('../pwd');
 const { checkEmailReal, sendVerificationCode, smtpReady, EMAIL_RE } = require('../mailer');
 
 // Express 4 doesn't forward async rejections to the error middleware.
@@ -35,9 +36,6 @@ const avatarUpload = multer({
 const publicRouter = express.Router();
 const protectedRouter = express.Router();
 
-const PASSWORD_RULE = 'Password must be at least 8 characters and contain both letters and numbers';
-const passwordOk = (p) => typeof p === 'string' && p.length >= 8 && /[A-Za-z]/.test(p) && /[0-9]/.test(p);
-
 function issueVerificationCode(email) {
  const code = String(Math.floor(100000 + Math.random() * 900000));
  db.prepare(`
@@ -56,7 +54,8 @@ publicRouter.post('/register', asyncRoute(async (req, res) => {
  if (!rl.ok) return res.status(429).json({ error: 'Too many registration attempts — try again later' });
  const { name, email, phone, password } = req.body;
  if (!name || !email || !password) return res.status(400).json({ error: 'Name, email and password are required' });
- if (!passwordOk(password)) return res.status(400).json({ error: PASSWORD_RULE });
+ const pol = passwordPolicy(password, { email, name });
+ if (!pol.ok) return res.status(400).json({ error: pol.error });
 
  // Real, active email required: format + disposable blocklist + live DNS check.
  const emailCheck = await checkEmailReal(email);
@@ -70,7 +69,7 @@ publicRouter.post('/register', asyncRoute(async (req, res) => {
  const roleId = db.prepare("SELECT id FROM roles WHERE name='customer'").get();
  if (!roleId) return res.status(500).json({ error: 'Customer role not configured' });
 
- const hash = bcrypt.hashSync(password, 10);
+ const hash = hashPassword(password);
  const displayName = String(name).trim().slice(0, 80);
  const cleanPhone = phone ? String(phone).trim().slice(0, 30) : null;
  let userId;
@@ -136,19 +135,21 @@ publicRouter.post('/verify-email', asyncRoute(async (req, res) => {
  if (!user) {
   // Recovery sign-in: the emailed code proves mailbox ownership, so the
   // customer sets their password again on this instance. Used when the row
-  // was lost to a recycled serverless disk (or lives on another instance)
-  // while SMTP is configured — previously an unrecoverable 401 lockout.
-  if (!passwordOk(password)) {
-   return res.status(400).json({ error: `Choose a password to recover your account — ${PASSWORD_RULE}` });
-  }
-  const roleId = db.prepare("SELECT id FROM roles WHERE name='customer'").get();
-  if (!roleId) return res.status(500).json({ error: 'Customer role not configured' });
-  const derived = clean.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 80);
-  const displayName = String(name || derived).trim().slice(0, 80) || derived;
-  let created;
-  try {
-   created = db.prepare("INSERT INTO users (name, email, password_hash, role_id, status) VALUES (?,?,?,?, 'active')")
-    .run(displayName, clean, bcrypt.hashSync(String(password), 10), roleId.id);
+   // was lost to a recycled serverless disk (or lives on another instance)
+   // while SMTP is configured — previously an unrecoverable 401 lockout.
+   // The typed password is the customer's EXISTING one (replayed from the
+   // sign-in form), so the legacy minimum applies here, not the new-choice rule.
+   if (!legacyPasswordOk(password)) {
+    return res.status(400).json({ error: `Choose a password to recover your account — ${LEGACY_RULE}` });
+   }
+   const roleId = db.prepare("SELECT id FROM roles WHERE name='customer'").get();
+   if (!roleId) return res.status(500).json({ error: 'Customer role not configured' });
+   const derived = clean.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 80);
+   const displayName = String(name || derived).trim().slice(0, 80) || derived;
+   let created;
+   try {
+    created = db.prepare("INSERT INTO users (name, email, password_hash, role_id, status) VALUES (?,?,?,?, 'active')")
+     .run(displayName, clean, hashPassword(String(password)), roleId.id);
   } catch (_) {
    // A parallel request recreated it — fall through and use that row.
    created = null;
@@ -192,9 +193,11 @@ async function handleCustomerLogin(req, res) {
  const clean = String(email || '').toLowerCase().trim();
  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
 
- const ipLimit = rateLimit(`ip:${ip}`, 30, 10 * 60 * 1000);
- if (!ipLimit.ok) return res.status(429).json({ error: `Too many attempts from this network — try again in ${Math.ceil(ipLimit.retryAfterSec / 60)} minute(s)` });
- const key = `clogin:${clean}`;
+  const ipLimit = rateLimit(`ip:${ip}`, 30, 10 * 60 * 1000);
+  if (!ipLimit.ok) return res.status(429).json({ error: `Too many attempts from this network — try again in ${Math.ceil(ipLimit.retryAfterSec / 60)} minute(s)` });
+  const ipLock = ipLockState(ip);
+  if (ipLock.locked) return res.status(429).json({ error: `Too many failed sign-ins from this network — try again in ${ipLock.minutesLeft} minute(s)` });
+  const key = `clogin:${clean}`;
  const emailLimit = rateLimit(key, 8, 10 * 60 * 1000);
  if (!emailLimit.ok) return res.status(429).json({ error: `Too many sign-in attempts — try again in ${Math.ceil(emailLimit.retryAfterSec / 60)} minute(s)` });
  const lock = lockState(key);
@@ -206,13 +209,13 @@ async function handleCustomerLogin(req, res) {
   `).get(clean);
   // Self-heal after a DB reset: with no SMTP configured, sign-in for a wiped
   // account recreates it with the presented password. Never bypasses existing accounts.
-  if (!user && EMAIL_RE.test(clean) && passwordOk(password) && !smtpReady()) {
+  if (!user && EMAIL_RE.test(clean) && legacyPasswordOk(password) && !smtpReady()) {
    try {
     const roleId = db.prepare("SELECT id FROM roles WHERE name='customer'").get();
     if (roleId) {
      const displayName = clean.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).slice(0, 80);
      const info = db.prepare("INSERT INTO users (name, email, password_hash, role_id, status) VALUES (?,?,?,?, 'active')")
-      .run(displayName, clean, bcrypt.hashSync(String(password), 10), roleId.id);
+      .run(displayName, clean, hashPassword(String(password)), roleId.id);
      user = db.prepare(`
       SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.status, u.token_ver, r.name AS role
       FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?
@@ -226,7 +229,7 @@ async function handleCustomerLogin(req, res) {
   // ephemeral serverless disk can drop the row (or the pin can land on a
   // twin instance) after a perfectly good registration — without this the
   // customer was permanently locked out with "Invalid email or password".
-  if (!user && EMAIL_RE.test(clean) && passwordOk(password) && smtpReady()) {
+  if (!user && EMAIL_RE.test(clean) && legacyPasswordOk(password) && smtpReady()) {
    const rl = rateLimit(`recover:${clean}`, 3, 15 * 60 * 1000);
    if (!rl.ok) {
     return res.status(429).json({ error: `Too many recovery requests — try again in ${Math.ceil(rl.retryAfterSec / 60)} minute(s)` });
@@ -245,12 +248,14 @@ async function handleCustomerLogin(req, res) {
    // SMTP configured but delivery failed — fall through to the normal
    // invalid-credentials answer rather than pretending recovery worked.
   }
-  const valid = user && user.role === 'customer' && bcrypt.compareSync(String(password), user.password_hash);
- if (!valid) {
-  registerFailure(key);
-  audit(user ? user.id : null, 'LOGIN_FAIL', 'user', user ? user.id : null, { email: clean.slice(0, 80), ip, shop: true });
-  return res.status(401).json({ error: 'Invalid email or password' });
- }
+  const pwOk = user && user.role === 'customer' ? verifyPassword(password, user.password_hash) : { ok: false };
+  if (pwOk.ok && pwOk.needsRehash) upgradeUserPassword(user.id, password);
+  if (!pwOk.ok) {
+   registerFailure(key);
+   const ipf = registerIpFailure(ip);
+   audit(user ? user.id : null, 'LOGIN_FAIL', 'user', user ? user.id : null, { email: clean.slice(0, 80), ip, shop: true, ip_locked: ipf.lockedUntil > Date.now() ? 1 : undefined });
+   return res.status(401).json({ error: 'Invalid email or password' });
+  }
  if (user.status === 'unverified') {
   return res.status(403).json({ error: 'Verify your email address to activate your account', code: 'EMAIL_UNVERIFIED' });
  }
@@ -313,31 +318,42 @@ protectedRouter.post('/me/avatar', requireCustomer, avatarUpload.single('avatar'
 });
 
 protectedRouter.put('/me', requireCustomer, (req, res) => {
- const { name, phone, password, current_password } = req.body;
- const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id);
- if (!u) return res.status(404).json({ error: 'User not found' });
- if (password && !current_password) {
-  return res.status(400).json({ error: 'Enter your current password to change it' });
- }
- if (password && !bcrypt.compareSync(String(current_password), u.password_hash)) {
-  audit(req.user.id, 'CHANGE_PASSWORD_FAIL', 'user', req.user.id, { ip: clientIp(req), shop: true });
-  return res.status(400).json({ error: 'Current password is incorrect' });
- }
- const fields = [];
- const params = [];
- let token;
- if (name !== undefined) { fields.push('name=?'); params.push(String(name).slice(0, 80)); }
- if (phone !== undefined) { fields.push('phone=?'); params.push(String(phone).slice(0, 30)); }
- if (password) {
-  if (!passwordOk(password)) return res.status(400).json({ error: PASSWORD_RULE });
-  const ver = (u.token_ver ?? 0) + 1;
-  fields.push('password_hash=?'); params.push(bcrypt.hashSync(String(password), 10));
-  fields.push('token_ver=?'); params.push(ver);
-  token = signToken({ ...req.user, token_ver: ver });
- }
- if (fields.length) db.prepare(`UPDATE users SET ${fields.join(',')} WHERE id=?`).run(...params, req.user.id);
- audit(req.user.id, 'UPDATE', 'user', Number(req.user.id), { fields: fields.map((f) => f.split('=')[0]), ip: clientIp(req) });
- res.json({ ok: true, ...(token ? { token } : {}) });
+  const { name, phone, password, current_password } = req.body;
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id);
+  if (!u) return res.status(404).json({ error: 'User not found' });
+  if (password && !current_password) {
+    return res.status(400).json({ error: 'Enter your current password to change it' });
+  }
+  if (password && !verifyPassword(String(current_password), u.password_hash).ok) {
+    audit(req.user.id, 'CHANGE_PASSWORD_FAIL', 'user', req.user.id, { ip: clientIp(req), shop: true });
+    return res.status(400).json({ error: 'Current password is incorrect' });
+  }
+  const fields = [];
+  const params = [];
+  let token;
+  if (name !== undefined) { fields.push('name=?'); params.push(String(name).slice(0, 80)); }
+  if (phone !== undefined) { fields.push('phone=?'); params.push(String(phone).slice(0, 30)); }
+  if (password) {
+    const pol = passwordPolicy(password, { email: u.email, name: u.name });
+    if (!pol.ok) return res.status(400).json({ error: pol.error });
+    const ver = (u.token_ver ?? 0) + 1;
+    fields.push('password_hash=?'); params.push(hashPassword(String(password)));
+    fields.push('token_ver=?'); params.push(ver);
+    token = signToken({ ...req.user, token_ver: ver });
+  }
+  if (fields.length) db.prepare(`UPDATE users SET ${fields.join(',')} WHERE id=?`).run(...params, req.user.id);
+  audit(req.user.id, 'UPDATE', 'user', Number(req.user.id), { fields: fields.map((f) => f.split('=')[0]), ip: clientIp(req) });
+  res.json({ ok: true, ...(token ? { token } : {}) });
+});
+
+// Kill every other session for this account by bumping token_ver; the caller
+// receives a replacement token that survives the bump.
+protectedRouter.post('/me/logout-all', requireCustomer, (req, res) => {
+  const u = db.prepare('SELECT token_ver FROM users WHERE id=?').get(req.user.id);
+  const ver = ((u && u.token_ver) || 0) + 1;
+  db.prepare('UPDATE users SET token_ver=? WHERE id=?').run(ver, req.user.id);
+  audit(req.user.id, 'UPDATE', 'user', req.user.id, { sessions_revoked: true, shop: true, ip: clientIp(req) });
+  res.json({ ok: true, token: signToken({ ...req.user, token_ver: ver }) });
 });
 
 // ---- addresses ----

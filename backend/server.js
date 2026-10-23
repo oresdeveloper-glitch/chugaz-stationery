@@ -5,7 +5,10 @@ const express = require('express');
 const cors = require('cors');
 
 const { db } = require('./src/db');
-const { requireAuth, requireRole, optionalAuth } = require('./src/auth');
+const { requireAuth, requireRole, optionalAuth, JWT_SECRET_SOURCE } = require('./src/auth');
+if (JWT_SECRET_SOURCE === 'code-fallback') {
+ console.warn('[security] JWT_SECRET env missing — using the built-in shared fallback secret. Set JWT_SECRET (16+ chars) in the deployment environment so signing cannot change with a code deploy.');
+}
 
 const app = express();
 const PORT = process.env.PORT || 7860;
@@ -21,7 +24,18 @@ process.on('uncaughtException', (err) => {
  console.error('[uncaughtException]', err);
 });
 
-app.use(cors());
+// Browser CORS is limited to our own frontends: same-origin calls (no Origin
+// header), the Vercel/HF hosts this app deploys to, and local dev. Native apps
+// and server-side callers are unaffected — CORS only governs browsers.
+const EXTRA_ORIGINS = String(process.env.CORS_EXTRA_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+function allowedOrigin(origin, cb) {
+ if (!origin) return cb(null, true);
+ let host = '';
+ try { host = new URL(origin).hostname; } catch (_) { return cb(null, false); }
+ const ok = host.endsWith('.vercel.app') || host.endsWith('.hf.space') || host === 'localhost' || host === '127.0.0.1' || EXTRA_ORIGINS.includes(origin);
+ cb(null, ok);
+}
+app.use(cors({ origin: allowedOrigin }));
 app.use(express.json({ limit: '5mb' }));
 
 // Basic security headers
@@ -29,6 +43,9 @@ app.use((req, res, next) => {
  res.setHeader('X-Content-Type-Options', 'nosniff');
  res.setHeader('X-Frame-Options', 'DENY');
  res.setHeader('Referrer-Policy', 'same-origin');
+ res.setHeader('Permissions-Policy', 'accelerometer=(), gyroscope=(), usb=()');
+ // API answers (auth, sales, ...) must never sit in a shared/browser cache.
+ if (req.path.startsWith('/api') && req.path !== '/api/events') res.setHeader('Cache-Control', 'no-store');
  next();
 });
 

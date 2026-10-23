@@ -18,6 +18,7 @@ export default function Layout({ user, setUser, children }) {
   const [pwdModal, setPwdModal] = useState(false);
   const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' });
   const [pwdBusy, setPwdBusy] = useState(false);
+  const [signOutAllBusy, setSignOutAllBusy] = useState(false);
   const close = () => setOpen(false);
 
   // Re-run the persistence check right after login (App's own mount ran while
@@ -107,6 +108,22 @@ export default function Layout({ user, setUser, children }) {
     navigate('/login');
   };
 
+  // Revokes every other session server-side (token_ver bump); this device
+  // continues on the replacement token the endpoint hands back.
+  const logoutEverywhere = async () => {
+    setUserMenu(false);
+    setSignOutAllBusy(true);
+    try {
+      const res = await api('/auth/logout-all', { method: 'POST' });
+      if (res?.token) setAuth(res.token, getUser());
+      toast('Signed out on every other device', 'info');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setSignOutAllBusy(false);
+    }
+  };
+
   const changePassword = async (e) => {
     e.preventDefault();
     if (pwdForm.next !== pwdForm.confirm) return toast('New passwords do not match', 'error');
@@ -186,6 +203,9 @@ export default function Layout({ user, setUser, children }) {
                   <button className="staff-user-item" onClick={() => { setUserMenu(false); setPwdModal(true); }}>
                     <span className="u-ico"><I name="lock" size={14} /></span> Change password
                   </button>
+                  <button className="staff-user-item" disabled={signOutAllBusy} onClick={logoutEverywhere}>
+                    <span className="u-ico"><I name="power" size={14} /></span> {signOutAllBusy ? 'Signing out…' : 'Sign out everywhere'}
+                  </button>
                   <div className="staff-user-sep" />
                   <button className="staff-user-item danger" onClick={() => { setUserMenu(false); logout(); }}>
                     <span className="u-ico"><I name="power" size={14} /></span> Log out
@@ -209,12 +229,12 @@ export default function Layout({ user, setUser, children }) {
             </div>
             <div className="field">
               <label>New password</label>
-              <input type="password" autoComplete="new-password" required minLength={8} value={pwdForm.next} onChange={(e) => setPwdForm({ ...pwdForm, next: e.target.value })} />
-              <p className="small muted" style={{ marginTop: 4 }}>At least 8 characters with letters and numbers. Other signed-in sessions will be signed out.</p>
+              <input type="password" autoComplete="new-password" required minLength={10} value={pwdForm.next} onChange={(e) => setPwdForm({ ...pwdForm, next: e.target.value })} />
+              <p className="small muted" style={{ marginTop: 4 }}>10+ characters with a capital letter or symbol, plus letters and numbers. Other signed-in sessions will be signed out.</p>
             </div>
             <div className="field">
               <label>Confirm new password</label>
-              <input type="password" autoComplete="new-password" required minLength={8} value={pwdForm.confirm} onChange={(e) => setPwdForm({ ...pwdForm, confirm: e.target.value })} />
+              <input type="password" autoComplete="new-password" required minLength={10} value={pwdForm.confirm} onChange={(e) => setPwdForm({ ...pwdForm, confirm: e.target.value })} />
             </div>
             <div className="form-actions">
               <button type="button" className="btn" onClick={() => setPwdModal(false)}>Cancel</button>

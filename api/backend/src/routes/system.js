@@ -22,7 +22,7 @@ router.get('/settings', (req, res) => {
 });
 
 router.put('/settings', requireRole('admin'), (req, res) => {
- const allowed = ['shop_name', 'shop_address', 'shop_phone', 'shop_email', 'currency', 'receipt_footer', 'allow_negative_stock', 'delivery_fee', 'free_delivery_threshold', 'pickup_available', 'payment_instructions', 'app_theme', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from'];
+ const allowed = ['shop_name', 'shop_address', 'shop_phone', 'shop_email', 'currency', 'receipt_footer', 'allow_negative_stock', 'delivery_fee', 'free_delivery_threshold', 'pickup_available', 'payment_instructions', 'app_theme', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from', 'two_factor'];
  const upd = db.prepare('INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
  for (const k of allowed) {
   if (req.body[k] !== undefined) upd.run(k, String(req.body[k]));

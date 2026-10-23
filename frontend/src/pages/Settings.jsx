@@ -179,6 +179,23 @@ export default function Settings() {
         </div>
 
         <div className="card">
+          <h2>Sign-in security</h2>
+          <p className="muted small">
+            Two-step sign-in: after the password, staff must also enter the 6-digit code emailed to them.
+            Requires working SMTP above. Customer sign-in is not affected. New passwords (accounts and
+            changes) already enforce 10+ characters with a capital letter or symbol.
+          </p>
+          <div className="field">
+            <label>Two-step sign-in for staff</label>
+            <select value={settings.two_factor || '0'} onChange={(e) => set('two_factor', e.target.value)}>
+              <option value="0">Off (password only)</option>
+              <option value="1">On (password + emailed code)</option>
+            </select>
+          </div>
+          <button className="btn primary" disabled={saving} onClick={save}>{saving ? 'Saving...' : 'Save settings'}</button>
+        </div>
+
+        <div className="card">
           <h2>Backup & restore</h2>
           <p className="muted">Download a full copy of the SQLite database. Keep backups somewhere safe and schedule regular downloads.</p>
           <button className="btn primary" onClick={backup}>Download backup (.db)</button>
