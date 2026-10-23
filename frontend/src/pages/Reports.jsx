@@ -84,6 +84,15 @@ export default function Reports() {
     ['cashierDaily', 'Cashier daily (detailed)'],
     ['tax', 'Tax report'], ['audit', 'Audit log'],
   ];
+  // Clear the OLD tab's payload synchronously with the tab change: the effect
+  // below runs only AFTER the next render, and rendering a new tab against the
+  // previous tab's differently-shaped data (e.g. Daily tasks reading
+  // data.totals off the Profit & Loss object) crashed the whole page.
+  const switchTab = (t) => {
+    if (t === tab) return;
+    setData(null);
+    setTab(t);
+  };
   const isRange = ['pnl', 'sales', 'best', 'tax', 'cashiers', 'dailyTasks'].includes(tab);
   const tabLabel = (tabs.find(([t]) => t === tab) || ['', 'Report'])[1];
   const stamp = new Date().toLocaleString();
@@ -109,7 +118,7 @@ export default function Reports() {
       <div className="toolbar">
         <div className="filters">
           {tabs.map(([t, l]) => (
-            <button key={t} className={`btn ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{l}</button>
+            <button key={t} className={`btn ${tab === t ? 'active' : ''}`} onClick={() => switchTab(t)}>{l}</button>
           ))}
         </div>
         {isRange && (
@@ -132,7 +141,7 @@ export default function Reports() {
         </div>
       )}
 
-      {tab === 'dailyTasks' && data && (
+      {tab === 'dailyTasks' && data?.totals && data?.days && (
         <>
           <div className="stats-grid cols-3 print-hide">
             <div className="card stat-card"><div className="label">Tasks done</div><div className="value">{fmt(data.totals.tasks)}</div><div className="sub">{data.range.from} → {data.range.to}</div></div>
