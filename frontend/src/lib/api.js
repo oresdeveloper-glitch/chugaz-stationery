@@ -133,17 +133,27 @@ async function rePinToRichest() {
   try {
     const rs = await Promise.all([0, 1, 2].map(() => request('/sync', { anyInstance: true }, false)));
     const w = (x) => [Number(x.reset_at) || 0, Number(x.sales) || 0, Number(x.orders) || 0, Number(x.categories) || 0];
-    let best = null;
+    const cands = [];
     for (const s of rs) {
-      if (!s || !s.db_marker) continue;
-      if (!best) { best = s; continue; }
-      const a = w(s), b = w(best);
-      if (a[0] !== b[0]) { if (a[0] > b[0]) best = s; }
-      else if (a[1] !== b[1]) { if (a[1] > b[1]) best = s; }
-      else if (a[2] !== b[2]) { if (a[2] > b[2]) best = s; }
-      else if (a[3] > b[3]) best = s;
+      if (s && s.db_marker) cands.push({ m: s.db_marker, w: w(s) });
     }
-    setDbPin(best ? best.db_marker : null);
+    if (!cands.length) { setDbPin(null); return; }
+    // Deterministic order: data weight descending, marker ascending, so two
+    // probe runs can never disagree about the winner.
+    cands.sort((a, b) => {
+      for (let i = 0; i < 4; i++) if (a.w[i] !== b.w[i]) return b.w[i] - a.w[i];
+      return a.m < b.m ? -1 : a.m > b.m ? 1 : 0;
+    });
+    const top = cands[0];
+    const cur = getDbPin();
+    // Never leave a pin that already holds top-rank data. When every reachable
+    // instance ties (empty fleet, fresh twin), "whoever answered first" used to
+    // become the new pin - each tab re-rolling the pin made the others 409,
+    // re-pin, and drag the whole fleet through a hop/reconnect storm. Holding
+    // a tied pin is always safe: same data, no traffic amplification.
+    const holdsTop = !!cur && cands.some((c) => c.m === cur &&
+      c.w[0] === top.w[0] && c.w[1] === top.w[1] && c.w[2] === top.w[2] && c.w[3] === top.w[3]);
+    setDbPin(holdsTop ? cur : top.m);
   } catch (_) {
     setDbPin(null);
   }

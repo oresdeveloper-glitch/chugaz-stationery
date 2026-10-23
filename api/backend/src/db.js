@@ -81,6 +81,12 @@ try {
   DatabaseSyncClass = DatabaseSync;
   const real = new DatabaseSync(DB_PATH);
   real.exec('PRAGMA journal_mode = WAL');
+  // NORMAL is the SQLite-recommended pairing with WAL: commits survive app and
+  // process crashes (only an OS-level crash can lose the last transaction).
+  // The FULL default fsyncs every statement, which measured ~6 seconds of pure
+  // cold-start time here - schema DDL, migrations and the 156-row catalog seed
+  // each paid a ~45ms disk sync before the first request could be served.
+  real.exec('PRAGMA synchronous = NORMAL');
   real.exec('PRAGMA foreign_keys = ON');
 
   const schemaPath = path.join(__dirname, 'schema.sql');
@@ -153,16 +159,29 @@ try {
   try {
     real.exec("INSERT OR IGNORE INTO roles (id, name) VALUES (1,'admin'),(2,'manager'),(3,'cashier'),(4,'clerk'),(5,'customer')");
     const userCount = real.prepare('SELECT COUNT(*) AS c FROM users').get().c;
+    // Precomputed cost-10 digests of the fixed default logins. bcryptjs at
+    // cost 10 costs ~0.5s PER HASH, and this block runs inside the serverless
+    // cold start before any request is served (7 hashes = ~2.6s of the boot);
+    // the values below are exactly what hashSync(pw, 10) produced for these
+    // public demo passwords, so verification behaves identically - only the
+    // compute moved ahead of time. A custom ADMIN_PASSWORD still hashes here.
+    const DEFAULT_HASH = {
+      admin123: '$2a$10$j0ZyRWKyYzMGzkhuiUDfH.DVPBNC2Dj5HkWDnj3xh3NPZv0XiyZ8u',
+      manager123: '$2a$10$fHw.fc6gn6foSn0NvKUCiem5BZJPq.AAyFvtXIQ6.GF5FZ3nvYtka',
+      cashier123: '$2a$10$tbXRuWTpViqSgrPhZf51cOuNuYeXusp6E7seqsIC/U/.6dfqrxHFK',
+      clerk123: '$2a$10$5yLqnHpj93Yga/g3uVDjfe6lS5RZ1Pfs6/ZrCRzEW4qM30jUtsAVC',
+      cust123: '$2a$10$C.iMzxfXkXpRuM6z/HJtYO/bMgyrv0m4fyewTXQW/8FCewlq5MgCK',
+    };
+    const seedHash = (pw) => DEFAULT_HASH[pw] || require('bcrypt').hashSync(pw, 10);
     if (!userCount) {
-      const bcrypt = require('bcryptjs');
       const adminEmail = process.env.ADMIN_EMAIL || 'admin@shop.com';
       const adminPass = process.env.ADMIN_PASSWORD || 'admin123';
       const add = real.prepare("INSERT INTO users (name, email, password_hash, role_id, status) VALUES (?,?,?,?,'active')");
-      add.run('Administrator', adminEmail, bcrypt.hashSync(adminPass, 10), 1);
-      add.run('Manager', 'manager@shop.com', bcrypt.hashSync('manager123', 10), 2);
-      add.run('Cashier', 'cashier@shop.com', bcrypt.hashSync('cashier123', 10), 3);
-      add.run('Clerk', 'clerk@shop.com', bcrypt.hashSync('clerk123', 10), 4);
-      add.run('Online Customer', 'customer@shop.com', bcrypt.hashSync('cust123', 10), 5);
+      add.run('Administrator', adminEmail, seedHash(adminPass), 1);
+      add.run('Manager', 'manager@shop.com', seedHash('manager123'), 2);
+      add.run('Cashier', 'cashier@shop.com', seedHash('cashier123'), 3);
+      add.run('Clerk', 'clerk@shop.com', seedHash('clerk123'), 4);
+      add.run('Online Customer', 'customer@shop.com', seedHash('cust123'), 5);
     }
 
     // Office cashiers — ensured every start, idempotent.
@@ -171,12 +190,11 @@ try {
     const officeB = real.prepare('SELECT id FROM offices WHERE name=?').get('Office B');
     const cashierExists = real.prepare('SELECT id FROM users WHERE email=?');
     const addCashier = real.prepare("INSERT INTO users (name, email, password_hash, role_id, office_id, status) VALUES (?,?,?,3,?,'active')");
-    const bcryptCash = require('bcryptjs');
     for (const [n, e, pw, oid] of [
       ['Cashier - Office A', 'cashier-a@shop.com', 'cashier123', officeA && officeA.id],
       ['Cashier - Office B', 'cashier-b@shop.com', 'cashier123', officeB && officeB.id],
     ]) {
-      if (oid && !cashierExists.get(e)) addCashier.run(n, e, bcryptCash.hashSync(pw, 10), oid);
+      if (oid && !cashierExists.get(e)) addCashier.run(n, e, seedHash(pw), oid);
     }
   } catch (e) {
     console.error('[db] bootstrap seed skipped:', e && e.message ? e.message : e);
@@ -250,6 +268,9 @@ function reopenDb() {
   try {
     const fresh = new DatabaseSyncClass(DB_PATH);
     fresh.exec('PRAGMA journal_mode = WAL');
+    // Same rationale as the initial open: WAL + NORMAL, so restores and the
+    // writes after them don't pay a per-statement fsync stall.
+    fresh.exec('PRAGMA synchronous = NORMAL');
     fresh.exec('PRAGMA foreign_keys = ON');
     // Restored file may predate the join table — rebuild it before queries run.
     try {

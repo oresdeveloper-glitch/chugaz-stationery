@@ -1,4 +1,9 @@
-const bcrypt = require('bcryptjs');
+// Native bcrypt, not bcryptjs: cost-12 verify in pure JS blocked the event
+// loop for ~1.4s on EVERY login (all other requests queued behind it on the
+// single-threaded server); the native build measured 574ms for the same
+// verify on this machine and less on server CPUs. Hash formats are
+// interchangeable ($2a$/$2b$), so existing rows verify as-is.
+const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { JWT_SECRET } = require('./auth');
 const { db } = require('./db');

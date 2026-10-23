@@ -4,7 +4,7 @@ const { signToken, requireAuth, verifyForRefresh } = require('../auth');
 const { rateLimit, registerFailure, lockState, clearFailures, clientIp, registerIpFailure, ipLockState } = require('../security');
 const { hashPassword, verifyPassword, upgradeUserPassword, passwordPolicy } = require('../pwd');
 const { sendVerificationCode, smtpReady } = require('../mailer');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 
 const router = express.Router();
 
