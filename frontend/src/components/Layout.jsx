@@ -19,6 +19,7 @@ export default function Layout({ user, setUser, children }) {
   const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' });
   const [pwdBusy, setPwdBusy] = useState(false);
   const [signOutAllBusy, setSignOutAllBusy] = useState(false);
+  const [signOutAllModal, setSignOutAllModal] = useState(false);
   const close = () => setOpen(false);
 
   // Re-run the persistence check right after login (App's own mount ran while
@@ -52,6 +53,7 @@ export default function Layout({ user, setUser, children }) {
       if (e.key === 'Escape') {
         setUserMenu(false);
         setPwdModal(false);
+        setSignOutAllModal(false);
       }
     };
     document.addEventListener('keydown', onKey);
@@ -109,14 +111,15 @@ export default function Layout({ user, setUser, children }) {
   };
 
   // Revokes every other session server-side (token_ver bump); this device
-  // continues on the replacement token the endpoint hands back.
+  // continues on the replacement token the endpoint hands back. The modal
+  // spells that out first — the menu item only opens it.
   const logoutEverywhere = async () => {
-    setUserMenu(false);
     setSignOutAllBusy(true);
     try {
       const res = await api('/auth/logout-all', { method: 'POST' });
       if (res?.token) setAuth(res.token, getUser());
-      toast('Signed out on every other device', 'info');
+      setSignOutAllModal(false);
+      toast('Signed out on all other devices — this device stays signed in', 'info');
     } catch (err) {
       toast(err.message, 'error');
     } finally {
@@ -203,8 +206,8 @@ export default function Layout({ user, setUser, children }) {
                   <button className="staff-user-item" onClick={() => { setUserMenu(false); setPwdModal(true); }}>
                     <span className="u-ico"><I name="lock" size={14} /></span> Change password
                   </button>
-                  <button className="staff-user-item" disabled={signOutAllBusy} onClick={logoutEverywhere}>
-                    <span className="u-ico"><I name="power" size={14} /></span> {signOutAllBusy ? 'Signing out…' : 'Sign out everywhere'}
+                  <button className="staff-user-item" onClick={() => { setUserMenu(false); setSignOutAllModal(true); }}>
+                    <span className="u-ico"><I name="devices" size={14} /></span> Sign out everywhere
                   </button>
                   <div className="staff-user-sep" />
                   <button className="staff-user-item danger" onClick={() => { setUserMenu(false); logout(); }}>
@@ -241,6 +244,24 @@ export default function Layout({ user, setUser, children }) {
               <button type="submit" className="btn primary" disabled={pwdBusy}>{pwdBusy ? 'Saving…' : 'Update password'}</button>
             </div>
           </form>
+        </Modal>
+      )}
+      {signOutAllModal && (
+        <Modal open={signOutAllModal} title="Sign out everywhere?" onClose={() => !signOutAllBusy && setSignOutAllModal(false)}>
+          <div className="form">
+            <p className="small" style={{ margin: '0 0 10px' }}>
+              This ends your session on <b>every other device</b> signed in to your account — other
+              computers, phones and browsers are signed out immediately. <b>This device stays signed in.</b>
+            </p>
+            <p className="small muted" style={{ margin: '0 0 4px' }}>
+              Anyone using your account elsewhere will need the password to sign in again. Use this if
+              you don't recognise a session or think someone else accessed your account.
+            </p>
+            <div className="form-actions">
+              <button type="button" className="btn" disabled={signOutAllBusy} onClick={() => setSignOutAllModal(false)}>Cancel</button>
+              <button type="button" className="btn danger" disabled={signOutAllBusy} onClick={logoutEverywhere}>{signOutAllBusy ? 'Signing out…' : 'Sign out other devices'}</button>
+            </div>
+          </div>
         </Modal>
       )}
       <nav className="staff-bottom-nav" aria-label="Mobile navigation">

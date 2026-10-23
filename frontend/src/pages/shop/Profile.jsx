@@ -3,11 +3,13 @@ import { Link } from 'react-router-dom';
 import { shopApi, setShopAuth, getShopUser } from '../../lib/api';
 import RequireShopAuth from '../../shop/RequireShopAuth';
 import { useToast } from '../../components/Toast';
+import Modal from '../../components/Modal';
 
 function ProfileInner() {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [signingOutAll, setSigningOutAll] = useState(false);
+  const [signOutAllModal, setSignOutAllModal] = useState(false);
   const [error, setError] = useState(null);
   const toast = useToast();
 
@@ -51,13 +53,15 @@ function ProfileInner() {
     finally { setSaving(false); }
   };
 
+  // Ends every other session server-side (token_ver bump); this device keeps
+  // going on the replacement token. The modal explains that before sending.
   const logoutEverywhere = async () => {
-    if (!confirm('Sign out on every device? You will stay signed in here.')) return;
     setSigningOutAll(true);
     try {
       const res = await shopApi('/me/logout-all', { method: 'POST' });
       if (res?.token) setShopAuth(res.token, getShopUser());
-      toast('Signed out everywhere else');
+      setSignOutAllModal(false);
+      toast('Signed out on all other devices — this device stays signed in');
     } catch (err) { toast(err.message, 'error'); }
     finally { setSigningOutAll(false); }
   };
@@ -128,9 +132,28 @@ function ProfileInner() {
 
       <div className="card">
         <h3 style={{margin:'0 0 6px', fontSize:14, fontWeight:600}}>Sessions</h3>
-        <p className="small muted" style={{marginTop:0, marginBottom:12}}>Signed in somewhere you don't recognise? End every other session at once — this device stays signed in.</p>
-        <button className="btn danger" disabled={signingOutAll} onClick={logoutEverywhere}>{signingOutAll ? 'Signing out…' : 'Sign out everywhere else'}</button>
+        <p className="small muted" style={{marginTop:0, marginBottom:12}}>Signed in somewhere you don't recognise? Sign out everywhere else in one step — every other phone, tablet and computer is signed out at once, while this device stays signed in.</p>
+        <button className="btn danger" onClick={() => setSignOutAllModal(true)}>Sign out everywhere</button>
       </div>
+
+      {signOutAllModal && (
+        <Modal open={signOutAllModal} title="Sign out everywhere?" onClose={() => !signingOutAll && setSignOutAllModal(false)}>
+          <div className="form">
+            <p className="small" style={{ margin: '0 0 10px' }}>
+              This ends your session on <b>every other device</b> signed in to your account — other
+              phones, tablets and computers are signed out immediately. <b>This device stays signed in.</b>
+            </p>
+            <p className="small muted" style={{ margin: '0 0 4px' }}>
+              Anyone using your account elsewhere will need the password to sign in again. Use this if
+              you don't recognise a session or think someone else accessed your account.
+            </p>
+            <div className="form-actions">
+              <button type="button" className="btn" disabled={signingOutAll} onClick={() => setSignOutAllModal(false)}>Cancel</button>
+              <button type="button" className="btn danger" disabled={signingOutAll} onClick={logoutEverywhere}>{signingOutAll ? 'Signing out…' : 'Sign out other devices'}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
