@@ -5,8 +5,10 @@ import { canRole } from '../lib/roles';
 
 export default function Reports() {
   const isAdmin = canRole(getUser(), 'admin');
+  const user = getUser() || {};
   const [tab, setTab] = useState('pnl');
   const [data, setData] = useState(null);
+  const [info, setInfo] = useState(null);
   const [range, setRange] = useState({ from: new Date(new Date().setDate(1)).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) });
   const toast = useToast();
   const seqRef = useRef(0);
@@ -53,6 +55,9 @@ export default function Reports() {
     load();
   }, [tab, range.from, range.to, cashierDate, cashierId]);
   useEffect(() => onLive(load), [tab, range.from, range.to, cashierDate, cashierId]);
+  // Shop identity for the printed document header (same public info the
+  // invoice uses, so report PDFs and invoice PDFs share one brand block).
+  useEffect(() => { api('/shop/info').then(setInfo).catch(() => {}); }, []);
   useEffect(() => {
     let alive = true;
     const loadList = async () => {
@@ -96,20 +101,48 @@ export default function Reports() {
   const isRange = ['pnl', 'sales', 'best', 'tax', 'cashiers', 'dailyTasks'].includes(tab);
   const tabLabel = (tabs.find(([t]) => t === tab) || ['', 'Report'])[1];
   const stamp = new Date().toLocaleString();
+  const periodText = isRange
+    ? `${range.from} → ${range.to}`
+    : tab === 'cashierDaily'
+      ? `${cashierDate}${cashierId ? ' · selected cashier' : ' · all cashiers'}`
+      : tab === 'audit' ? 'Latest 300 entries' : 'Latest records';
+  const shopName = info?.shop_name || 'CHUGAZ STATIONERY';
+  const shopMeta = [info?.shop_address, info?.shop_phone, info?.shop_email].filter(Boolean).join(' · ');
   return (
     <div>
       <div className="doc-head">
-        <img src="/logo-report.png" alt="" />
-        <div className="doc-head-meta">
-          <h2>{tabLabel}</h2>
-          <div className="muted small">
-            {isRange ? `Period: ${range.from} to ${range.to} · ` : ''}
-            Generated {stamp}
+        <div className="doc-brand">
+          <img src="/logo-report.png" alt="" />
+          <div>
+            <div className="doc-shop-name">{shopName}</div>
+            <div className="doc-shop-meta">{shopMeta}</div>
           </div>
         </div>
-        <button className="btn primary no-print" style={{ marginLeft: 'auto' }} onClick={() => window.print()}>Print / Save PDF</button>
+        <div className="doc-doc">
+          <div className="doc-type">REPORT</div>
+          <span className="doc-chip">{tabLabel}</span>
+        </div>
+        <button className="btn primary no-print" onClick={() => window.print()}>Print / Save PDF</button>
       </div>
       <div className="doc-rule" />
+      <div className="doc-meta">
+        <div>
+          <div className="lbl">Period</div>
+          <div className="val">{periodText}</div>
+        </div>
+        <div>
+          <div className="lbl">Generated</div>
+          <div className="val">{stamp}</div>
+        </div>
+        <div>
+          <div className="lbl">Prepared by</div>
+          <div className="val"><b>{user.name || '—'}</b>{user.role ? ` · ${user.role}` : ''}</div>
+        </div>
+        <div>
+          <div className="lbl">Currency</div>
+          <div className="val">{info?.currency || 'TSh'}</div>
+        </div>
+      </div>
 
       <div className="page-header no-print">
         <h1>Reports</h1>
@@ -487,6 +520,11 @@ export default function Reports() {
           </table></div>
         </div>
       )}
+
+      <div className="doc-print-foot">
+        <span>{shopName} · {tabLabel} · Generated {stamp}</span>
+        <span>Designed by CHUGAZ ICT SERVICES</span>
+      </div>
     </div>
   );
 }
