@@ -424,14 +424,20 @@ router.get('/daily-tasks', requireRole('manager', 'admin'), (req, res) => {
 
 router.get('/cashier-performance', requireRole('manager', 'admin'), (req, res) => {
  const { from, to } = req.query;
- let dateCond = '';
  const dateParams = [];
- if (from && to) { dateCond = " AND s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day')"; dateParams.push(from, to); }
+ // Aggregate the window ONCE, then left-join it onto the staff list. The old
+ // shape (LEFT JOIN sales ON created_by = u.id AND <date>) let SQLite drive
+ // from the user index, so each cashier re-scanned their entire history and
+ // threw away every row outside the window - 213ms on a 20k-sale database for
+ // a figure the date index can answer in under a millisecond.
+ const w = from && to ? "WHERE sale_date >= date(?) AND sale_date < date(?, '+1 day')" : '';
+ if (from && to) dateParams.push(from, to);
  res.json(db.prepare(`
-  SELECT u.id, u.name, o.name AS office, COUNT(s.id) sales_count, COALESCE(SUM(s.total),0) total
+  SELECT u.id, u.name, o.name AS office, COALESCE(x.c,0) sales_count, COALESCE(x.t,0) total
   FROM users u
   JOIN roles r ON r.id = u.role_id
-  LEFT JOIN sales s ON s.created_by = u.id${dateCond}
+  LEFT JOIN (SELECT created_by, COUNT(*) c, SUM(total) t FROM sales ${w} GROUP BY created_by) x
+    ON x.created_by = u.id
   LEFT JOIN offices o ON o.id = u.office_id
   WHERE r.name IN ('cashier','clerk','manager','admin')
   GROUP BY u.id ORDER BY total DESC, u.id
@@ -484,12 +490,16 @@ router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) 
  `).all(...params);
 
  const perCashier = cashierId ? [] : (() => {
+  // Same fix as /cashier-performance: aggregate the window first, then join
+  // it to the staff list, so the date index drives the scan.
   const rows = db.prepare(`
-   SELECT u.id, u.name, o.name AS office, COUNT(s.id) sales_count,
-       COALESCE(SUM(s.total),0) total
+   SELECT u.id, u.name, o.name AS office, COALESCE(x.c,0) sales_count,
+       COALESCE(x.t,0) total
    FROM users u
    JOIN roles r ON r.id = u.role_id
-   LEFT JOIN sales s ON s.created_by = u.id AND s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day')
+   LEFT JOIN (SELECT created_by, COUNT(*) c, SUM(total) t FROM sales
+              WHERE sale_date >= date(?) AND sale_date < date(?, '+1 day') GROUP BY created_by) x
+     ON x.created_by = u.id
    LEFT JOIN offices o ON o.id = u.office_id
    WHERE r.name IN ('cashier','clerk','manager','admin')
    GROUP BY u.id ORDER BY total DESC, u.id
