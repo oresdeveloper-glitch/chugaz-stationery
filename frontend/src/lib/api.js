@@ -148,6 +148,22 @@ function syncOnce() {
 // mounting at once used to fetch the same URL twice).
 const inFlightGets = new Map();
 
+// A page can start its own data request before it renders (main.jsx does this
+// for the dashboard): the request overlaps the route chunk download, and the
+// page's own call then consumes that answer instead of issuing a second one -
+// even if the prefetch already finished, which the in-flight map cannot cover.
+// Consumed exactly once, and ignored if it is older than a few seconds, so a
+// later reload never reads stale numbers.
+const prefetched = new Map();
+const PREFETCH_TTL_MS = 5000;
+
+export function prefetch(path) {
+  if (prefetched.has(path)) return;
+  const p = request(path, {}, false);
+  prefetched.set(path, { at: Date.now(), p });
+  p.catch(() => { prefetched.delete(path); });
+}
+
 // Probe the fleet in parallel and pin to the instance with the most data.
 // A fresher deliberate-reset epoch outranks raw counts: after an admin
 // "clear transactions" wipe, an un-reset twin still holding the OLD sales
@@ -304,6 +320,12 @@ export async function api(path, options = {}) {
   const isGet = !options.method || options.method === 'GET';
   if (!isGet || options.anyInstance || options.signal) return request(path, options, false);
   if (path === '/sync') return syncOnce();
+  // Take a prefetched answer (once) before the in-flight/dedupe path.
+  const pre = prefetched.get(path);
+  if (pre) {
+    prefetched.delete(path);
+    if (Date.now() - pre.at < PREFETCH_TTL_MS) return pre.p;
+  }
   // Collapse identical concurrent reads (two effects mounting together) into a
   // single request; each completes and leaves the map immediately.
   const pending = inFlightGets.get(path);

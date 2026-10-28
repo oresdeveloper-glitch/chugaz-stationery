@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import { clearAuth, api, setAuth, getToken, getUser, lockPrintRedirect, unlockPrintRedirect, refreshToken } from '../lib/api';
 import { canRole } from '../lib/roles';
@@ -7,6 +7,29 @@ import Modal from './Modal';
 import { useToast } from './Toast';
 import SaleBell from './SaleBell';
 import I from './icons';
+
+// Placeholder shown while a page chunk downloads. Deliberately shaped like a
+// generic page (title, KPI row, two panels) so the real content lands where
+// the skeleton already was instead of jumping the layout.
+function ContentSkeleton() {
+  return (
+    <div aria-busy="true" aria-live="polite">
+      <div className="page-header dash-header">
+        <div>
+          <div className="skel-card" style={{ width: 190, height: 26, marginBottom: 8 }} />
+          <div className="skel-card" style={{ width: 280, height: 14 }} />
+        </div>
+      </div>
+      <div className="dash-skel-grid">
+        {[0, 1, 2, 3].map((i) => <div key={i} className="skel-card skel-kpi" />)}
+      </div>
+      <div className="grid grid-2">
+        <div className="skel-card skel-chart" />
+        <div className="skel-card skel-chart" />
+      </div>
+    </div>
+  );
+}
 
 export default function Layout({ user, setUser, children }) {
   const navigate = useNavigate();
@@ -220,7 +243,16 @@ export default function Layout({ user, setUser, children }) {
         </div>
 </header>
         
-        <main className="main">{children}</main>
+        <main className="main">
+          {/* The page chunk is fetched lazily, so without a boundary here the
+              whole shell - sidebar, header, nav - unmounts while it downloads
+              and the user stares at a spinner for a full round trip. Suspend
+              only the content area: the app frame paints at once and the
+              placeholder keeps the page from jumping when the real one lands. */}
+          <Suspense fallback={<ContentSkeleton />}>
+            {children}
+          </Suspense>
+        </main>
       </div>
 
       {pwdModal && (

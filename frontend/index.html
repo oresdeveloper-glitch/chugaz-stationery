@@ -11,6 +11,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="CHUGAZ" />
     <title>CHUGAZ Stationery - POS & Inventory</title>
+    <!-- The sidebar logo is above the fold on every page and was only requested
+         once the shell rendered; preloading it lets it download alongside the
+         bundle instead of costing another round trip after first paint. -->
+    <link rel="preload" as="image" href="/logo.png" fetchpriority="high" />
   </head>
   <body>
     <div id="root"></div>
