@@ -101,35 +101,40 @@ export default function Reports() {
   const isRange = ['pnl', 'sales', 'best', 'tax', 'cashiers', 'dailyTasks'].includes(tab);
   const tabLabel = (tabs.find(([t]) => t === tab) || ['', 'Report'])[1];
   const stamp = new Date().toLocaleString();
+  // Only tabs that actually cover a period/selection carry a Period line —
+  // the static "latest records" filler is noise on screen and on the PDF.
   const periodText = isRange
     ? `${range.from} → ${range.to}`
     : tab === 'cashierDaily'
       ? `${cashierDate}${cashierId ? ' · selected cashier' : ' · all cashiers'}`
-      : tab === 'audit' ? 'Latest 300 entries' : 'Latest records';
+      : tab === 'audit' ? 'Latest 300 entries' : null;
   const shopName = info?.shop_name || 'CHUGAZ STATIONERY';
   const shopMeta = [info?.shop_address, info?.shop_phone, info?.shop_email].filter(Boolean).join(' · ');
   return (
     <div>
+      <h1 className="sr-only">Reports</h1>
       <div className="doc-head">
         <div className="doc-brand">
           <img src="/logo-report.png" alt="" />
-          <div>
+          <div className="doc-brand-text">
             <div className="doc-shop-name">{shopName}</div>
-            <div className="doc-shop-meta">{shopMeta}</div>
+            {shopMeta && <div className="doc-shop-meta">{shopMeta}</div>}
           </div>
         </div>
         <div className="doc-doc">
           <div className="doc-type">REPORT</div>
           <span className="doc-chip">{tabLabel}</span>
         </div>
-        <button className="btn primary no-print" onClick={() => window.print()}>Print / Save PDF</button>
+        <button className="btn primary doc-print-btn no-print" onClick={() => window.print()}>Print / Save PDF</button>
       </div>
       <div className="doc-rule" />
       <div className="doc-meta">
-        <div>
-          <div className="lbl">Period</div>
-          <div className="val">{periodText}</div>
-        </div>
+        {periodText && (
+          <div>
+            <div className="lbl">Period</div>
+            <div className="val">{periodText}</div>
+          </div>
+        )}
         <div>
           <div className="lbl">Generated</div>
           <div className="val">{stamp}</div>
@@ -138,31 +143,26 @@ export default function Reports() {
           <div className="lbl">Prepared by</div>
           <div className="val"><b>{user.name || '—'}</b>{user.role ? ` · ${user.role}` : ''}</div>
         </div>
-        <div>
-          <div className="lbl">Currency</div>
-          <div className="val">{info?.currency || 'TSh'}</div>
-        </div>
       </div>
 
-      <div className="page-header no-print">
-        <h1>Reports</h1>
-      </div>
-
-      <div className="toolbar">
+      <div className="toolbar reports-toolbar">
         <div className="filters">
           {tabs.map(([t, l]) => (
             <button key={t} className={`btn ${tab === t ? 'active' : ''}`} onClick={() => switchTab(t)}>{l}</button>
           ))}
         </div>
         {isRange && (
-          <>
-            <div className="spacer" />
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="doc-range">
+            <label className="doc-range-field">
+              <span>From</span>
               <input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />
-              <span className="muted">to</span>
+            </label>
+            <span className="doc-range-arrow" aria-hidden="true">→</span>
+            <label className="doc-range-field">
+              <span>To</span>
               <input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
-            </div>
-          </>
+            </label>
+          </div>
         )}
       </div>
 
@@ -522,7 +522,7 @@ export default function Reports() {
       )}
 
       <div className="doc-print-foot">
-        <span>{shopName} · {tabLabel} · Generated {stamp}</span>
+        <span>{shopName} · {tabLabel}</span>
         <span>Designed by CHUGAZ ICT SERVICES</span>
       </div>
     </div>
