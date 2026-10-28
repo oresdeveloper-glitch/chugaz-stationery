@@ -18,8 +18,17 @@ applyTheme(getTheme());
 // can even draw its skeleton. Start both now, in parallel with the shell.
 // The Dashboard's own load() calls the same URL, and api() collapses identical
 // in-flight GETs, so this costs exactly zero extra requests.
-if ((window.location.pathname === '/' || window.location.pathname === '/dashboard') && isSessionValid() && getToken()) {
+const PATH = window.location.pathname;
+const LANDING = PATH === '/' || PATH === '/dashboard';
+// Warm the dashboard chunk on the login screen too: it is the page every
+// session lands on, and fetching it while the user types their password takes
+// a round trip out of the sign-in path.
+if (LANDING || PATH === '/login') {
   import('./pages/Dashboard.jsx').catch(() => { /* real navigation will retry */ });
+}
+// Only prefetch data when a session already exists and we are going straight
+// to the dashboard; api() hands the answer to the page's own load().
+if (LANDING && isSessionValid() && getToken()) {
   prefetch('/reports/dashboard?range=month');
 }
 
