@@ -139,7 +139,13 @@ function syncOnce() {
   if (syncCache.data && Date.now() - syncCache.at < SYNC_TTL_MS) return Promise.resolve(syncCache.data);
   if (syncInFlight) return syncInFlight;
   syncInFlight = request('/sync', {}, false)
-    .then((d) => { syncCache = { at: Date.now(), data: d }; return d; })
+    .then((d) => {
+      syncCache = { at: Date.now(), data: d };
+      // Does the instance we are pinned to actually hold data? If not, the
+      // pin protects nothing and enforcing it only produces 409 + retries.
+      pinHasData = (Number(d && d.sales) || 0) + (Number(d && d.orders) || 0) > 0;
+      return d;
+    })
     .finally(() => { syncInFlight = null; });
   return syncInFlight;
 }
@@ -156,6 +162,22 @@ const inFlightGets = new Map();
 // later reload never reads stale numbers.
 const prefetched = new Map();
 const PREFETCH_TTL_MS = 5000;
+
+// Enforcing the pin costs a 409 + retry every time the load balancer lands
+// elsewhere, which is fine when the pinned instance is the one holding the
+// shop's data and pointless when the whole fleet is empty (every instance is
+// then equally correct, and the pin just turns one request into four). Start
+// from the last high-water this browser has seen, then let each /sync answer
+// for the instance we are actually talking to.
+function readHighWater() {
+  try {
+    const [s, o] = String(localStorage.getItem('sst_db_so') || '0:0').split(':').map(Number);
+    return (Number(s) || 0) + (Number(o) || 0);
+  } catch (_) { return 0; }
+}
+let pinHasData = readHighWater() > 0;
+
+export function pinAffinity() { return pinHasData; }
 
 export function prefetch(path) {
   if (prefetched.has(path)) return;
@@ -244,7 +266,7 @@ async function request(path, options = {}, shop = false) {
     const h = { ...headers };
     // Read the pin via getDbPin(): the in-memory var starts null on a fresh load.
     const pin = getDbPin();
-    if (pin && affinity) h['X-Expect-Db-Marker'] = pin;
+    if (pin && affinity && pinHasData) h['X-Expect-Db-Marker'] = pin;
     const sig = options.signal ||
       ((typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(15000) : undefined);
     return fetch(url, { ...options, headers: h, signal: sig }).catch((e) => {

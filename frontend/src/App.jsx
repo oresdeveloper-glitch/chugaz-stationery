@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { getUser, clearAuth, isSessionValid, api, getDbPin, lastSyncVersion } from './lib/api';
+import { getUser, clearAuth, isSessionValid, api, getDbPin, lastSyncVersion, pinAffinity } from './lib/api';
 import { dbKeepInit, convergeInstances, knownCounts, canKeep } from './lib/dbkeep';
 import Login from './pages/Login.jsx';
 import Layout from './components/Layout.jsx';
@@ -94,7 +94,7 @@ export default function App() {
     const open = () => {
       if (es) { try { es.close(); } catch (e) { /* ignore */ } es = null; }
       try {
-        const pin = getDbPin();
+        const pin = pinAffinity() ? getDbPin() : null;
         es = new EventSource(pin ? `/api/events?marker=${encodeURIComponent(pin)}` : '/api/events');
         es.onopen = () => { errs = 0; markUp(); };
         es.onmessage = (e) => {
