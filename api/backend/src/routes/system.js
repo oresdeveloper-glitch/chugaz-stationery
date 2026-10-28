@@ -254,6 +254,30 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
     }
    }
 
+   // Product photos: gallery rows, and the bytes they point at. Both were
+   // previously left out of the merge, so a recycled instance came back with
+   // products that named images nobody could serve.
+   if (tableExists('product_images')) {
+    const imgRows = db.prepare('SELECT product_id, path, sort FROM bak.product_images').all();
+    const addImg = db.prepare('INSERT INTO product_images (product_id, path, sort) VALUES (?,?,?)');
+    for (const r of imgRows) {
+     const pid = prodMap.get(Number(r.product_id));
+     if (!pid || !r.path) continue;
+     if (has('product_images', 'product_id = ? AND path = ?', [pid, r.path])) continue;
+     addImg.run(pid, r.path, Number(r.sort) || 0);
+     bump('product_images');
+    }
+   }
+   if (tableExists('product_media')) {
+    const mediaRows = db.prepare('SELECT name, mime, bytes FROM bak.product_media').all();
+    const addMedia = db.prepare('INSERT OR IGNORE INTO product_media (name, mime, bytes) VALUES (?,?,?)');
+    for (const r of mediaRows) {
+     if (!r.name || !r.bytes) continue;
+     const info = addMedia.run(r.name, r.mime || 'application/octet-stream', r.bytes);
+     if (info.changes) bump('product_images');
+    }
+   }
+
    if (tableExists('product_categories')) {
     const linkRows = db.prepare('SELECT product_id, category_id FROM bak.product_categories').all();
     const addLink = db.prepare('INSERT OR IGNORE INTO product_categories (product_id, category_id) VALUES (?,?)');

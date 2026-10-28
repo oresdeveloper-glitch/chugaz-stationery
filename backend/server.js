@@ -76,6 +76,9 @@ app.use((req, res, next) => {
 });
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Uploaded product photos live in the database, so they survive a recycled
+// serverless disk and travel with backups. Public: the storefront needs them.
+app.use('/api/media', require('./src/routes/media'));
 
 // Any write makes the cached sync-version stale: drop it when the response
 // finishes so the very next /sync (or SSE tick) recomputes.

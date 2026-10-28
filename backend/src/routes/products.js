@@ -1,17 +1,10 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const { db, audit, transact } = require('../db');
 const { requireRole } = require('../auth');
 const u = require('../units');
 
 const router = express.Router();
-
-const UPLOAD_DIR = process.env.VERCEL === '1' ? '/tmp/stationery-uploads' : path.join(__dirname, '..', '..', 'uploads');
-try {
-  if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-} catch (_) { /* read-only bundle dir on serverless — uploads fall back to /tmp */ }
 
 // Normalize admin-entered unit_prices: keep only numeric > 0 entries for known units.
 function cleanUnitPrices(raw) {
@@ -44,16 +37,12 @@ const IMAGE_TYPES = {
  'image/gif': '.gif',
 };
 
-const storage = multer.diskStorage({
- destination: (req, file, cb) => cb(null, UPLOAD_DIR),
- filename: (req, file, cb) => {
-  const ext = IMAGE_TYPES[file.mimetype] || '.jpg';
-  cb(null, `prod-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
- },
-});
-// Only real images are accepted — blocks HTML/SVG/scripts disguised as uploads.
+// Uploads are buffered in memory and written straight into the database (see
+// media.js). Writing them to disk looked like it worked but produced a URL that
+// nothing ever served: on serverless the bundle directory is read-only and /tmp
+// is private to the instance that accepted the upload, so the photo vanished.
 const upload = multer({
- storage,
+ storage: multer.memoryStorage(),
  limits: { fileSize: 2 * 1024 * 1024, files: 8 },
  fileFilter: (req, file, cb) => {
   if (IMAGE_TYPES[file.mimetype]) return cb(null, true);
@@ -61,7 +50,35 @@ const upload = multer({
  },
 });
 
+// Store one uploaded photo and return the URL the browser (and the storefront)
+// can load it from. The name is unique, so the answer is cacheable forever.
+function saveUploadedImage(file) {
+ const ext = IMAGE_TYPES[file.mimetype] || '.jpg';
+ const name = `prod-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+ db.prepare('INSERT INTO product_media (name, mime, bytes) VALUES (?,?,?)')
+  .run(name, file.mimetype, file.buffer);
+ return `/api/media/${name}`;
+}
+
+// Drop the stored bytes once no product or gallery row points at them any more.
+function dropUnusedMedia(url) {
+ const m = /^\/api\/media\/([^/?#]+)$/.exec(String(url || ''));
+ if (!m) return;
+ const name = m[1];
+ try {
+  const used = db.prepare('SELECT 1 FROM products WHERE image = ? LIMIT 1').get(url)
+   || db.prepare('SELECT 1 FROM product_images WHERE path = ? LIMIT 1').get(url);
+  if (!used) db.prepare('DELETE FROM product_media WHERE name = ?').run(name);
+ } catch (_) { /* cleanup must never fail the request */ }
+}
+
 // ---- product image gallery ----
+db.exec(`CREATE TABLE IF NOT EXISTS product_media (
+ name TEXT PRIMARY KEY,
+ mime TEXT NOT NULL,
+ bytes BLOB NOT NULL,
+ created_at TEXT DEFAULT (datetime('now'))
+)`);
 db.exec(`CREATE TABLE IF NOT EXISTS product_images (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
@@ -378,33 +395,61 @@ router.delete('/:id', requireRole('admin'), (req, res) => {
   audit(req.user.id, 'DEACTIVATE', 'product', Number(req.params.id), { reason: 'has stock history' });
   return res.json({ ok: true, deactivated: true });
  }
+ const removedImages = db.prepare('SELECT path FROM product_images WHERE product_id=?').all(req.params.id).map((r) => r.path);
+ const mainImage = db.prepare('SELECT image FROM products WHERE id=?').get(req.params.id);
  db.prepare('DELETE FROM products WHERE id=?').run(req.params.id);
+ for (const url of removedImages) dropUnusedMedia(url);
+ if (mainImage && mainImage.image) dropUnusedMedia(mainImage.image);
  audit(req.user.id, 'DELETE', 'product', Number(req.params.id));
  res.json({ ok: true });
 });
 
-router.post('/:id/image', upload.single('image'), requireRole('admin'), (req, res) => {
+router.post('/:id/image', requireRole('admin', 'manager'), upload.single('image'), (req, res) => {
  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
- const url = '/uploads/' + req.file.filename;
+ const url = saveUploadedImage(req.file);
  db.prepare('UPDATE products SET image=? WHERE id=?').run(url, req.params.id);
  audit(req.user.id, 'UPDATE', 'product', Number(req.params.id), { image: url });
  res.json({ url });
 });
 
 // ---- categories ----
-router.post('/:id/images', upload.array('images', 8), requireRole('admin'), (req, res) => {
+router.post('/:id/images', requireRole('admin', 'manager'), upload.array('images', 8), (req, res) => {
  if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
  const pid = Number(req.params.id);
- const maxSort = db.prepare('SELECT COALESCE(MAX(sort), -1) AS m FROM product_images WHERE product_id=?').get(pid).m;
- const ins = db.prepare('INSERT INTO product_images (product_id, path, sort) VALUES (?,?,?)');
- req.files.forEach((f, i) => ins.run(pid, '/uploads/' + f.filename, maxSort + 1 + i));
- const cur = db.prepare('SELECT image FROM products WHERE id=?').get(pid);
- if (!cur.image) db.prepare('UPDATE products SET image=? WHERE id=?').run('/uploads/' + req.files[0].filename, pid);
- audit(req.user.id, 'UPDATE', 'product', pid, { images_added: req.files.length });
+ const product = db.prepare('SELECT id, image FROM products WHERE id=?').get(pid);
+ if (!product) return res.status(404).json({ error: 'Product not found' });
+ const urls = req.files.map(saveUploadedImage);
+ transact(() => {
+  const maxSort = db.prepare('SELECT COALESCE(MAX(sort), -1) AS m FROM product_images WHERE product_id=?').get(pid).m;
+  const ins = db.prepare('INSERT INTO product_images (product_id, path, sort) VALUES (?,?,?)');
+  urls.forEach((url, i) => ins.run(pid, url, maxSort + 1 + i));
+  // First photo becomes the main image, which is what the catalog and the
+  // storefront show. Managers could not do this at all before: the routes
+  // demanded the admin role even though product editing is a manager task.
+  if (!product.image) db.prepare('UPDATE products SET image=? WHERE id=?').run(urls[0], pid);
+  audit(req.user.id, 'UPDATE', 'product', pid, { images_added: urls.length });
+ });
  res.json({ ok: true, images: imagesFor(pid) });
 });
 
-router.delete('/:id/images/:imgId', requireRole('admin'), (req, res) => {
+// Choose which of the product's photos is the one shown on the catalog and in
+// the storefront. Without this a new photo only joined the gallery: products
+// that already had an image (the seeded catalog does) kept showing the old one,
+// which looks exactly like "the image cannot be changed".
+router.post('/:id/main-image', requireRole('admin', 'manager'), (req, res) => {
+ const pid = Number(req.params.id);
+ const url = String((req.body && req.body.path) || '').trim();
+ if (!url) return res.status(400).json({ error: 'Choose a photo' });
+ const product = db.prepare('SELECT id, image FROM products WHERE id=?').get(pid);
+ if (!product) return res.status(404).json({ error: 'Product not found' });
+ const inGallery = db.prepare('SELECT 1 FROM product_images WHERE product_id=? AND path=?').get(pid, url);
+ if (!inGallery && product.image !== url) return res.status(404).json({ error: 'Photo not found on this product' });
+ db.prepare('UPDATE products SET image=? WHERE id=?').run(url, pid);
+ audit(req.user.id, 'UPDATE', 'product', pid, { main_image: url });
+ res.json({ ok: true, image: url, images: imagesFor(pid) });
+});
+
+router.delete('/:id/images/:imgId', requireRole('admin', 'manager'), (req, res) => {
  const row = db.prepare('SELECT * FROM product_images WHERE id=? AND product_id=?').get(req.params.imgId, req.params.id);
  if (!row) return res.status(404).json({ error: 'Image not found' });
  db.prepare('DELETE FROM product_images WHERE id=?').run(row.id);
@@ -414,6 +459,7 @@ router.delete('/:id/images/:imgId', requireRole('admin'), (req, res) => {
   db.prepare('UPDATE products SET image=? WHERE id=?').run(rest.length ? rest[0].path : null, req.params.id);
  }
  audit(req.user.id, 'UPDATE', 'product', Number(req.params.id), { image_removed: row.path });
+ dropUnusedMedia(row.path);
  res.json({ ok: true, images: imagesFor(Number(req.params.id)) });
 });
 

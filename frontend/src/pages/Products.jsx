@@ -116,11 +116,14 @@ export default function Products() {
 
   const uploadImages = async (p, files) => {
     if (!files || !files.length) return;
+    // The caller clears the input right after handing over its FileList, which
+    // is a LIVE object - read the count now or the toast says "0 photos added".
+    const count = files.length;
     const fd = new FormData();
     for (const f of files) fd.append('images', f);
     try {
       await api(`/products/${p.id}/images`, { method: 'POST', body: fd });
-      toast(`${files.length} photo${files.length > 1 ? 's' : ''} added`);
+      toast(`${count} photo${count > 1 ? 's' : ''} added`);
       load();
       if (gallery && gallery.id === p.id) openGallery(gallery);
     } catch (err) { toast(err.message, 'error'); }
@@ -129,7 +132,16 @@ export default function Products() {
   const openGallery = async (p) => {
     try {
       const full = await api(`/products/${p.id}`);
-      setGallery({ id: p.id, name: p.name, images: full.images || [] });
+      setGallery({ id: p.id, name: p.name, main: full.image || null, images: full.images || [] });
+    } catch (err) { toast(err.message, 'error'); }
+  };
+
+  const setMainImage = async (p, path) => {
+    try {
+      const r = await api(`/products/${p.id}/main-image`, { method: 'POST', body: { path } });
+      setGallery({ ...p, main: r.image, images: r.images || [] });
+      load();
+      toast('Main photo updated');
     } catch (err) { toast(err.message, 'error'); }
   };
 
@@ -321,14 +333,15 @@ export default function Products() {
                         });
                       } catch (err) { toast(err.message, 'error'); }
                     }}>Edit</button>
+                    {/* Photos are part of maintaining a product, so managers get
+                        them too - not just admins. Deleting the product stays
+                        an admin action. */}
+                    <label className="btn sm" style={{ cursor: 'pointer' }} title="Add photos"><I name="camera" size={14} />
+                      <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => { uploadImages(p, e.target.files); e.target.value = ''; }} />
+                    </label>
+                    <button className="btn sm" onClick={() => openGallery(p)} title="Manage photo gallery"><I name="image" size={14} /></button>
                     {isAdmin && (
-                      <>
-                        <label className="btn sm" style={{ cursor: 'pointer' }} title="Add photos"><I name="camera" size={14} />
-                          <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => { uploadImages(p, e.target.files); e.target.value = ''; }} />
-                        </label>
-                        <button className="btn sm" onClick={() => openGallery(p)} title="Manage photo gallery"><I name="image" size={14} /></button>
-                        <button className="btn sm danger" onClick={() => remove(p)} title="Delete product"><I name="x" size={14} /></button>
-                      </>
+                      <button className="btn sm danger" onClick={() => remove(p)} title="Delete product"><I name="x" size={14} /></button>
                     )}
                   </div>
                 )}
@@ -520,17 +533,30 @@ export default function Products() {
         {gallery && (
           <div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-              {(gallery.images || []).map((im) => (
-                <div key={im.id} style={{ position: 'relative' }}>
-                  <SafeImg src={im.path} alt={gallery?.name || 'Photo'} letter="P" style={{ width: 110, height: 110, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--border)' }} />
-                  <button
-                    className="btn sm danger"
-                    style={{ position: 'absolute', top: 4, right: 4, padding: '2px 7px', borderRadius: '50%' }}
-                    onClick={() => removeImage(gallery, im.id)}
-                    title="Remove photo"
-                  >×</button>
-                </div>
-              ))}
+              {(gallery.images || []).map((im) => {
+                const isMain = gallery.main === im.path;
+                return (
+                  <div key={im.id} style={{ position: 'relative', width: 110 }}>
+                    <SafeImg src={im.path} alt={gallery?.name || 'Photo'} letter="P" style={{ width: 110, height: 110, objectFit: 'cover', borderRadius: 10, border: isMain ? '2px solid var(--primary)' : '1px solid var(--border)' }} />
+                    <button
+                      className="btn sm danger"
+                      style={{ position: 'absolute', top: 4, right: 4, padding: '2px 7px', borderRadius: '50%' }}
+                      onClick={() => removeImage(gallery, im.id)}
+                      title="Remove photo"
+                    >×</button>
+                    {isMain ? (
+                      <span className="badge" style={{ position: 'absolute', bottom: 4, left: 4, fontSize: 10 }}>Main</span>
+                    ) : (
+                      <button
+                        className="btn sm"
+                        style={{ width: '100%', marginTop: 4, padding: '2px 4px', fontSize: 11 }}
+                        onClick={() => setMainImage(gallery, im.path)}
+                        title="Show this photo on the catalog and storefront"
+                      >Set as main</button>
+                    )}
+                  </div>
+                );
+              })}
               {!gallery.images || !gallery.images.length ? <p className="muted">No photos yet.</p> : null}
             </div>
             <div className="sep" style={{ borderTop: '1px solid var(--border)', margin: '14px 0' }} />
@@ -538,7 +564,7 @@ export default function Products() {
               + Add photos (select several)
               <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => { uploadImages(gallery, e.target.files); e.target.value = ''; }} />
             </label>
-            <p className="muted small" style={{ marginTop: 8 }}>First photo is used as the main image on the storefront.</p>
+            <p className="muted small" style={{ marginTop: 8 }}>The photo marked Main is the one used on the storefront.</p>
           </div>
         )}
       </Modal>

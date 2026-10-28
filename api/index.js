@@ -242,6 +242,7 @@ if (customerRoutes) {
 } else {
   app.use('/api/shop/cart', safeRoute('./backend/src/routes/cart'));
 }
+app.use('/api/media', safeRoute('./backend/src/routes/media'));
 app.use('/api/products', staff, safeRoute('./backend/src/routes/products'));
 app.use('/api/suppliers', staff, safeRoute('./backend/src/routes/suppliers'));
 app.use('/api/customers', staff, safeRoute('./backend/src/routes/customers'));
