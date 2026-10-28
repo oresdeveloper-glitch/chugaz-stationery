@@ -259,21 +259,33 @@ async function request(path, options = {}, shop = false) {
   let res = await send();
   let data = null;
   // Retry on 409 instance_mismatch: nothing ran server-side, so it is safe.
-  // The 409 body names the instance that actually answered, so we adopt it and
-  // retry immediately. Probing the whole fleet on every mismatch (3 extra
-  // round trips, fired once per concurrent request) is what turned a single
-  // stale pin into a request storm on page load.
+  // A 409 means this request did not land on the instance we pinned. Retry the
+  // SAME pin first: the platform load-balances every request independently, so
+  // the pinned instance is often reachable on the next draw. Adopting whichever
+  // instance answered on the first mismatch made the pin chase the balancer
+  // from one twin to the next - every adoption reopened the event stream and
+  // refetched the page, and the dashboard never settled (measured: a 409 on
+  // essentially every request, each naming a different instance).
   if (affinity) {
     let hops = 0;
-    while (res.status === 409 && hops < 3) {
-      const body = await res.json().catch(() => null);
-      if (!body || body.code !== 'instance_mismatch') break;
+    while (res.status === 409 && hops < 2) {
       hops += 1;
-      if (body.db_marker) setDbPin(body.db_marker);
-      else await rePinToRichest();
+      const body = await res.clone().json().catch(() => null);
+      if (!body || body.code !== 'instance_mismatch') break;
       res = await send();
     }
-    if (res.status === 409) { setDbPin(null); res = await send(); }
+    if (res.status === 409) {
+      const body = await res.json().catch(() => null);
+      if (body && body.code === 'instance_mismatch') {
+        // Two clean retries still missed: the pinned instance is gone (its
+        // ephemeral disk was recycled). Adopt the one that answered - it is
+        // the only instance we can actually reach - and let the next request
+        // proceed against it.
+        if (body.db_marker && body.db_marker !== getDbPin()) setDbPin(body.db_marker);
+        else { setDbPin(null); await rePinToRichest().catch(() => {}); }
+        res = await send();
+      }
+    }
   }
   const answered = res.headers.get('X-Db-Marker');
   if (answered && !options.anyInstance) {

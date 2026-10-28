@@ -156,13 +156,13 @@ export default function App() {
   // Check a cheap version hash on demand - when the push channel signals a
   // change, after a local write, or when the tab regains focus - and announce
   // 'chugaz-live' so every open page refetches. No interval runs anywhere.
-  // Flap suppression: a previously-seen version must hold 2 checks before a
-  // resync fires, so instance bouncing never storms events.
+  // Flap suppression: versions are tracked PER INSTANCE, so a page that is
+  // bounced between the fleet's twins does not treat each switch as new data.
   useEffect(() => {
     let last = null;
-    let seen = [];
-    let suppressed = false;
-    let hold = 0;
+    // Last version announced per db_marker (one entry per instance we hear
+    // from, capped below).
+    const seenByMarker = new Map();
     // Persisted across reloads: the fleet sweep is a discovery cost (several
     // probes + possibly a whole-database merge), so it must not restart from
     // zero on every page load.
@@ -210,32 +210,20 @@ export default function App() {
             }
           } catch (e) { /* ignore */ }
         }
-        if (last === null) {
-          last = v;
-          seen = [v];
-          return;
-        }
-        if (v === last) {
-          if (suppressed) {
-            hold += 1;
-            if (hold >= 2) {
-              suppressed = false;
-              hold = 0;
-              announce(v);
-            }
-          }
-          return;
-        }
-        const bounced = seen.includes(v);
+        // Only a version change reported by the SAME instance is new data.
+        // Production runs several instances on independent disks, so a page
+        // bounced between them sees a different version every single time.
+        // Announcing each of those refetched the dashboard in a loop (measured:
+        // a fetch every ~600ms, forever). Remember the last version per marker
+        // and ignore repeats from an instance we have already heard from.
+        const marker = (s && s.db_marker) || '';
+        const prevVersion = seenByMarker.get(marker);
+        if (prevVersion === v) return;
+        seenByMarker.set(marker, v);
+        if (seenByMarker.size > 8) seenByMarker.delete(seenByMarker.keys().next().value);
+        if (last === null) { last = v; return; }
         last = v;
-        seen.push(v);
-        if (seen.length > 4) seen.shift();
-        if (!suppressed && !bounced) {
-          announce(v);
-        } else {
-          suppressed = true;
-          hold = 1;
-        }
+        announce(v);
       } catch (e) { /* ignore */ } finally { busy = false; }
     };
     tick();
