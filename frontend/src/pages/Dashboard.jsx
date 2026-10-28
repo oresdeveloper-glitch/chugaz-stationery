@@ -144,9 +144,15 @@ export default function Dashboard() {
     },
   ).catch((e) => { setLoadError(e.message); toast(e.message, 'error'); });
 
-  // Run the wipe/restore check before the very first fetch: after a disk
-  // reset the KPI would otherwise paint 0 totals until the merge lands.
-  useEffect(() => { (async () => { try { await dbKeepInit(); } catch (e) { /* ignore */ } load(rangeRef.current); })(); }, []);
+  // The dashboard must not wait for the disk-reset check: that check is a
+  // network round trip of its own, and chaining it in front of the data fetch
+  // doubled the time to first paint. Both now run in parallel; if the check
+  // does restore a wiped database it announces chugaz-live, which reloads the
+  // numbers through the normal live channel.
+  useEffect(() => {
+    load(rangeRef.current);
+    dbKeepInit().catch(() => { /* non-fatal: the numbers are still fetched */ });
+  }, []);
   useEffect(() => onLive(() => { load(rangeRef.current); }), []);
   useEffect(() => {
     const id = setInterval(() => setClock(new Date()), 1000);

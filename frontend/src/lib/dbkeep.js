@@ -13,6 +13,10 @@ const DB_NAME = 'sst-keep';
 const STORE = 'kv';
 const BACKUP_KEY = 'backup';
 const BACKUP_INTERVAL_MS = 3 * 60 * 1000;
+// Last snapshot time, shared by every tab of the browser: the snapshot lives
+// in IndexedDB (one copy per origin), so a second tab re-downloading the whole
+// database bought nothing and cost the shop a full-file read + redacted copy.
+const BACKUP_AT_KEY = 'sst_backup_at';
 // A write near a cold reset may miss the 3-minute snapshot — schedule an 8s follow-up.
 const POST_WRITE_BACKUP_MS = 8 * 1000;
 
@@ -122,6 +126,14 @@ async function applyResetEpoch(h) {
 }
 
 async function health() {
+  // /sync already carries everything this check needs — db_marker, sales,
+  // orders, categories and the reset epoch — and it is shared with the app's
+  // live version tick, so the page load pays for ONE of them instead of a
+  // separate /health round trip as well.
+  try {
+    const s = await api('/sync');
+    if (s && s.db_marker) return s;
+  } catch (_) { /* fall back to the dedicated probe below */ }
   try {
     const res = await fetch(`${apiBase()}/api/health`, {
       signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(12000) : undefined,
@@ -172,9 +184,15 @@ export function canKeep() {
       user.role === 'cashier' || user.role === 'clerk');
 }
 
-async function backupNow() {
+async function backupNow(force) {
   if (!canKeep() || !getToken()) return;
   if (backing) return;
+  // One snapshot per interval per BROWSER (all tabs share IndexedDB). Forced
+  // calls come from the write hook, where the new row must be captured soon -
+  // but not once per keystroke burst, so they get a much smaller gap.
+  let at = 0;
+  try { at = Number(localStorage.getItem(BACKUP_AT_KEY) || 0) || 0; } catch (_) { /* ignore */ }
+  if (Date.now() - at < (force ? 15000 : BACKUP_INTERVAL_MS)) return;
   backing = true;
   try {
     const pin = getDbPin();
@@ -207,6 +225,7 @@ async function backupNow() {
     });
     if (counts) bumpSo(counts.sales, counts.orders);
     localStorage.setItem(MARKER_KEY, marker);
+    try { localStorage.setItem(BACKUP_AT_KEY, String(Date.now())); } catch (_) { /* ignore */ }
   } catch (e) {
     console.warn('[dbkeep] backup failed:', e && e.message ? e.message : e);
   } finally {
@@ -267,7 +286,7 @@ export async function convergeInstances() {
       if (!mine || !mine.db_marker) return 'fail';
       const seen = new Map();
       seen.set(mine.db_marker, mine);
-      for (let i = 0; i < 24 && seen.size < 8; i++) {
+      for (let i = 0; i < 8 && seen.size < 8; i++) {
         const p = await api('/sync', { anyInstance: true });
         if (p && p.db_marker && !seen.has(p.db_marker)) seen.set(p.db_marker, p);
       }
@@ -355,7 +374,7 @@ export async function convergeInstances() {
 export function schedulePostWriteBackup() {
   if (!canKeep()) return;
   clearTimeout(postWriteTimer);
-  postWriteTimer = setTimeout(backupNow, POST_WRITE_BACKUP_MS);
+  postWriteTimer = setTimeout(() => backupNow(true), POST_WRITE_BACKUP_MS);
 }
 
 // Bounded retry: a failed merge (cold instance, brief 5xx) gets up to three

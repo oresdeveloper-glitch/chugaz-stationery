@@ -124,8 +124,14 @@ router.get('/', (req, res) => {
  if (low === '1') { conds.push('p.current_stock <= p.reorder_level'); }
  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
  const rows = db.prepare(productSelect(where + ' ORDER BY p.name')).all(...params);
+ // One grouped count instead of one COUNT query per product (the old N+1 ran
+ // 156 extra statements for a full catalog page).
+ const variantCounts = new Map(
+   db.prepare("SELECT parent_id, COUNT(*) c FROM products WHERE parent_id IS NOT NULL AND status='active' GROUP BY parent_id").all()
+     .map((r) => [r.parent_id, r.c]),
+ );
  const withCount = rows.map((r) => {
-   r.variant_count = db.prepare("SELECT COUNT(*) c FROM products WHERE parent_id = ? AND status='active'").get(r.id).c;
+   r.variant_count = variantCounts.get(r.id) || 0;
    return withUnits(r);
  });
  // Full membership list (primary first) for the category filters and the edit form.

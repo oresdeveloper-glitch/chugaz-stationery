@@ -67,7 +67,7 @@ router.get('/', requireRole('cashier', 'manager', 'admin'), (req, res) => {
  if (customer_id) { conds.push('s.customer_id = ?'); params.push(customer_id); }
  if (status === 'outstanding') { conds.push('s.payment_status != \'paid\''); }
  else if (status) { conds.push('s.payment_status = ?'); params.push(status); }
- if (from && to) { conds.push('date(s.sale_date) BETWEEN date(?) AND date(?)'); params.push(from, to); }
+ if (from && to) { conds.push("s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day')"); params.push(from, to); }
  if (q) { conds.push('(s.invoice_number LIKE ? OR c.name LIKE ?)'); params.push(`%${q}%`, `%${q}%`); }
  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
  const rows = db.prepare(saleSelect(where + ' ORDER BY s.sale_date DESC, s.id DESC LIMIT 200')).all(...params);

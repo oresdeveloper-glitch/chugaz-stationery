@@ -6,19 +6,24 @@ const router = express.Router();
 
 // Wrapped so a single bad query can't take the flagship page down uncaught.
 function dashboardHandler(req, res) {
+ // Window bounds are half-open [start, end) on the RAW date column: comparing
+ // the bare column lets SQLite use idx_sales_date / idx_payments_date /
+ // idx_expenses_date / idx_orders_date, whereas the old `date(col) BETWEEN …`
+ // wrapped every row in a function and forced a full table scan on each of the
+ // ~40 statements below.
  const RANGES = {
-  today: { curStart: "date('now')", curEnd: "date('now')", prevStart: "date('now','-1 day')", prevEnd: "date('now','-1 day')", label: 'Today', prevLabel: 'Yesterday' },
-  '7d': { curStart: "date('now','-6 day')", curEnd: "date('now')", prevStart: "date('now','-13 day')", prevEnd: "date('now','-7 day')", label: 'Last 7 days', prevLabel: 'Previous 7 days' },
-  '30d': { curStart: "date('now','-29 day')", curEnd: "date('now')", prevStart: "date('now','-59 day')", prevEnd: "date('now','-30 day')", label: 'Last 30 days', prevLabel: 'Previous 30 days' },
-  month: { curStart: "date('now','start of month')", curEnd: "date('now')", prevStart: "date('now','start of month','-1 month')", prevEnd: "date('now','start of month','-1 day')", label: 'This month', prevLabel: 'Last month' },
-  last_month: { curStart: "date('now','start of month','-1 month')", curEnd: "date('now','start of month','-1 day')", prevStart: "date('now','start of month','-2 month')", prevEnd: "date('now','start of month','-1 month','-1 day')", label: 'Last month', prevLabel: 'Previous month' },
-  '90d': { curStart: "date('now','-89 day')", curEnd: "date('now')", prevStart: "date('now','-179 day')", prevEnd: "date('now','-90 day')", label: 'Last 90 days', prevLabel: 'Previous 90 days' },
-  all: { curStart: "date('1900-01-01')", curEnd: "date('now')", prevStart: "date('1900-01-01')", prevEnd: "date('now')", label: 'All time', prevLabel: '—' },
+  today: { curStart: "date('now')", curEnd: "date('now','+1 day')", prevStart: "date('now','-1 day')", prevEnd: "date('now')", label: 'Today', prevLabel: 'Yesterday' },
+  '7d': { curStart: "date('now','-6 day')", curEnd: "date('now','+1 day')", prevStart: "date('now','-13 day')", prevEnd: "date('now','-6 day')", label: 'Last 7 days', prevLabel: 'Previous 7 days' },
+  '30d': { curStart: "date('now','-29 day')", curEnd: "date('now','+1 day')", prevStart: "date('now','-59 day')", prevEnd: "date('now','-29 day')", label: 'Last 30 days', prevLabel: 'Previous 30 days' },
+  month: { curStart: "date('now','start of month')", curEnd: "date('now','+1 day')", prevStart: "date('now','start of month','-1 month')", prevEnd: "date('now','start of month')", label: 'This month', prevLabel: 'Last month' },
+  last_month: { curStart: "date('now','start of month','-1 month')", curEnd: "date('now','start of month')", prevStart: "date('now','start of month','-2 month')", prevEnd: "date('now','start of month','-1 month')", label: 'Last month', prevLabel: 'Previous month' },
+  '90d': { curStart: "date('now','-89 day')", curEnd: "date('now','+1 day')", prevStart: "date('now','-179 day')", prevEnd: "date('now','-89 day')", label: 'Last 90 days', prevLabel: 'Previous 90 days' },
+  all: { curStart: "date('1900-01-01')", curEnd: "date('now','+1 day')", prevStart: "date('1900-01-01')", prevEnd: "date('now','+1 day')", label: 'All time', prevLabel: '—' },
  };
  const range = req.query.range || 'month';
  const b = RANGES[range] || RANGES.month;
- const inWin = (col) => `date(${col}) BETWEEN ${b.curStart} AND ${b.curEnd}`;
- const inPrev = (col) => `date(${col}) BETWEEN ${b.prevStart} AND ${b.prevEnd}`;
+ const inWin = (col) => `${col} >= ${b.curStart} AND ${col} < ${b.curEnd}`;
+ const inPrev = (col) => `${col} >= ${b.prevStart} AND ${col} < ${b.prevEnd}`;
  const q = (sql) => db.prepare(sql).get();
  const qa = (sql) => db.prepare(sql).all();
  const num = (v) => Number(v) || 0;
@@ -33,11 +38,14 @@ function dashboardHandler(req, res) {
  // ---- KPIs for selected window vs previous equivalent window ----
  const curSales = q(`SELECT COALESCE(SUM(total),0) sales, COALESCE(SUM(paid_amount),0) received, COALESCE(SUM(tax),0) tax, COUNT(*) count
   FROM sales WHERE ${inWin('sale_date')}${sellerPlain}`);
- const prevSales = q(`SELECT COALESCE(SUM(total),0) sales, COALESCE(SUM(paid_amount),0) received, COUNT(*) count
+ // All-time has no "previous equivalent window" — running the same aggregates
+ // a second time over the whole table doubled the cost of the heaviest view
+ // for numbers that are identical by definition.
+ const prevSales = range === 'all' ? curSales : q(`SELECT COALESCE(SUM(total),0) sales, COALESCE(SUM(paid_amount),0) received, COUNT(*) count
   FROM sales WHERE ${inPrev('sale_date')}${sellerPlain}`);
  const curProfit = q(`SELECT COALESCE(SUM(si.total - si.cost_at_sale * si.quantity),0) profit
   FROM sale_items si JOIN sales s ON s.id = si.sale_id WHERE ${inWin('s.sale_date')}${sellerJoin}`);
- const prevProfit = q(`SELECT COALESCE(SUM(si.total - si.cost_at_sale * si.quantity),0) profit
+ const prevProfit = range === 'all' ? curProfit : q(`SELECT COALESCE(SUM(si.total - si.cost_at_sale * si.quantity),0) profit
   FROM sale_items si JOIN sales s ON s.id = si.sale_id WHERE ${inPrev('s.sale_date')}${sellerJoin}`);
  const curReceived = q(`SELECT COALESCE(SUM(amount),0) total, COUNT(*) count FROM payments
   WHERE ${inWin('payment_date')} AND amount > 0 AND supplier_id IS NULL${sellerPay}`);
@@ -57,9 +65,9 @@ function dashboardHandler(req, res) {
  const ap = q(`SELECT COUNT(*) count, COALESCE(SUM(total - paid_amount),0) total FROM purchases WHERE payment_status != 'paid'`);
  const pendingOrders = q(`SELECT COUNT(*) count, COALESCE(SUM(total),0) total FROM orders WHERE order_status='pending'`);
  const ordersToday = q(`SELECT COUNT(*) count, COALESCE(SUM(total),0) total FROM orders
-   WHERE date(order_date)=date('now') AND order_status NOT IN ('cancelled','rejected')`);
+   WHERE order_date >= date('now') AND order_date < date('now','+1 day') AND order_status NOT IN ('cancelled','rejected')`);
  const ordersTodayPrev = q(`SELECT COUNT(*) count, COALESCE(SUM(total),0) total FROM orders
-   WHERE date(order_date)=date('now','-1 day') AND order_status NOT IN ('cancelled','rejected')`);
+   WHERE order_date >= date('now','-1 day') AND order_date < date('now') AND order_status NOT IN ('cancelled','rejected')`);
 
  // ---- Daily series ----
  const dailySales = qa(`SELECT date(sale_date) day, COALESCE(SUM(total),0) sales, COALESCE(SUM(paid_amount),0) received, COUNT(*) count
@@ -113,11 +121,12 @@ function dashboardHandler(req, res) {
  // ---- Breakdowns ----
  const byMethod = qa(`SELECT COALESCE(payment_method,'other') method, COALESCE(SUM(amount),0) amount, COUNT(*) count
   FROM payments WHERE ${inWin('payment_date')} AND amount > 0 AND supplier_id IS NULL${sellerPay} GROUP BY payment_method ORDER BY amount DESC`);
+ const onlineWin = q(`SELECT COALESCE(SUM(total),0) v, COUNT(*) c FROM orders WHERE ${inWin('order_date')} AND order_status NOT IN ('cancelled','rejected')`);
  const byChannel = [
-  { channel: 'pos', revenue: q(`SELECT COALESCE(SUM(total),0) v FROM sales WHERE ${inWin('sale_date')}${sellerPlain}`).v,
-   count: q(`SELECT COUNT(*) c FROM sales WHERE ${inWin('sale_date')}${sellerPlain}`).c },
-  { channel: 'online', revenue: q(`SELECT COALESCE(SUM(total),0) v FROM orders WHERE ${inWin('order_date')} AND order_status NOT IN ('cancelled','rejected')`).v,
-   count: q(`SELECT COUNT(*) c FROM orders WHERE ${inWin('order_date')} AND order_status NOT IN ('cancelled','rejected')`).c },
+  // POS is exactly the current-window sales aggregate above - reuse it instead
+  // of re-scanning sales twice more.
+  { channel: 'pos', revenue: num(curSales.sales), count: num(curSales.count) },
+  { channel: 'online', revenue: num(onlineWin.v), count: num(onlineWin.c) },
  ];
  const byCategory = qa(`SELECT COALESCE(c.name,'Uncategorized') category, SUM(si.quantity) qty, SUM(si.total) revenue
   FROM sale_items si JOIN sales s ON s.id = si.sale_id
@@ -139,8 +148,8 @@ function dashboardHandler(req, res) {
   const r = q(`SELECT COUNT(*) count, COALESCE(SUM(total - paid_amount),0) total FROM ${table} WHERE payment_status != 'paid' AND total > 0 AND ${g.cond} ${extra}`);
   return { bucket: g.bucket, count: num(r.count), total: num(r.total) };
  });
- const arAging = age('sales', 'date(sale_date)', sellerPlain);
- const apAging = age('purchases', 'date(purchase_date)');
+ const arAging = age('sales', 'sale_date', sellerPlain);
+ const apAging = age('purchases', 'purchase_date');
 
  // ---- Alerts ----
  const lowStock = qa(`SELECT id, name, sku, current_stock, reorder_level, (current_stock - COALESCE(reserved_stock,0)) available,
@@ -257,7 +266,7 @@ router.get('/sales-summary', requireRole('manager', 'admin'), (req, res) => {
       FROM sales GROUP BY period ORDER BY period DESC`;
  } else {
   sql = `SELECT date(sale_date) period, COUNT(*) count, SUM(total) sales, SUM(paid_amount) received, SUM(tax) tax
-      FROM sales WHERE date(sale_date) BETWEEN date(?) AND date(?) GROUP BY period ORDER BY period DESC`;
+      FROM sales WHERE sale_date >= date(?) AND sale_date < date(?, '+1 day') GROUP BY period ORDER BY period DESC`;
  }
  const params = from && to ? [from, to] : [];
  res.json(db.prepare(sql).all(...params));
@@ -269,18 +278,18 @@ router.get('/profit-loss', requireRole('manager', 'admin'), (req, res) => {
  const toDate = to || '2999-12-31';
  const sales = db.prepare(`
   SELECT COALESCE(SUM(total),0) revenue, COALESCE(SUM(tax),0) tax_collected
-  FROM sales WHERE date(sale_date) BETWEEN date(?) AND date(?)
+  FROM sales WHERE sale_date >= date(?) AND sale_date < date(?, '+1 day')
  `).get(fromDate, toDate);
  const cogs = db.prepare(`
   SELECT COALESCE(SUM(si.cost_at_sale * si.quantity),0) cost_of_goods
   FROM sale_items si JOIN sales s ON s.id = si.sale_id
-  WHERE date(s.sale_date) BETWEEN date(?) AND date(?)
+  WHERE s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day')
  `).get(fromDate, toDate);
  const expenses = db.prepare(`
-  SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE date(expense_date) BETWEEN date(?) AND date(?)
+  SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE expense_date >= date(?) AND expense_date < date(?, '+1 day')
  `).get(fromDate, toDate);
  const purchases = db.prepare(`
-  SELECT COALESCE(SUM(total),0) total FROM purchases WHERE date(purchase_date) BETWEEN date(?) AND date(?)
+  SELECT COALESCE(SUM(total),0) total FROM purchases WHERE purchase_date >= date(?) AND purchase_date < date(?, '+1 day')
  `).get(fromDate, toDate);
  res.json({
   revenue: sales.revenue,
@@ -297,7 +306,7 @@ router.get('/best-sellers', requireRole('manager', 'admin'), (req, res) => {
  const { from, to } = req.query;
  const params = [];
  let cond = '';
- if (from && to) { cond = 'WHERE date(s.sale_date) BETWEEN date(?) AND date(?)'; params.push(from, to); }
+ if (from && to) { cond = "WHERE s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day')"; params.push(from, to); }
  res.json(db.prepare(`
   SELECT p.id, p.name, p.sku, SUM(si.quantity) qty, SUM(si.total) revenue
   FROM sale_items si JOIN products p ON p.id = si.product_id JOIN sales s ON s.id = si.sale_id
@@ -318,8 +327,8 @@ router.get('/tax', requireRole('manager', 'admin'), (req, res) => {
  const { from, to } = req.query;
  const fromDate = from || '1900-01-01';
  const toDate = to || '2999-12-31';
- const sales = db.prepare('SELECT COALESCE(SUM(tax),0) tax FROM sales WHERE date(sale_date) BETWEEN date(?) AND date(?)').get(fromDate, toDate);
- const purchases = db.prepare('SELECT COALESCE(SUM(tax),0) tax FROM purchases WHERE date(purchase_date) BETWEEN date(?) AND date(?)').get(fromDate, toDate);
+ const sales = db.prepare("SELECT COALESCE(SUM(tax),0) tax FROM sales WHERE sale_date >= date(?) AND sale_date < date(?, '+1 day')").get(fromDate, toDate);
+ const purchases = db.prepare("SELECT COALESCE(SUM(tax),0) tax FROM purchases WHERE purchase_date >= date(?) AND purchase_date < date(?, '+1 day')").get(fromDate, toDate);
  res.json({ sales_tax: sales.tax, purchase_tax: purchases.tax, net_payable: Math.max(sales.tax - purchases.tax, 0) });
 });
 
@@ -348,25 +357,25 @@ router.get('/daily-tasks', requireRole('manager', 'admin'), (req, res) => {
  const taskRows = qa(`
    SELECT date(al.created_at) day, al.action, al.entity, u.name AS user_name, COUNT(*) count
    FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id
-   WHERE date(al.created_at) BETWEEN date(?) AND date(?)
+   WHERE al.created_at >= date(?) AND al.created_at < date(?, '+1 day')
      AND al.action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ')
    GROUP BY day, al.action, al.entity, al.user_id
    ORDER BY day, count DESC`, from, to);
  const taskTotals = qa(`
    SELECT date(created_at) day, COUNT(*) count
    FROM audit_logs
-   WHERE date(created_at) BETWEEN date(?) AND date(?)
+   WHERE created_at >= date(?) AND created_at < date(?, '+1 day')
      AND action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ')
    GROUP BY day`, from, to);
 
  const salesRows = qa(`SELECT date(sale_date) day, COUNT(*) count, COALESCE(SUM(total),0) total
-   FROM sales WHERE date(sale_date) BETWEEN date(?) AND date(?) GROUP BY day`, from, to);
+   FROM sales WHERE sale_date >= date(?) AND sale_date < date(?, '+1 day') GROUP BY day`, from, to);
  const orderRows = qa(`SELECT date(order_date) day, COUNT(*) count, COALESCE(SUM(total),0) total
-   FROM orders WHERE date(order_date) BETWEEN date(?) AND date(?) AND order_status NOT IN ('cancelled','rejected') GROUP BY day`, from, to);
+   FROM orders WHERE order_date >= date(?) AND order_date < date(?, '+1 day') AND order_status NOT IN ('cancelled','rejected') GROUP BY day`, from, to);
  const payRows = qa(`SELECT date(payment_date) day, COUNT(*) count, COALESCE(SUM(amount),0) total
-   FROM payments WHERE date(payment_date) BETWEEN date(?) AND date(?) AND amount > 0 GROUP BY day`, from, to);
+   FROM payments WHERE payment_date >= date(?) AND payment_date < date(?, '+1 day') AND amount > 0 GROUP BY day`, from, to);
  const expRows = qa(`SELECT date(expense_date) day, COUNT(*) count, COALESCE(SUM(amount),0) total
-   FROM expenses WHERE date(expense_date) BETWEEN date(?) AND date(?) GROUP BY day`, from, to);
+   FROM expenses WHERE expense_date >= date(?) AND expense_date < date(?, '+1 day') GROUP BY day`, from, to);
 
  // Dense day list so days with no activity still show up as rows of zeros.
  const days = [];
@@ -400,7 +409,7 @@ router.get('/daily-tasks', requireRole('manager', 'admin'), (req, res) => {
    SELECT al.id, al.action, al.entity, al.entity_id, al.details, al.created_at,
           date(al.created_at) day, u.name AS user_name, r.name AS user_role
    FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id LEFT JOIN roles r ON r.id = u.role_id
-   WHERE date(al.created_at) BETWEEN date(?) AND date(?)
+   WHERE al.created_at >= date(?) AND al.created_at < date(?, '+1 day')
      AND al.action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ')
    ORDER BY al.created_at DESC, al.id DESC LIMIT 500`, from, to);
 
@@ -417,7 +426,7 @@ router.get('/cashier-performance', requireRole('manager', 'admin'), (req, res) =
  const { from, to } = req.query;
  let dateCond = '';
  const dateParams = [];
- if (from && to) { dateCond = ' AND date(s.sale_date) BETWEEN date(?) AND date(?)'; dateParams.push(from, to); }
+ if (from && to) { dateCond = " AND s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day')"; dateParams.push(from, to); }
  res.json(db.prepare(`
   SELECT u.id, u.name, o.name AS office, COUNT(s.id) sales_count, COALESCE(SUM(s.total),0) total
   FROM users u
@@ -442,13 +451,13 @@ router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) 
   SELECT COUNT(s.id) sales_count, COALESCE(SUM(s.total),0) total_revenue,
       COALESCE(SUM(s.paid_amount),0) total_paid, COALESCE(SUM(s.total - s.paid_amount),0) outstanding
   FROM sales s
-  WHERE date(s.sale_date) BETWEEN date(?) AND date(?) ${cashierFilter}
+  WHERE s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day') ${cashierFilter}
  `).get(...params);
 
  const distinctProducts = db.prepare(`
   SELECT COUNT(DISTINCT si.product_id) c
   FROM sale_items si JOIN sales s ON s.id = si.sale_id
-  WHERE date(s.sale_date) BETWEEN date(?) AND date(?) ${cashierFilter}
+  WHERE s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day') ${cashierFilter}
  `).get(...params);
 
  // qty and profit need separate aggregation from sale_items
@@ -457,7 +466,7 @@ router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) 
       COALESCE(SUM(si.cost_at_sale * si.quantity),0) total_cost,
       COALESCE(SUM(si.total - si.cost_at_sale * si.quantity),0) total_profit
   FROM sale_items si JOIN sales s ON s.id = si.sale_id
-  WHERE date(s.sale_date) BETWEEN date(?) AND date(?) ${cashierFilter}
+  WHERE s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day') ${cashierFilter}
  `).get(...params);
 
  const perProduct = db.prepare(`
@@ -470,7 +479,7 @@ router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) 
   JOIN sales s ON s.id = si.sale_id
   JOIN products p ON p.id = si.product_id
   LEFT JOIN categories c ON c.id = p.category_id
-  WHERE date(s.sale_date) BETWEEN date(?) AND date(?) ${cashierFilter}
+  WHERE s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day') ${cashierFilter}
   GROUP BY p.id ORDER BY revenue DESC
  `).all(...params);
 
@@ -480,7 +489,7 @@ router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) 
        COALESCE(SUM(s.total),0) total
    FROM users u
    JOIN roles r ON r.id = u.role_id
-   LEFT JOIN sales s ON s.created_by = u.id AND date(s.sale_date) BETWEEN date(?) AND date(?)
+   LEFT JOIN sales s ON s.created_by = u.id AND s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day')
    LEFT JOIN offices o ON o.id = u.office_id
    WHERE r.name IN ('cashier','clerk','manager','admin')
    GROUP BY u.id ORDER BY total DESC, u.id
@@ -489,7 +498,7 @@ router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) 
    SELECT s.created_by AS id, COALESCE(SUM(si.quantity),0) qty,
        COALESCE(SUM(si.total - si.cost_at_sale * si.quantity),0) profit
    FROM sale_items si JOIN sales s ON s.id = si.sale_id
-   WHERE date(s.sale_date) BETWEEN date(?) AND date(?) GROUP BY s.created_by
+   WHERE s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day') GROUP BY s.created_by
   `).all(from, to);
   const byId = Object.fromEntries(items.map((r) => [r.id, r]));
   return rows.map((r) => ({ ...r, qty: Number(byId[r.id]?.qty || 0), profit: Number(byId[r.id]?.profit || 0) }));
@@ -502,7 +511,7 @@ router.get('/cashier-daily-detail', requireRole('manager', 'admin'), (req, res) 
   LEFT JOIN customers c ON c.id = s.customer_id
   LEFT JOIN users u ON u.id = s.created_by
   LEFT JOIN offices o ON o.id = u.office_id
-  WHERE date(s.sale_date) BETWEEN date(?) AND date(?) ${cashierFilter}
+  WHERE s.sale_date >= date(?) AND s.sale_date < date(?, '+1 day') ${cashierFilter}
   ORDER BY s.sale_date DESC, s.id DESC LIMIT 200
  `).all(...params);
 

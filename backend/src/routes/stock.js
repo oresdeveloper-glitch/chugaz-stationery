@@ -10,7 +10,7 @@ router.get('/movements', requireRole('admin'), (req, res) => {
  const params = [];
  if (product_id) { conds.push('sm.product_id = ?'); params.push(product_id); }
  if (type) { conds.push('sm.movement_type = ?'); params.push(type); }
- if (from && to) { conds.push('date(sm.created_at) BETWEEN date(?) AND date(?)'); params.push(from, to); }
+ if (from && to) { conds.push("sm.created_at >= date(?) AND sm.created_at < date(?, '+1 day')"); params.push(from, to); }
  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
  const rows = db.prepare(`
   SELECT sm.*, p.name AS product_name, p.sku, u.name AS created_by_name

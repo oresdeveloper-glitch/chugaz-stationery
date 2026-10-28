@@ -36,9 +36,12 @@ export default function SaleBell() {
       seen.current = new Set(Array.isArray(raw) ? raw : []);
     } catch { /* ignore */ }
     let stopped = false;
+    let busy = false;
+    let nudgeTimer = null;
 
     const tick = async () => {
-      if (stopped) return;
+      if (stopped || busy) return;
+      busy = true;
       try {
         const res = await api('/notifications');
         const rows = (res && res.notifications) || [];
@@ -59,7 +62,7 @@ export default function SaleBell() {
           }
         }
         try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seen.current].slice(-300))); } catch { /* ignore */ }
-      } catch (e) { /* ignore */ }
+      } catch (e) { /* ignore */ } finally { busy = false; }
     };
 
     tick();
@@ -67,14 +70,16 @@ export default function SaleBell() {
     // sale or order is generated on this instance (so a sale from another
     // till toasts even while this tab sits in the background, exactly like
     // the old ticker did), and focus/visibility catches up whatever was
-    // missed while the stream was down. No timer polls the API.
-    const onNudge = () => tick();
+    // missed while the stream was down. No timer polls the API. A burst of
+    // nudges collapses into one refresh.
+    const onNudge = () => { clearTimeout(nudgeTimer); nudgeTimer = setTimeout(tick, 200); };
     const onWake = () => { if (!document.hidden) tick(); };
     window.addEventListener('chugaz-nudge', onNudge);
     window.addEventListener('focus', onWake);
     document.addEventListener('visibilitychange', onWake);
     return () => {
       stopped = true;
+      clearTimeout(nudgeTimer);
       window.removeEventListener('chugaz-nudge', onNudge);
       window.removeEventListener('focus', onWake);
       document.removeEventListener('visibilitychange', onWake);

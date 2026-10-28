@@ -121,7 +121,32 @@ export function setDbPin(m) {
 // the instance holding the most data. A dead pin (recycled serverless disk)
 // must never heal by gambling on a random instance - that lottery is what
 // parked sessions on an EMPTY twin and left dashboards reading 0.
-const AFFINITY_TRIES = 1;
+
+// Every page asks /sync (mount tick, SSE hint, focus, backup check). Concurrent
+// callers share ONE request and the answer is reused for a beat, so a burst of
+// nudges can no longer turn into a burst of full-table version scans.
+const SYNC_TTL_MS = 600;
+let syncInFlight = null;
+let syncCache = { at: 0, data: null };
+
+export function lastSync() { return syncCache.data; }
+export function lastSyncVersion() {
+  const s = syncCache.data;
+  return s && s.version != null ? String(s.version) : null;
+}
+
+function syncOnce() {
+  if (syncCache.data && Date.now() - syncCache.at < SYNC_TTL_MS) return Promise.resolve(syncCache.data);
+  if (syncInFlight) return syncInFlight;
+  syncInFlight = request('/sync', {}, false)
+    .then((d) => { syncCache = { at: Date.now(), data: d }; return d; })
+    .finally(() => { syncInFlight = null; });
+  return syncInFlight;
+}
+
+// Identical concurrent GETs collapse into one round trip (two components
+// mounting at once used to fetch the same URL twice).
+const inFlightGets = new Map();
 
 // Probe the fleet in parallel and pin to the instance with the most data.
 // A fresher deliberate-reset epoch outranks raw counts: after an admin
@@ -130,6 +155,18 @@ const AFFINITY_TRIES = 1;
 // reset_at, then sales, then orders, then categories. The anyInstance
 // probes never recurse: they skip the affinity path entirely.
 async function rePinToRichest() {
+  // Concurrent 409s must not each probe the fleet: one shared probe serves them
+  // all (the old code fired 3 fleet calls per failed request, which is what
+  // multiplied a single stale pin into ~20 /sync calls per page load).
+  if (rePinP && Date.now() - rePinAt < 2000) return rePinP;
+  rePinAt = Date.now();
+  rePinP = probeRichest().finally(() => { rePinP = null; });
+  return rePinP;
+}
+let rePinP = null;
+let rePinAt = 0;
+
+async function probeRichest() {
   try {
     const rs = await Promise.all([0, 1, 2].map(() => request('/sync', { anyInstance: true }, false)));
     const w = (x) => [Number(x.reset_at) || 0, Number(x.sales) || 0, Number(x.orders) || 0, Number(x.categories) || 0];
@@ -206,25 +243,21 @@ async function request(path, options = {}, shop = false) {
   let res = await send();
   let data = null;
   // Retry on 409 instance_mismatch: nothing ran server-side, so it is safe.
+  // The 409 body names the instance that actually answered, so we adopt it and
+  // retry immediately. Probing the whole fleet on every mismatch (3 extra
+  // round trips, fired once per concurrent request) is what turned a single
+  // stale pin into a request storm on page load.
   if (affinity) {
-    for (let attempt = 0; attempt <= AFFINITY_TRIES; attempt++) {
-      if (res.status !== 409) break;
-      data = await res.json().catch(() => null);
-      if (!data || data.code !== 'instance_mismatch') break;
-      data = null;
-      if (attempt === AFFINITY_TRIES) {
-        // The pinned instance is gone (recycled disk). Pin to the instance
-        // that actually holds the data before the next send; if even that
-        // pin 409s (load-balancer fluke), accept any instance once.
-        if (shop) setDbPin(null);
-        else await rePinToRichest();
-        res = await send();
-        if (res.status === 409) { setDbPin(null); res = await send(); }
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 60 + Math.random() * 140));
+    let hops = 0;
+    while (res.status === 409 && hops < 3) {
+      const body = await res.json().catch(() => null);
+      if (!body || body.code !== 'instance_mismatch') break;
+      hops += 1;
+      if (body.db_marker) setDbPin(body.db_marker);
+      else await rePinToRichest();
       res = await send();
     }
+    if (res.status === 409) { setDbPin(null); res = await send(); }
   }
   const answered = res.headers.get('X-Db-Marker');
   if (answered && !options.anyInstance) {
@@ -268,7 +301,16 @@ async function request(path, options = {}, shop = false) {
 }
 
 export async function api(path, options = {}) {
-  return request(path, options, false);
+  const isGet = !options.method || options.method === 'GET';
+  if (!isGet || options.anyInstance || options.signal) return request(path, options, false);
+  if (path === '/sync') return syncOnce();
+  // Collapse identical concurrent reads (two effects mounting together) into a
+  // single request; each completes and leaves the map immediately.
+  const pending = inFlightGets.get(path);
+  if (pending) return pending;
+  const run = request(path, options, false).finally(() => { inFlightGets.delete(path); });
+  inFlightGets.set(path, run);
+  return run;
 }
 
 export async function shopApi(path, options = {}) {

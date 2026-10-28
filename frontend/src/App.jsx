@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { getUser, clearAuth, isSessionValid, api, getDbPin } from './lib/api';
+import { getUser, clearAuth, isSessionValid, api, getDbPin, lastSyncVersion } from './lib/api';
 import { dbKeepInit, convergeInstances, knownCounts, canKeep } from './lib/dbkeep';
 import Login from './pages/Login.jsx';
 import Layout from './components/Layout.jsx';
@@ -100,9 +100,13 @@ export default function App() {
         es.onmessage = (e) => {
           try {
             const d = JSON.parse(e.data);
-            // hello = (re)connect catch-up: anything generated while the
-            // stream was down is picked up by the /sync version comparison.
-            if (d && (d.type === 'change' || d.type === 'hello')) nudge();
+            if (!d || (d.type !== 'change' && d.type !== 'hello')) return;
+            // The hello frame is a reconnect catch-up, and the app already ran
+            // its mount/focus version check. Nudging on an unchanged version
+            // made every stream reconnect fan out into a fresh dashboard +
+            // notifications + sync round trip for nothing.
+            if (d.version != null && String(d.version) === lastSyncVersion()) return;
+            nudge();
           } catch (err) { /* ignore malformed frame */ }
         };
         es.onerror = () => {
@@ -159,13 +163,19 @@ export default function App() {
     let seen = [];
     let suppressed = false;
     let hold = 0;
-    let lastConv = 0;
+    // Persisted across reloads: the fleet sweep is a discovery cost (several
+    // probes + possibly a whole-database merge), so it must not restart from
+    // zero on every page load.
+    let lastConv = Number(localStorage.getItem('sst_converge_at') || 0) || 0;
     let stopped = false;
+    let busy = false;
+    let nudgeTimer = null;
     const announce = (v) => {
       try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'], version: v } })); } catch (e) { /* ignore */ }
     };
     const tick = async () => {
-      if (stopped || document.hidden) return;
+      if (stopped || document.hidden || busy) return;
+      busy = true;
       try {
         let s = await api('/sync');
         // Wipe signature: live transaction counts fell below what this browser
@@ -185,13 +195,14 @@ export default function App() {
         // for a richer instance and re-merge if found.
         if (Date.now() - lastConv >= 60000) {
           lastConv = Date.now();
+          try { localStorage.setItem('sst_converge_at', String(lastConv)); } catch (e) { /* ignore */ }
           try {
             const pin = getDbPin();
             // Converge whenever any live instance holds more sales than our pinned one.
             if (canKeep() && pin) {
               const mine = Number(s.sales) || 0;
               let richer = false;
-              for (let i = 0; i < 6 && !richer; i++) {
+              for (let i = 0; i < 3 && !richer; i++) {
                 const p = await api('/sync', { anyInstance: true });
                 if (p && p.db_marker !== pin && (Number(p.sales) || 0) > mine) richer = true;
               }
@@ -225,16 +236,18 @@ export default function App() {
           suppressed = true;
           hold = 1;
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) { /* ignore */ } finally { busy = false; }
     };
     tick();
     const onVis = () => { if (!document.hidden) tick(); };
-    const onNudge = () => tick();
+    // A burst of nudges (SSE hint + focus + post-write) is one version check.
+    const onNudge = () => { clearTimeout(nudgeTimer); nudgeTimer = setTimeout(tick, 150); };
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('focus', onVis);
     window.addEventListener('chugaz-nudge', onNudge);
     return () => {
       stopped = true;
+      clearTimeout(nudgeTimer);
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('focus', onVis);
       window.removeEventListener('chugaz-nudge', onNudge);

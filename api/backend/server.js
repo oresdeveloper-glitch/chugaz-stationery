@@ -77,6 +77,15 @@ app.use((req, res, next) => {
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Any write makes the cached sync-version stale: drop it when the response
+// finishes so the very next /sync (or SSE tick) recomputes.
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.on('finish', () => { syncMemo.at = 0; });
+  }
+  next();
+});
+
 // Public
 app.use('/api/auth', require('./src/routes/auth'));
 app.use('/api/shop', require('./src/routes/shop'));
@@ -130,37 +139,72 @@ app.get('/api/health', (req, res) => {
 const SYNC_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT SUM(total) FROM sales),0) || ':' || COALESCE((SELECT SUM(paid_amount) FROM sales),0) || ':' || (SELECT COUNT(*) FROM sale_returns) || '|' || (SELECT COUNT(*) FROM orders) || ':' || COALESCE((SELECT MAX(updated_at) FROM orders),'') || '|' || (SELECT COUNT(*) FROM order_status_history) || '|' || (SELECT COUNT(*) FROM stock_movements) || '|' || (SELECT COUNT(*) FROM products) || ':' || COALESCE((SELECT SUM(selling_price) FROM products),0) || ':' || COALESCE((SELECT SUM(current_stock) FROM products),0) || '|' || (SELECT COUNT(*) FROM purchases) || '|' || (SELECT COUNT(*) FROM expenses) || '|' || (SELECT COUNT(*) FROM customers) || '|' || (SELECT COUNT(*) FROM users) || '|' || (SELECT COUNT(*) FROM payments) || '|' || (SELECT COUNT(*) FROM notifications) || '|' || (SELECT COUNT(*) FROM contact_messages) || '|' || (SELECT COUNT(*) FROM order_returns) || ':' || COALESCE((SELECT MAX(processed_at) FROM order_returns),'') || '|' || (SELECT COUNT(*) FROM audit_logs WHERE action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ','RESTORE','RESTORE_MERGE')) || '|' || (SELECT COUNT(*) FROM categories) || ':' || (SELECT COUNT(*) FROM product_categories) || ':' || (SELECT COUNT(*) FROM brands) || ':' || (SELECT COUNT(*) FROM suppliers) || '|' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(sku,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(image,''))+LENGTH(COALESCE(description,''))+LENGTH(COALESCE(unit,''))),0) FROM products) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(phone,''))+LENGTH(COALESCE(email,''))),0) FROM customers) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(email,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(avatar,''))),0) FROM users) AS v";
 const SYNC_DATA_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT SUM(total) FROM sales),0) || ':' || COALESCE((SELECT SUM(paid_amount) FROM sales),0) || ':' || (SELECT COUNT(*) FROM sale_returns) || '|' || (SELECT COUNT(*) FROM orders) || ':' || COALESCE((SELECT MAX(updated_at) FROM orders),'') || '|' || (SELECT COUNT(*) FROM order_status_history) || '|' || (SELECT COUNT(*) FROM stock_movements) || '|' || (SELECT COUNT(*) FROM products) || ':' || COALESCE((SELECT SUM(selling_price) FROM products),0) || ':' || COALESCE((SELECT SUM(current_stock) FROM products),0) || '|' || (SELECT COUNT(*) FROM purchases) || '|' || (SELECT COUNT(*) FROM expenses) || '|' || (SELECT COUNT(*) FROM customers) || '|' || (SELECT COUNT(*) FROM users) || '|' || (SELECT COUNT(*) FROM payments) || '|' || (SELECT COUNT(*) FROM notifications) || '|' || (SELECT COUNT(*) FROM contact_messages) || '|' || (SELECT COUNT(*) FROM order_returns) || ':' || COALESCE((SELECT MAX(processed_at) FROM order_returns),'') || '|' || '0' || '|' || (SELECT COUNT(*) FROM categories) || ':' || (SELECT COUNT(*) FROM product_categories) || ':' || (SELECT COUNT(*) FROM brands) || ':' || (SELECT COUNT(*) FROM suppliers) || '|' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(sku,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(image,''))+LENGTH(COALESCE(description,''))+LENGTH(COALESCE(unit,''))),0) FROM products) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(phone,''))+LENGTH(COALESCE(email,''))),0) FROM customers) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(email,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(avatar,''))),0) FROM users) AS v";
 
-app.get('/api/sync', (req, res) => {
-  let version = null, dataVersion = null, sales = null, orders = null, categories = null, reset_at = null;
+// The version hash aggregates ~17 whole tables. Every open tab asks for it
+// (SSE ticker, post-write checks, focus), so compute it at most once per
+// SHORT window per process and share the answer between all clients. A write
+// clears the memo as soon as its response finishes (see the middleware above),
+// so nothing can read a version older than the process's own last write.
+const SYNC_TTL_MS = 1200;
+let syncMemo = { at: 0, data: null };
+
+function syncSnapshot() {
+  const now = Date.now();
+  if (syncMemo.data && now - syncMemo.at < SYNC_TTL_MS) return syncMemo.data;
+  const data = { version: null, data_version: null, sales: null, orders: null, categories: null, reset_at: null };
   try {
     const m = require('./src/db');
     if (m.dbReady) {
-      try {
-        const r = m.db.prepare(SYNC_SQL).get();
-        version = r && r.v != null ? String(r.v) : null;
-      } catch (_) {
-        try { version = 's' + m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; dataVersion = version; } catch (__) { version = null; }
-      }
+      // One aggregate serves both hashes: SYNC_DATA_SQL is SYNC_SQL without the
+      // audit-log counter (whose actions are noise for the data version). The
+      // audit count is appended instead of being a second whole-table scan -
+      // the old pair ran the same 17-table aggregate twice per check.
       try {
         const d = m.db.prepare(SYNC_DATA_SQL).get();
-        dataVersion = d && d.v != null ? String(d.v) : null;
-      } catch (_) {}
+        data.data_version = d && d.v != null ? String(d.v) : null;
+      } catch (_) { /* keep the empty snapshot */ }
+      let auditCount = 0;
+      try {
+        auditCount = Number(m.db.prepare("SELECT COUNT(*) c FROM audit_logs WHERE action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ','RESTORE','RESTORE_MERGE')").get().c) || 0;
+      } catch (_) { /* audit table missing */ }
+      data.version = data.data_version != null ? `${data.data_version}|${auditCount}` : null;
+      if (data.version == null) {
+        try {
+          const c = m.db.prepare('SELECT COUNT(*) c FROM sales').get().c;
+          data.version = 's' + c;
+          data.data_version = data.version;
+        } catch (_) { /* degraded: no version at all */ }
+      }
       // Row counts let the client ELECT a canonical leader: serverless runs
       // several instances on independent ephemeral disks, and the instance a
       // session happens to pin first can be an empty twin (sales=0) while
       // another holds the real data. Reporting counts here lets the client
       // discover the instance with the most data, merge everything into it,
       // and re-pin there — so the POS total stops snapping back to 0.
-      try { sales = m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; } catch (_) {}
-      try { orders = m.db.prepare('SELECT COUNT(*) c FROM orders').get().c; } catch (_) {}
-      try { categories = m.db.prepare('SELECT COUNT(*) c FROM categories').get().c; } catch (_) {}
+      try { data.sales = m.db.prepare('SELECT COUNT(*) c FROM sales').get().c; } catch (_) {}
+      try { data.orders = m.db.prepare('SELECT COUNT(*) c FROM orders').get().c; } catch (_) {}
+      try { data.categories = m.db.prepare('SELECT COUNT(*) c FROM categories').get().c; } catch (_) {}
       // Deliberate-wipe epoch: instance ranking must put a fresher reset_at
       // above raw counts, or an un-reset twin (old sales) would win the
       // election and the deleted history would come back.
-      try { reset_at = Number(m.db.prepare("SELECT value FROM settings WHERE key='reset_at'").get()?.value) || null; } catch (_) {}
+      try { data.reset_at = Number(m.db.prepare("SELECT value FROM settings WHERE key='reset_at'").get()?.value) || null; } catch (_) {}
     }
-  } catch (_) { version = null; }
-  res.json({ ok: true, version, data_version: dataVersion, db_marker: res.getHeader('X-Db-Marker') || null, sales, orders, categories, reset_at });
+  } catch (_) { /* degraded db: keep the empty snapshot */ }
+  syncMemo = { at: now, data };
+  return data;
+}
+
+app.get('/api/sync', (req, res) => {
+  const snap = syncSnapshot();
+  res.json({
+    ok: true,
+    version: snap.version,
+    data_version: snap.data_version,
+    db_marker: res.getHeader('X-Db-Marker') || null,
+    sales: snap.sales,
+    orders: snap.orders,
+    categories: snap.categories,
+    reset_at: snap.reset_at,
+  });
 });
 
 // Live push channel (SSE). The browser opens this once and the server sends
@@ -193,8 +237,7 @@ app.get('/api/events', (req, res) => {
     try {
       const m = require('./src/db');
       if (!m || !m.dbReady) return null;
-      const r = m.db.prepare(SYNC_SQL).get();
-      return r && r.v != null ? String(r.v) : null;
+      return syncSnapshot().version;
     } catch (_) { return null; }
   };
   let last = readVersion();

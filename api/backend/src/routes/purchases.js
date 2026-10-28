@@ -38,7 +38,7 @@ router.get('/', (req, res) => {
  if (supplier_id) { conds.push('pu.supplier_id = ?'); params.push(supplier_id); }
  if (status === 'outstanding') { conds.push('pu.payment_status != \'paid\''); }
  else if (status) { conds.push('pu.payment_status = ?'); params.push(status); }
- if (from && to) { conds.push('date(pu.purchase_date) BETWEEN date(?) AND date(?)'); params.push(from, to); }
+ if (from && to) { conds.push("pu.purchase_date >= date(?) AND pu.purchase_date < date(?, '+1 day')"); params.push(from, to); }
  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
  const rows = db.prepare(purchaseSelect(where + ' ORDER BY pu.purchase_date DESC, pu.id DESC')).all(...params);
  res.json(rows);

@@ -51,6 +51,23 @@ function sendBackup(res, data) {
  res.send(data);
 }
 
+// The redacted copy is a full-file copy plus a VACUUM, and every staff browser
+// asks for one periodically (and after writes). VACUUM takes the database's
+// only write lock, so doing it per request stalled every other query on the
+// instance. Keep one redacted file and rebuild it only when the checkpointed
+// main file actually changed.
+let redactedBackup = { key: null, file: null };
+
+function redactedBackupFile() {
+ const stat = fs.statSync(DB_PATH);
+ const key = `${stat.size}:${stat.mtimeMs}`;
+ if (redactedBackup.file && redactedBackup.key === key && fs.existsSync(redactedBackup.file)) return redactedBackup.file;
+ const file = path.join(path.dirname(DB_PATH), 'backup-redacted.db');
+ writeRedactedCopy(DB_PATH, file);
+ redactedBackup = { key, file };
+ return file;
+}
+
 // Admins get the raw file; every other staff role gets password hashes
 // stripped. Cashiers and clerks may hold snapshots too: each extra browser
 // that can merge data back after a disk reset is one more replica of the shop.
@@ -60,14 +77,10 @@ router.get('/backup', requireRole('admin', 'manager', 'cashier', 'clerk'), (req,
   sendBackup(res, fs.readFileSync(DB_PATH));
   return;
  }
- const tmp = path.join(path.dirname(DB_PATH), `backup-mgr-${Date.now()}.db`);
  try {
-  writeRedactedCopy(DB_PATH, tmp);
-  sendBackup(res, fs.readFileSync(tmp));
+  sendBackup(res, fs.readFileSync(redactedBackupFile()));
  } catch (e) {
   res.status(500).json({ error: 'Backup failed: ' + e.message });
- } finally {
-  try { fs.unlinkSync(tmp); } catch (_) { /* already sent or never created */ }
  }
 });
 

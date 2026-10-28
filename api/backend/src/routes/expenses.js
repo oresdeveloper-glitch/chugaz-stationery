@@ -9,7 +9,7 @@ router.get('/', requireRole('manager', 'admin'), (req, res) => {
  const conds = [];
  const params = [];
  if (category) { conds.push('category = ?'); params.push(category); }
- if (from && to) { conds.push('date(expense_date) BETWEEN date(?) AND date(?)'); params.push(from, to); }
+ if (from && to) { conds.push("expense_date >= date(?) AND expense_date < date(?, '+1 day')"); params.push(from, to); }
  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
  res.json(db.prepare(`SELECT e.*, u.name AS created_by_name FROM expenses e LEFT JOIN users u ON u.id=e.created_by ${where} ORDER BY expense_date DESC, id DESC`).all(...params));
 });
