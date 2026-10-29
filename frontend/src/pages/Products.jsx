@@ -25,6 +25,7 @@ export default function Products() {
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('');
   const [tab, setTab] = useState('products');
+  const [showArchived, setShowArchived] = useState(false);
   const [modal, setModal] = useState(null);
   const [catModal, setCatModal] = useState(null);
   const [catItems, setCatItems] = useState([]);
@@ -96,10 +97,14 @@ export default function Products() {
   };
 
   const remove = async (p) => {
-    if (!confirm(`Delete product "${p.name}"? (products with history are deactivated)`)) return;
+    if (!confirm(`Permanently delete "${p.name}"? This removes the product and cannot be undone.`)) return;
     try {
-      await api(`/products/${p.id}`, { method: 'DELETE' });
-      toast('Product deleted/deactivated');
+      const r = await api(`/products/${p.id}`, { method: 'DELETE' });
+      if (r && r.archived) {
+        toast(r.message || 'Product has past invoices, so it was archived instead.', 'error');
+      } else {
+        toast('Product deleted permanently');
+      }
       load();
     } catch (err) { toast(err.message, 'error'); }
   };
@@ -261,7 +266,11 @@ export default function Products() {
 
   const orderedCats = orderCats(categories);
   const catIds = cat ? catFilterIds(categories, cat) : null;
-  const filtered = catIds ? products.filter((p) => productInCats(p, catIds)) : products;
+  // Archived products (kept only because they appear on past invoices) stay out
+  // of the catalog unless they are explicitly asked for.
+  const archivedCount = products.filter((p) => p.status === 'inactive').length;
+  const visible = showArchived ? products : products.filter((p) => p.status !== 'inactive');
+  const filtered = catIds ? visible.filter((p) => productInCats(p, catIds)) : visible;
   const openBarcodeCat = (c) => setBarcodeCat({ id: c.id, name: c.name, barcode: c.barcode || categoryBarcode(c.id) });
   const editCatBarcode = catModal?.id ? (categories.find((c) => c.id === catModal.id)?.barcode || categoryBarcode(catModal.id)) : null;
 
@@ -290,6 +299,12 @@ export default function Products() {
               <option value="">All categories</option>
               {orderedCats.map((c) => <option key={c.id} value={c.id}>{catLabel(categories, c)}</option>)}
             </select>
+            {archivedCount > 0 && (
+              <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', cursor: 'pointer' }} title="Products that appear on past invoices cannot be deleted; they are archived here">
+                <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+                Show archived ({archivedCount})
+              </label>
+            )}
           </>
         )}
       </div>
@@ -302,7 +317,10 @@ export default function Products() {
                 {p.image ? <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || 'P'} loading="lazy" /> : <span style={{ display: 'grid', placeItems: 'center', width: '100%', height: '100%', background: 'var(--panel-2)', color: 'var(--muted)', fontWeight: 600 }}>{p.name?.[0] || 'P'}</span>}
               </div>
               <div className="catalog-card-body">
-                <div className="catalog-name">{p.name}</div>
+                <div className="catalog-name">
+                  {p.name}
+                  {p.status === 'inactive' && <span className="badge gray" style={{ marginLeft: 8, textTransform: 'none' }}>archived</span>}
+                </div>
                 <div className="catalog-brand">{p.category_name || 'No category'} · {p.sku}</div>
                 <div className="catalog-price">
                   <span className="catalog-price-cur">{fmt(p.selling_price)}</span>
@@ -333,15 +351,14 @@ export default function Products() {
                         });
                       } catch (err) { toast(err.message, 'error'); }
                     }}>Edit</button>
-                    {/* Photos are part of maintaining a product, so managers get
-                        them too - not just admins. Deleting the product stays
-                        an admin action. */}
+                    {/* Photos and deleting are part of maintaining a product, so
+                        managers get them too - not just admins. */}
                     <label className="btn sm" style={{ cursor: 'pointer' }} title="Add photos"><I name="camera" size={14} />
                       <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => { uploadImages(p, e.target.files); e.target.value = ''; }} />
                     </label>
                     <button className="btn sm" onClick={() => openGallery(p)} title="Manage photo gallery"><I name="image" size={14} /></button>
-                    {isAdmin && (
-                      <button className="btn sm danger" onClick={() => remove(p)} title="Delete product"><I name="x" size={14} /></button>
+                    {canManage && (
+                      <button className="btn sm danger" onClick={() => remove(p)} title="Delete product permanently"><I name="x" size={14} /></button>
                     )}
                   </div>
                 )}

@@ -111,6 +111,75 @@ function variantsOf(id) {
  return db.prepare('SELECT * FROM products WHERE parent_id = ? ORDER BY id').all(id).map(withUnits);
 }
 
+// A product plus its variants. Variants are full product rows linked through
+// parent_id, so deleting a parent has to take its children with it.
+function familyIds(id) {
+ const seen = new Set();
+ const queue = [Number(id)];
+ while (queue.length) {
+  const cur = queue.shift();
+  if (!Number.isInteger(cur) || seen.has(cur)) continue;
+  seen.add(cur);
+  for (const row of db.prepare('SELECT id FROM products WHERE parent_id = ?').all(cur)) queue.push(Number(row.id));
+ }
+ return [...seen];
+}
+
+// Rows that make a product part of the shop's accounting history. sale_items
+// and purchase_items only store product_id (no name snapshot) and the invoice
+// and report queries join products for the name, so deleting the product would
+// silently rewrite documents that have already been printed or handed out.
+function accountingUse(ids) {
+ const count = (sql) => {
+  try { return Number(db.prepare(sql).get(...ids).c) || 0; } catch (_) { return 0; }
+ };
+ if (!ids.length) return { sales: 0, purchases: 0, returns: 0 };
+ const marks = ids.map(() => '?').join(',');
+ return {
+  sales: count(`SELECT COUNT(*) c FROM sale_items WHERE product_id IN (${marks})`),
+  purchases: count(`SELECT COUNT(*) c FROM purchase_items WHERE product_id IN (${marks})`),
+  returns: count(`SELECT COUNT(*) c FROM sale_return_items WHERE product_id IN (${marks})`)
+   + count(`SELECT COUNT(*) c FROM purchase_return_items WHERE product_id IN (${marks})`),
+ };
+}
+
+function hasAccountingHistory(ids) {
+ const used = accountingUse(ids);
+ return used.sales + used.purchases + used.returns > 0;
+}
+
+// Photo URLs owned by these products, collected before the rows disappear so
+// the stored blobs can be dropped afterwards.
+function productPhotoUrls(ids) {
+ const urls = [];
+ for (const pid of ids) {
+  const row = db.prepare('SELECT image FROM products WHERE id = ?').get(pid);
+  if (row && row.image) urls.push(row.image);
+  for (const img of db.prepare('SELECT path FROM product_images WHERE product_id = ?').all(pid)) urls.push(img.path);
+ }
+ return urls;
+}
+
+// Remove every non-accounting row attached to these products: variants, photo
+// links, category memberships, cart lines and stock movements. order_items
+// keeps its own product_name snapshot, so only the dangling link is cleared.
+// Caller owns the transaction.
+function purgeProductRows(ids) {
+ const marks = ids.map(() => '?').join(',');
+ db.prepare(`UPDATE order_items SET product_id = NULL WHERE product_id IN (${marks})`).run(...ids);
+ db.prepare(`DELETE FROM cart_items WHERE product_id IN (${marks})`).run(...ids);
+ db.prepare(`DELETE FROM stock_movements WHERE product_id IN (${marks})`).run(...ids);
+ db.prepare(`DELETE FROM product_categories WHERE product_id IN (${marks})`).run(...ids);
+ db.prepare(`DELETE FROM product_images WHERE product_id IN (${marks})`).run(...ids);
+ // Children first: products.parent_id has no cascade.
+ db.prepare(`DELETE FROM products WHERE parent_id IN (${marks})`).run(...ids);
+ db.prepare(`DELETE FROM products WHERE id IN (${marks})`).run(...ids);
+}
+
+// Permanent delete with the accounting guard lives in the DELETE route below:
+// the product (and its variants) is only removed when no invoice or purchase
+// line points at it; otherwise it is archived instead.
+
 router.get('/', (req, res) => {
  const { q, barcode, category_id, status, low, office_id } = req.query;
  const conds = [];
@@ -316,6 +385,7 @@ router.put('/:id', requireRole('admin', 'manager'), (req, res) => {
  const barcode = (p.barcode !== undefined && p.barcode !== null && p.barcode !== '')
   ? p.barcode
   : (targetCat ? barcodeForCategory(targetCat) : existing.barcode);
+ const variantPhotoUrls = [];
  transact(() => {
   const update = db.prepare(`
    UPDATE products SET sku=?, barcode=?, name=?, category_id=?, brand_id=?, unit=?, purchase_price=?,
@@ -377,31 +447,56 @@ router.put('/:id', requireRole('admin', 'manager'), (req, res) => {
    // remove variant rows that were deleted in the form
    for (const id of existingVariantIds) {
     if (!keep.has(id)) {
-     const hasMoves = db.prepare('SELECT COUNT(*) c FROM stock_movements WHERE product_id=?').get(id).c;
-     if (hasMoves > 0) db.prepare("UPDATE products SET status='inactive' WHERE id=?").run(id);
-     else db.prepare('DELETE FROM products WHERE id=?').run(id);
+     // A variant that has been sold or bought keeps its row (archived) so the
+     // invoices that mention it still resolve; everything else goes for real.
+     if (hasAccountingHistory([id])) db.prepare("UPDATE products SET status='inactive' WHERE id=?").run(id);
+     else {
+      variantPhotoUrls.push(...productPhotoUrls([id]));
+      purgeProductRows([id]);
+     }
     }
    }
   }
  });
+ for (const url of variantPhotoUrls) dropUnusedMedia(url);
  res.json({ ok: true });
 });
 
-router.delete('/:id', requireRole('admin'), (req, res) => {
- // Business rule: deactivate instead of hard delete if the product has movement history
- const hasMovements = db.prepare('SELECT COUNT(*) c FROM stock_movements WHERE product_id=?').get(req.params.id).c;
- if (hasMovements > 0) {
-  db.prepare("UPDATE products SET status='inactive' WHERE id=?").run(req.params.id);
-  audit(req.user.id, 'DEACTIVATE', 'product', Number(req.params.id), { reason: 'has stock history' });
-  return res.json({ ok: true, deactivated: true });
+router.delete('/:id', requireRole('admin', 'manager'), (req, res) => {
+ const id = Number(req.params.id);
+ const product = db.prepare('SELECT id, name FROM products WHERE id = ?').get(id);
+ if (!product) return res.status(404).json({ error: 'Product not found' });
+ // Managers maintain the catalog, so they may delete products too - the same
+ // people who create and edit them.
+ const ids = familyIds(id);
+ const used = accountingUse(ids);
+ const records = used.sales + used.purchases + used.returns;
+ if (records > 0) {
+  // Deleting the row would rewrite past invoices and purchases, so the only
+  // safe "delete" for a product that has been sold or bought is to archive it
+  // and take it out of every catalog/list. The API says so explicitly instead
+  // of pretending the delete succeeded.
+  transact(() => {
+   db.prepare(`UPDATE products SET status='inactive' WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
+  });
+  audit(req.user.id, 'ARCHIVE', 'product', id, { reason: 'has accounting history', ...used });
+  const parts = [];
+  if (used.sales) parts.push(`${used.sales} sale line${used.sales === 1 ? '' : 's'}`);
+  if (used.purchases) parts.push(`${used.purchases} purchase line${used.purchases === 1 ? '' : 's'}`);
+  if (used.returns) parts.push(`${used.returns} return line${used.returns === 1 ? '' : 's'}`);
+  return res.json({
+   ok: true,
+   deleted: false,
+   archived: true,
+   history: used,
+   message: `"${product.name}" appears on ${parts.join(' and ')}, so deleting it would change past invoices. It was archived and removed from the catalog instead.`,
+  });
  }
- const removedImages = db.prepare('SELECT path FROM product_images WHERE product_id=?').all(req.params.id).map((r) => r.path);
- const mainImage = db.prepare('SELECT image FROM products WHERE id=?').get(req.params.id);
- db.prepare('DELETE FROM products WHERE id=?').run(req.params.id);
- for (const url of removedImages) dropUnusedMedia(url);
- if (mainImage && mainImage.image) dropUnusedMedia(mainImage.image);
- audit(req.user.id, 'DELETE', 'product', Number(req.params.id));
- res.json({ ok: true });
+ const urls = productPhotoUrls(ids);
+ transact(() => purgeProductRows(ids));
+ for (const url of urls) dropUnusedMedia(url);
+ audit(req.user.id, 'DELETE', 'product', id, { variants: ids.length - 1 });
+ res.json({ ok: true, deleted: true, archived: false, deleted_ids: ids });
 });
 
 router.post('/:id/image', requireRole('admin', 'manager'), upload.single('image'), (req, res) => {
