@@ -34,6 +34,8 @@ export default function Products() {
   const [catSelected, setCatSelected] = useState([]);
   const [barcodeCat, setBarcodeCat] = useState(null);
   const [gallery, setGallery] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const toast = useToast();
@@ -96,10 +98,18 @@ export default function Products() {
     finally { setSaving(false); }
   };
 
-  const remove = async (p) => {
-    if (!confirm(`Permanently delete "${p.name}"? This removes the product and cannot be undone.`)) return;
+  // Deleting used to depend on window.confirm(), which some browsers and
+  // installed apps silently block (and Chrome stops showing after the user
+  // ticks "prevent additional dialogs"), so the click looked dead. The
+  // confirmation is an in-app dialog now and the request always runs.
+  const doDelete = async (p) => {
+    setDeleting(true);
     try {
       const r = await api(`/products/${p.id}`, { method: 'DELETE' });
+      setConfirmDel(null);
+      // Drop the card immediately so the list never shows a product the server
+      // has already accepted the delete for.
+      setProducts((rows) => (rows || []).filter((x) => Number(x.id) !== Number(p.id)));
       if (r && r.archived) {
         toast(r.message || 'Product has past invoices, so it was archived instead.', 'error');
       } else {
@@ -107,6 +117,7 @@ export default function Products() {
       }
       load();
     } catch (err) { toast(err.message, 'error'); }
+    finally { setDeleting(false); }
   };
 
   const uploadImage = async (p, file) => {
@@ -358,7 +369,7 @@ export default function Products() {
                     </label>
                     <button className="btn sm" onClick={() => openGallery(p)} title="Manage photo gallery"><I name="image" size={14} /></button>
                     {canManage && (
-                      <button className="btn sm danger" onClick={() => remove(p)} title="Delete product permanently"><I name="x" size={14} /></button>
+                      <button className="btn sm danger" onClick={() => setConfirmDel(p)} title="Delete product permanently"><I name="x" size={14} /></button>
                     )}
                   </div>
                 )}
@@ -689,6 +700,25 @@ export default function Products() {
               Scan this code at the till to open this category's items. Every product in the category shares it automatically.
             </p>
             <button type="button" className="btn primary" style={{ marginTop: 10 }} onClick={() => window.print()}>Print</button>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!confirmDel} onClose={() => { if (!deleting) setConfirmDel(null); }} title="Delete product permanently?">
+        {confirmDel && (
+          <div>
+            <p style={{ marginTop: 0 }}>
+              <strong>{confirmDel.name}</strong> will be removed from the catalog and cannot be restored.
+            </p>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              Products that already appear on invoices or purchases are archived instead, so past documents keep their lines.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+              <button type="button" className="btn" disabled={deleting} onClick={() => setConfirmDel(null)}>Cancel</button>
+              <button type="button" className="btn danger" disabled={deleting} onClick={() => doDelete(confirmDel)}>
+                {deleting ? 'Deleting…' : 'Delete permanently'}
+              </button>
+            </div>
           </div>
         )}
       </Modal>
