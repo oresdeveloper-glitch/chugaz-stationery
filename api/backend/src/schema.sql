@@ -58,6 +58,17 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Products removed on purpose, remembered by sku (else name) so an older
+-- browser snapshot merged back after a cold start cannot re-create them.
+CREATE TABLE IF NOT EXISTS deleted_products (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sku TEXT,
+  name TEXT NOT NULL,
+  deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_deleted_products_sku ON deleted_products(sku);
+CREATE INDEX IF NOT EXISTS idx_deleted_products_name ON deleted_products(name);
+
 CREATE TABLE IF NOT EXISTS suppliers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,

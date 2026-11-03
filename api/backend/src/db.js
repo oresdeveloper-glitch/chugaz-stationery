@@ -145,6 +145,13 @@ try {
     // products.category_id is the primary membership; this table holds them all.
     real.exec('CREATE TABLE IF NOT EXISTS product_categories (\n product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,\n category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,\n PRIMARY KEY (product_id, category_id)\n)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_product_categories_cat ON product_categories(category_id)');
+    // Products deleted on purpose, remembered by the identity the backup merge
+    // uses (sku, else name). Browser snapshots are merged back after a cold
+    // start; without this a snapshot taken before the delete re-created the
+    // product a few seconds later.
+    real.exec('CREATE TABLE IF NOT EXISTS deleted_products (\n id INTEGER PRIMARY KEY AUTOINCREMENT,\n sku TEXT,\n name TEXT NOT NULL,\n deleted_at TEXT NOT NULL DEFAULT (datetime(\'now\'))\n)');
+    real.exec('CREATE INDEX IF NOT EXISTS idx_deleted_products_sku ON deleted_products(sku)');
+    real.exec('CREATE INDEX IF NOT EXISTS idx_deleted_products_name ON deleted_products(name)');
     if (!hasColumn('carts', 'guest_id')) {
       real.exec('DROP TABLE IF EXISTS cart_items');
       real.exec('DROP TABLE IF EXISTS carts');
@@ -315,6 +322,9 @@ function reopenDb() {
       fresh.exec('CREATE TABLE IF NOT EXISTS product_categories (\n product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,\n category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,\n PRIMARY KEY (product_id, category_id)\n)');
       fresh.exec('CREATE INDEX IF NOT EXISTS idx_product_categories_cat ON product_categories(category_id)');
       fresh.exec('INSERT OR IGNORE INTO product_categories (product_id, category_id) SELECT id, category_id FROM products WHERE category_id IS NOT NULL');
+      fresh.exec('CREATE TABLE IF NOT EXISTS deleted_products (\n id INTEGER PRIMARY KEY AUTOINCREMENT,\n sku TEXT,\n name TEXT NOT NULL,\n deleted_at TEXT NOT NULL DEFAULT (datetime(\'now\'))\n)');
+      fresh.exec('CREATE INDEX IF NOT EXISTS idx_deleted_products_sku ON deleted_products(sku)');
+      fresh.exec('CREATE INDEX IF NOT EXISTS idx_deleted_products_name ON deleted_products(name)');
     } catch (_) { /* table may be missing on a stubbed environment */ }
     db = fresh;
     return true;

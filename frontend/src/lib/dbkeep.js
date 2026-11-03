@@ -1,4 +1,5 @@
 import { getToken, getUser, getDbPin, setDbPin, api, registerOnWrite } from './api';
+import { deletedProductHints } from './productTombstones';
 
 // Wire the post-write backup hook so fresh rows are folded in before a cold reset.
 registerOnWrite(schedulePostWriteBackup);
@@ -254,6 +255,10 @@ async function restoreFromBackup(target) {
     if (!entry || !entry.blob) return 'none';
     const fd = new FormData();
     fd.append('file', entry.blob, 'auto-restore.db');
+    // Tell the server what this browser deleted on purpose: the snapshot may
+    // predate those deletes and the merge is additive.
+    const deleted = deletedProductHints();
+    if (deleted.length) fd.append('deleted', JSON.stringify(deleted));
     const res = await fetchPinned(`${apiBase()}/api/system/restore-merge`, {
       method: 'POST',
       headers: authHeaders(),

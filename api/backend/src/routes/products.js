@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const { db, audit, transact } = require('../db');
 const { requireRole } = require('../auth');
+const { accountingUse, hasAccountingHistory, productPhotoUrls, purgeProductRows, dropUnusedMedia, tombstone, clearTombstones } = require('../product-cleanup');
 const u = require('../units');
 
 const router = express.Router();
@@ -61,16 +62,7 @@ function saveUploadedImage(file) {
 }
 
 // Drop the stored bytes once no product or gallery row points at them any more.
-function dropUnusedMedia(url) {
- const m = /^\/api\/media\/([^/?#]+)$/.exec(String(url || ''));
- if (!m) return;
- const name = m[1];
- try {
-  const used = db.prepare('SELECT 1 FROM products WHERE image = ? LIMIT 1').get(url)
-   || db.prepare('SELECT 1 FROM product_images WHERE path = ? LIMIT 1').get(url);
-  if (!used) db.prepare('DELETE FROM product_media WHERE name = ?').run(name);
- } catch (_) { /* cleanup must never fail the request */ }
-}
+// (Implementation lives in ../product-cleanup so the merge route can share it.)
 
 // ---- product image gallery ----
 db.exec(`CREATE TABLE IF NOT EXISTS product_media (
@@ -123,57 +115,6 @@ function familyIds(id) {
   for (const row of db.prepare('SELECT id FROM products WHERE parent_id = ?').all(cur)) queue.push(Number(row.id));
  }
  return [...seen];
-}
-
-// Rows that make a product part of the shop's accounting history. sale_items
-// and purchase_items only store product_id (no name snapshot) and the invoice
-// and report queries join products for the name, so deleting the product would
-// silently rewrite documents that have already been printed or handed out.
-function accountingUse(ids) {
- const count = (sql) => {
-  try { return Number(db.prepare(sql).get(...ids).c) || 0; } catch (_) { return 0; }
- };
- if (!ids.length) return { sales: 0, purchases: 0, returns: 0 };
- const marks = ids.map(() => '?').join(',');
- return {
-  sales: count(`SELECT COUNT(*) c FROM sale_items WHERE product_id IN (${marks})`),
-  purchases: count(`SELECT COUNT(*) c FROM purchase_items WHERE product_id IN (${marks})`),
-  returns: count(`SELECT COUNT(*) c FROM sale_return_items WHERE product_id IN (${marks})`)
-   + count(`SELECT COUNT(*) c FROM purchase_return_items WHERE product_id IN (${marks})`),
- };
-}
-
-function hasAccountingHistory(ids) {
- const used = accountingUse(ids);
- return used.sales + used.purchases + used.returns > 0;
-}
-
-// Photo URLs owned by these products, collected before the rows disappear so
-// the stored blobs can be dropped afterwards.
-function productPhotoUrls(ids) {
- const urls = [];
- for (const pid of ids) {
-  const row = db.prepare('SELECT image FROM products WHERE id = ?').get(pid);
-  if (row && row.image) urls.push(row.image);
-  for (const img of db.prepare('SELECT path FROM product_images WHERE product_id = ?').all(pid)) urls.push(img.path);
- }
- return urls;
-}
-
-// Remove every non-accounting row attached to these products: variants, photo
-// links, category memberships, cart lines and stock movements. order_items
-// keeps its own product_name snapshot, so only the dangling link is cleared.
-// Caller owns the transaction.
-function purgeProductRows(ids) {
- const marks = ids.map(() => '?').join(',');
- db.prepare(`UPDATE order_items SET product_id = NULL WHERE product_id IN (${marks})`).run(...ids);
- db.prepare(`DELETE FROM cart_items WHERE product_id IN (${marks})`).run(...ids);
- db.prepare(`DELETE FROM stock_movements WHERE product_id IN (${marks})`).run(...ids);
- db.prepare(`DELETE FROM product_categories WHERE product_id IN (${marks})`).run(...ids);
- db.prepare(`DELETE FROM product_images WHERE product_id IN (${marks})`).run(...ids);
- // Children first: products.parent_id has no cascade.
- db.prepare(`DELETE FROM products WHERE parent_id IN (${marks})`).run(...ids);
- db.prepare(`DELETE FROM products WHERE id IN (${marks})`).run(...ids);
 }
 
 // Permanent delete with the accounting guard lives in the DELETE route below:
@@ -358,6 +299,9 @@ router.post('/', requireRole('admin', 'manager'), (req, res) => {
     p.description || null, p.specifications || null, cleanUnitPrices(p.unit_prices), p.parent_id || null
    );
    const pid = Number(info.lastInsertRowid);
+   // Creating a product with the same SKU/name as a deleted one is a deliberate
+   // re-add, so the delete memory must not purge it on the next backup merge.
+   clearTombstones(p.sku || null, p.name);
    const addLink = db.prepare('INSERT OR IGNORE INTO product_categories (product_id, category_id) VALUES (?,?)');
    for (const cid of ids) addLink.run(pid, cid);
    audit(req.user.id, 'CREATE', 'product', pid, { name: p.name });
@@ -403,6 +347,11 @@ router.put('/:id', requireRole('admin', 'manager'), (req, res) => {
    p.parent_id !== undefined ? p.parent_id : existing.parent_id,
    req.params.id
   );
+  // Renaming or re-SKU-ing a product to a previously deleted identity makes it
+  // a live product again, not the deleted one.
+  if ((p.sku !== undefined && p.sku !== existing.sku) || (p.name !== undefined && p.name !== existing.name)) {
+   clearTombstones(p.sku ?? existing.sku, p.name ?? existing.name);
+  }
   if (target.ids) {
    db.prepare('DELETE FROM product_categories WHERE product_id = ?').run(Number(req.params.id));
    const addLink = db.prepare('INSERT OR IGNORE INTO product_categories (product_id, category_id) VALUES (?,?)');
@@ -493,7 +442,13 @@ router.delete('/:id', requireRole('admin', 'manager'), (req, res) => {
   });
  }
  const urls = productPhotoUrls(ids);
- transact(() => purgeProductRows(ids));
+ transact(() => {
+  // Remember what was deleted before the rows disappear: a browser snapshot
+  // from a few seconds earlier is merged back after a cold start and used to
+  // re-create the product, which looked like "delete does nothing".
+  tombstone(ids);
+  purgeProductRows(ids);
+ });
  for (const url of urls) dropUnusedMedia(url);
  audit(req.user.id, 'DELETE', 'product', id, { variants: ids.length - 1 });
  res.json({ ok: true, deleted: true, archived: false, deleted_ids: ids });

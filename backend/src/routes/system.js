@@ -4,6 +4,7 @@ const path = require('path');
 const multer = require('multer');
 const { db, DB_PATH, audit, reopenDb, writeRedactedCopy, fixBahashaSpelling } = require('../db');
 const { requireRole } = require('../auth');
+const { importTombstones, applyTombstones } = require('../product-cleanup');
 
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
@@ -547,6 +548,29 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
      updStock.run(base - (sold.get(targetId) || 0), targetId);
     }
    }
+
+   // A browser snapshot taken before a product was deleted is merged back in
+   // additively, which used to re-create the product seconds after the delete.
+   // Fold in every delete marker - from the backup file itself and from the
+   // browser doing the merge - then remove the matching products that have no
+   // accounting history (invoice/purchase lines keep their products).
+   let tombRows = [];
+   if (tableExists('deleted_products')) {
+    try { tombRows = bakRows('deleted_products', ['sku', 'name']); } catch (_) { tombRows = []; }
+   }
+   // Only roles that may delete products anyway can add client hints; a
+   // cashier/clerk merge still imports the backup's own tombstones.
+   const hint = (req.user.role === 'admin' || req.user.role === 'manager') && req.body && req.body.deleted;
+   if (hint) {
+    try {
+     const parsed = typeof hint === 'string' ? JSON.parse(hint) : hint;
+     if (Array.isArray(parsed)) tombRows = tombRows.concat(parsed);
+    } catch (_) { /* ignore a malformed hint */ }
+   }
+   const tombAdded = importTombstones(tombRows);
+   if (tombAdded) bump('deleted_products', tombAdded);
+   const purged = applyTombstones();
+   if (purged) bump('removed_deleted_products', purged);
 
    db.exec('COMMIT');
   } catch (e) {

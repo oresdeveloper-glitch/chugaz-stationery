@@ -7,6 +7,7 @@ import Modal from '../components/Modal';
 import Barcode from '../components/Barcode';
 import I from '../components/icons';
 import SafeImg from '../shop/SafeImg';
+import { noteProductDeleted, forgetProductTombstone } from '../lib/productTombstones';
 
 const EMPTY = {
   sku: '', barcode: '', name: '', category_id: '', brand_id: '', unit: 'piece',
@@ -91,6 +92,8 @@ export default function Products() {
       } else {
         await api('/products', { method: 'POST', body });
       }
+      // Re-adding a name/SKU that was deleted makes it a live product again.
+      forgetProductTombstone({ sku: body.sku, name: body.name });
       toast(modal.id ? 'Product updated' : 'Product created');
       setModal(null);
       load();
@@ -113,6 +116,9 @@ export default function Products() {
       if (r && r.archived) {
         toast(r.message || 'Product has past invoices, so it was archived instead.', 'error');
       } else {
+        // Remember the delete locally too: this browser may still hold a
+        // snapshot from before the delete and merges it back on the next load.
+        noteProductDeleted(p);
         toast('Product deleted permanently');
       }
       load();
