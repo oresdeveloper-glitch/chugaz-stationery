@@ -5,6 +5,7 @@ import { orderCats, catLabel, catFilterIds, productInCats, categoryBarcode } fro
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 import Barcode from '../components/Barcode';
+import BarcodeSheet from '../components/BarcodeSheet';
 import I from '../components/icons';
 import SafeImg from '../shop/SafeImg';
 import { noteProductDeleted, forgetProductTombstone } from '../lib/productTombstones';
@@ -36,6 +37,7 @@ export default function Products() {
   const [barcodeCat, setBarcodeCat] = useState(null);
   const [gallery, setGallery] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
+  const [barcodeSheet, setBarcodeSheet] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -295,6 +297,11 @@ export default function Products() {
     <div>
       <div className="page-header">
         <h1>Products</h1>
+        {isAdmin && tab === 'products' && (
+          <button className="btn" onClick={() => setBarcodeSheet(true)} title="Print every active product barcode on A4 labels (or save as PDF)">
+            <I name="printer" size={14} /> All barcodes
+          </button>
+        )}
         {canManage && tab === 'products' && <button className="btn primary" onClick={() => setModal({ ...EMPTY })}>+ Add item</button>}
         {canManage && tab === 'categories' && <button className="btn primary" onClick={() => openCat(null)}>+ Add category</button>}
         {isAdmin && tab === 'brands' && <button className="btn primary" onClick={addBrand}>+ Add brand</button>}
@@ -728,6 +735,8 @@ export default function Products() {
           </div>
         )}
       </Modal>
+
+      <BarcodeSheet open={barcodeSheet} onClose={() => setBarcodeSheet(false)} />
     </div>
   );
 }
