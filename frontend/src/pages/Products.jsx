@@ -38,6 +38,7 @@ export default function Products() {
   const [gallery, setGallery] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
   const [barcodeSheet, setBarcodeSheet] = useState(false);
+  const [catBarcodeSheet, setCatBarcodeSheet] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -300,6 +301,11 @@ export default function Products() {
         {isAdmin && tab === 'products' && (
           <button className="btn" onClick={() => setBarcodeSheet(true)} title="Print every active product barcode on A4 labels (or save as PDF)">
             <I name="printer" size={14} /> All barcodes
+          </button>
+        )}
+        {isAdmin && tab === 'categories' && (
+          <button className="btn" onClick={() => setCatBarcodeSheet(true)} title="Print one barcode per category on A4 labels (or save as PDF)">
+            <I name="printer" size={14} /> All category barcodes
           </button>
         )}
         {canManage && tab === 'products' && <button className="btn primary" onClick={() => setModal({ ...EMPTY })}>+ Add item</button>}
@@ -737,6 +743,7 @@ export default function Products() {
       </Modal>
 
       <BarcodeSheet open={barcodeSheet} onClose={() => setBarcodeSheet(false)} />
+      <BarcodeSheet open={catBarcodeSheet} kind="categories" onClose={() => setCatBarcodeSheet(false)} />
     </div>
   );
 }
