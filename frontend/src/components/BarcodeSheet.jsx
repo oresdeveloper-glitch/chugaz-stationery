@@ -82,7 +82,7 @@ export default function BarcodeSheet({ open, onClose, kind = 'products' }) {
         return {
           key: c.id,
           name: c.name || 'Unnamed category',
-          sub: parent ? `in ${parent.name}` : 'Category',
+          sub: parent ? `in ${parent.name}` : '',
           barcode: String(c.barcode || categoryBarcode(c.id) || ''),
         };
       }).filter((r) => r.barcode);
