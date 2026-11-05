@@ -80,10 +80,17 @@ export default function Barcode({ code, height = 56, module = 2, maxWidth = 0 })
       )}
       {ean ? (
         <>
-          {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-            <text key={i} x={quiet + (3 + i * 7 + 3.5) * mod} y={barH + 14} textAnchor="middle" fontFamily="monospace" fontSize="11">{value[i]}</text>
+          {/* EAN-13 layout: first digit left of the guard, six digits under the
+              left group (bits 3-44), six under the right group (bits 50-91).
+              Drawing seven digits under the left group made the last one collide
+              with the right-group number. */}
+          <text x={quiet / 2} y={barH + 14} textAnchor="middle" fontFamily="monospace" fontSize="11">{value[0]}</text>
+          {[1, 2, 3, 4, 5, 6].map((d, i) => (
+            <text key={d} x={quiet + (3 + i * 7 + 3.5) * mod} y={barH + 14} textAnchor="middle" fontFamily="monospace" fontSize="11">{value[d]}</text>
           ))}
-          <text x={quiet + (45 + 3.5) * mod} y={barH + 14} textAnchor="middle" fontFamily="monospace" fontSize="11">{value.slice(7)}</text>
+          {[7, 8, 9, 10, 11, 12].map((d, i) => (
+            <text key={d} x={quiet + (50 + i * 7 + 3.5) * mod} y={barH + 14} textAnchor="middle" fontFamily="monospace" fontSize="11">{value[d]}</text>
+          ))}
         </>
       ) : (
         <text x={totalW / 2} y={barH + 14} textAnchor="middle" fontFamily="monospace" fontSize="11">{value}</text>
