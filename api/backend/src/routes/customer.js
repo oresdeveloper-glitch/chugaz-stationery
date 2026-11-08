@@ -17,16 +17,43 @@ function asyncRoute(fn) {
 const AVATAR_DIR = process.env.VERCEL === '1' ? '/tmp/stationery-avatars' : path.join(__dirname, '..', '..', 'uploads', 'avatars');
 try {
   if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
-} catch (_) { /* read-only bundle dir on serverless — avatar uploads fall back to /tmp */ }
+} catch (_) { /* read-only bundle dir on serverless — new avatars go to the database */ }
+
+// Avatars used to be written to disk, which silently broke on serverless: the
+// bundle is read-only and /tmp is private to the instance that accepted the
+// upload, so the returned /uploads/avatars/... URL was never served again.
+// Store the bytes in the same media table as product photos and serve them
+// through /api/media, which works on every instance.
+db.exec(`CREATE TABLE IF NOT EXISTS product_media (
+ name TEXT PRIMARY KEY,
+ mime TEXT NOT NULL,
+ bytes BLOB NOT NULL,
+ created_at TEXT DEFAULT (datetime('now'))
+)`);
+const AVATAR_TYPES = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
+function saveAvatar(userId, file) {
+  const ext = AVATAR_TYPES[file.mimetype] || '.jpg';
+  const name = `avatar-${userId}-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+  db.prepare('INSERT INTO product_media (name, mime, bytes) VALUES (?,?,?)')
+    .run(name, file.mimetype, file.buffer);
+  return `/api/media/${name}`;
+}
+function dropAvatar(url) {
+  const m = /^\/api\/media\/([^/?#]+)$/.exec(String(url || ''));
+  if (m) {
+    try { db.prepare('DELETE FROM product_media WHERE name=?').run(m[1]); } catch (_) {}
+    return;
+  }
+  // Legacy avatars were files on disk; remove the local copy when present.
+  try {
+    const oldPath = path.join(AVATAR_DIR, path.basename(url));
+    if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+  } catch (_) {}
+}
+
 const avatarUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, AVATAR_DIR),
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
-      cb(null, `avatar-${req.user.id}-${Date.now()}${ext}`);
-    },
-  }),
-  limits: { fileSize: 3 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith('image/')) return cb(new Error('Only images allowed'));
     cb(null, true);
@@ -299,20 +326,20 @@ protectedRouter.get('/me', requireCustomer, (req, res) => {
    FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?
   `).get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  if (user.avatar) user.avatar_url = `/uploads/avatars/${path.basename(user.avatar)}`;
+  if (user.avatar) {
+    user.avatar_url = /^\/api\/media\//.test(user.avatar)
+      ? user.avatar
+      : `/uploads/avatars/${path.basename(user.avatar)}`;
+  }
   res.json({ user });
 });
 
 protectedRouter.post('/me/avatar', requireCustomer, avatarUpload.single('avatar'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
-  const rel = `/uploads/avatars/${req.file.filename}`;
-  // remove old avatar
+  const rel = saveAvatar(req.user.id, req.file);
   const old = db.prepare('SELECT avatar FROM users WHERE id=?').get(req.user.id);
-  if (old && old.avatar) {
-    const oldPath = path.join(AVATAR_DIR, path.basename(old.avatar));
-    try { if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath); } catch {}
-  }
   db.prepare('UPDATE users SET avatar=? WHERE id=?').run(rel, req.user.id);
+  if (old && old.avatar) dropAvatar(old.avatar);
   audit(req.user.id, 'UPDATE', 'user', req.user.id, { field: 'avatar' });
   res.json({ ok: true, avatar: rel, avatar_url: rel });
 });

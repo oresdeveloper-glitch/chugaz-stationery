@@ -4,6 +4,7 @@ import { shopApi, setShopAuth, getShopUser } from '../../lib/api';
 import RequireShopAuth from '../../shop/RequireShopAuth';
 import { useToast } from '../../components/Toast';
 import Modal from '../../components/Modal';
+import { prepareImageFile } from '../../lib/imageFile';
 
 function ProfileInner() {
   const [form, setForm] = useState(null);
@@ -21,15 +22,17 @@ function ProfileInner() {
   useEffect(() => { load(); }, []);
 
   const onAvatar = async (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    if (file.size > 3 * 1024 * 1024) return toast('Image too large — max 3MB', 'error');
-    const fd = new FormData();
-    fd.append('avatar', file);
+    const picked = e.target.files && e.target.files[0];
+    if (!picked) return;
     setUploading(true);
     try {
+      // Shrink camera photos before upload so the request fits the host limit.
+      const file = await prepareImageFile(picked, { maxDimension: 512, targetBytes: 400 * 1024 });
+      if (file.size > 4 * 1024 * 1024) throw new Error('Image too large — choose a smaller photo');
+      const fd = new FormData();
+      fd.append('avatar', file);
       const res = await shopApi('/me/avatar', { method: 'POST', body: fd });
-      setForm({ ...form, avatar: res.avatar, avatar_url: res.avatar_url });
+      setForm((cur) => ({ ...cur, avatar: res.avatar, avatar_url: res.avatar_url }));
       toast('Profile picture updated');
     } catch (err) { toast(err.message, 'error'); }
     finally { setUploading(false); e.target.value = ''; }

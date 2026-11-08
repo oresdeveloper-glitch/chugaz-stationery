@@ -44,7 +44,9 @@ const IMAGE_TYPES = {
 // is private to the instance that accepted the upload, so the photo vanished.
 const upload = multer({
  storage: multer.memoryStorage(),
- limits: { fileSize: 2 * 1024 * 1024, files: 8 },
+ // Vercel rejects request bodies over 4.5 MB, so keep the per-file ceiling
+ // below that. The admin screen also shrinks phone photos before sending.
+ limits: { fileSize: 4 * 1024 * 1024, files: 8 },
  fileFilter: (req, file, cb) => {
   if (IMAGE_TYPES[file.mimetype]) return cb(null, true);
   cb(new Error('Only JPG, PNG, WebP or GIF images are allowed'));
@@ -59,6 +61,17 @@ function saveUploadedImage(file) {
  db.prepare('INSERT INTO product_media (name, mime, bytes) VALUES (?,?,?)')
   .run(name, file.mimetype, file.buffer);
  return `/api/media/${name}`;
+}
+
+// Keep the photo a product already showed in its gallery before the main image
+// is replaced. Otherwise changing the main photo made the previous one vanish
+// from the gallery, which looked like photos were being lost.
+function rememberCurrentImage(pid, image) {
+ if (!image) return;
+ const has = db.prepare('SELECT 1 FROM product_images WHERE product_id=? AND path=?').get(pid, image);
+ if (has) return;
+ const minSort = db.prepare('SELECT COALESCE(MIN(sort), 0) AS m FROM product_images WHERE product_id=?').get(pid).m;
+ db.prepare('INSERT INTO product_images (product_id, path, sort) VALUES (?,?,?)').run(pid, image, minSort - 1);
 }
 
 // Drop the stored bytes once no product or gallery row points at them any more.
@@ -456,10 +469,18 @@ router.delete('/:id', requireRole('admin', 'manager'), (req, res) => {
 
 router.post('/:id/image', requireRole('admin', 'manager'), upload.single('image'), (req, res) => {
  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+ const pid = Number(req.params.id);
+ const product = db.prepare('SELECT id, image FROM products WHERE id=?').get(pid);
+ if (!product) return res.status(404).json({ error: 'Product not found' });
  const url = saveUploadedImage(req.file);
- db.prepare('UPDATE products SET image=? WHERE id=?').run(url, req.params.id);
- audit(req.user.id, 'UPDATE', 'product', Number(req.params.id), { image: url });
- res.json({ url });
+ transact(() => {
+  rememberCurrentImage(pid, product.image);
+  const maxSort = db.prepare('SELECT COALESCE(MAX(sort), -1) AS m FROM product_images WHERE product_id=?').get(pid).m;
+  db.prepare('INSERT INTO product_images (product_id, path, sort) VALUES (?,?,?)').run(pid, url, maxSort + 1);
+  db.prepare('UPDATE products SET image=? WHERE id=?').run(url, pid);
+  audit(req.user.id, 'UPDATE', 'product', pid, { image: url });
+ });
+ res.json({ ok: true, url, image: url, images: imagesFor(pid) });
 });
 
 // ---- categories ----
@@ -469,17 +490,21 @@ router.post('/:id/images', requireRole('admin', 'manager'), upload.array('images
  const product = db.prepare('SELECT id, image FROM products WHERE id=?').get(pid);
  if (!product) return res.status(404).json({ error: 'Product not found' });
  const urls = req.files.map(saveUploadedImage);
+ // The newly added photo becomes the one shown on the catalog and storefront.
+ // Before this, only products without a photo changed: the seeded catalog
+ // already had one, so uploading or taking a picture looked like a no-op.
+ // A multi-photo request keeps the first new photo as main; the caller can
+ // pass ?main=0 when it is appending to an earlier upload.
+ const makeMain = req.query.main !== '0';
  transact(() => {
+  rememberCurrentImage(pid, product.image);
   const maxSort = db.prepare('SELECT COALESCE(MAX(sort), -1) AS m FROM product_images WHERE product_id=?').get(pid).m;
   const ins = db.prepare('INSERT INTO product_images (product_id, path, sort) VALUES (?,?,?)');
   urls.forEach((url, i) => ins.run(pid, url, maxSort + 1 + i));
-  // First photo becomes the main image, which is what the catalog and the
-  // storefront show. Managers could not do this at all before: the routes
-  // demanded the admin role even though product editing is a manager task.
-  if (!product.image) db.prepare('UPDATE products SET image=? WHERE id=?').run(urls[0], pid);
-  audit(req.user.id, 'UPDATE', 'product', pid, { images_added: urls.length });
+  if (makeMain) db.prepare('UPDATE products SET image=? WHERE id=?').run(urls[0], pid);
+  audit(req.user.id, 'UPDATE', 'product', pid, { images_added: urls.length, main: makeMain ? urls[0] : null });
  });
- res.json({ ok: true, images: imagesFor(pid) });
+ res.json({ ok: true, image: makeMain ? urls[0] : product.image, images: imagesFor(pid) });
 });
 
 // Choose which of the product's photos is the one shown on the catalog and in

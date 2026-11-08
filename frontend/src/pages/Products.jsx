@@ -8,6 +8,7 @@ import Barcode from '../components/Barcode';
 import BarcodeSheet from '../components/BarcodeSheet';
 import I from '../components/icons';
 import SafeImg from '../shop/SafeImg';
+import { prepareImageFile, prepareImageFiles } from '../lib/imageFile';
 import { noteProductDeleted, forgetProductTombstone } from '../lib/productTombstones';
 
 const EMPTY = {
@@ -130,27 +131,55 @@ export default function Products() {
   };
 
   const uploadImage = async (p, file) => {
-    const fd = new FormData();
-    fd.append('image', file);
     try {
+      const [prepared] = await prepareImageFiles([file]);
+      const fd = new FormData();
+      fd.append('image', prepared);
       const r = await api(`/products/${p.id}/image`, { method: 'POST', body: fd });
+      const next = r && (r.image || r.url);
+      if (next) setProducts((rows) => (rows || []).map((x) => (Number(x.id) === Number(p.id) ? { ...x, image: next } : x)));
       toast('Image uploaded');
       load();
     } catch (err) { toast(err.message, 'error'); }
   };
 
   const uploadImages = async (p, files) => {
-    if (!files || !files.length) return;
-    // The caller clears the input right after handing over its FileList, which
-    // is a LIVE object - read the count now or the toast says "0 photos added".
-    const count = files.length;
-    const fd = new FormData();
-    for (const f of files) fd.append('images', f);
+    const list = Array.from(files || []).slice(0, 8);
+    if (!list.length) return;
     try {
-      await api(`/products/${p.id}/images`, { method: 'POST', body: fd });
-      toast(`${count} photo${count > 1 ? 's' : ''} added`);
+      // Phone photos are shrunk before sending; a large original would be
+      // rejected by the host before the route ran (and looked like a no-op).
+      const prepared = await prepareImageFiles(list);
+      // Keep every request under the serverless body limit. Usually this is a
+      // single request; picking many large photos splits into a few.
+      const batches = [];
+      let batch = [];
+      let bytes = 0;
+      for (const f of prepared) {
+        if (batch.length && (batch.length >= 8 || bytes + f.size > 3.5 * 1024 * 1024)) {
+          batches.push(batch);
+          batch = [];
+          bytes = 0;
+        }
+        batch.push(f);
+        bytes += f.size;
+      }
+      if (batch.length) batches.push(batch);
+
+      let main = null;
+      for (let i = 0; i < batches.length; i++) {
+        const fd = new FormData();
+        for (const f of batches[i]) fd.append('images', f);
+        // Only the first batch selects a new main photo; later batches append
+        // without replacing the photo the user just saw.
+        const r = await api(`/products/${p.id}/images${i === 0 ? '' : '?main=0'}`, { method: 'POST', body: fd });
+        if (i === 0 && r && r.image) main = r.image;
+      }
+      // Show the new photo immediately, before the list refetch finishes.
+      if (main) setProducts((rows) => (rows || []).map((x) => (Number(x.id) === Number(p.id) ? { ...x, image: main } : x)));
+      toast(`${prepared.length} photo${prepared.length > 1 ? 's' : ''} added`);
       load();
-      if (gallery && gallery.id === p.id) openGallery(gallery);
+      if (gallery && gallery.id === p.id) openGallery(p);
     } catch (err) { toast(err.message, 'error'); }
   };
 
