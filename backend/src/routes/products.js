@@ -55,10 +55,21 @@ const upload = multer({
 });
 
 // Store one uploaded photo and return the URL the browser (and the storefront)
-// can load it from. The name is unique, so the answer is cacheable forever.
-function saveUploadedImage(file) {
- const ext = IMAGE_TYPES[file.mimetype] || '.jpg';
- const name = `prod-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+// can load it from. On Vercel, when BLOB_READ_WRITE_TOKEN is configured, the
+// bytes go to Vercel Blob (shared across all instances, so photos persist and
+// are visible to every account). Otherwise they are kept in the database, which
+// is the existing behaviour and still works on a single instance / local dev.
+async function saveUploadedImage(file) {
+ const name = `prod-${Date.now()}-${Math.round(Math.random() * 1e6)}${IMAGE_TYPES[file.mimetype] || '.jpg'}`;
+ if (process.env.BLOB_READ_WRITE_TOKEN) {
+  try {
+   const { put } = require('@vercel/blob');
+   const blob = await put(name, file.buffer, { access: 'public', contentType: file.mimetype });
+   if (blob && blob.url) return blob.url;
+  } catch (e) {
+   console.warn('[media] Vercel Blob upload failed, falling back to DB:', e && e.message ? e.message : e);
+  }
+ }
  db.prepare('INSERT INTO product_media (name, mime, bytes) VALUES (?,?,?)')
   .run(name, file.mimetype, file.buffer);
  return `/api/media/${name}`;
@@ -502,12 +513,12 @@ router.delete('/:id', requireRole('admin', 'manager'), (req, res) => {
  res.json({ ok: true, deleted: true, archived: false, deleted_ids: ids });
 });
 
-router.post('/:id/image', requireRole('admin', 'manager'), upload.single('image'), (req, res) => {
+router.post('/:id/image', requireRole('admin', 'manager'), upload.single('image'), async (req, res) => {
  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
  const pid = Number(req.params.id);
  const product = db.prepare('SELECT id, image FROM products WHERE id=?').get(pid);
  if (!product) return res.status(404).json({ error: 'Product not found' });
- const url = saveUploadedImage(req.file);
+ const url = await saveUploadedImage(req.file);
  transact(() => {
   rememberCurrentImage(pid, product.image);
   const maxSort = db.prepare('SELECT COALESCE(MAX(sort), -1) AS m FROM product_images WHERE product_id=?').get(pid).m;
@@ -519,12 +530,12 @@ router.post('/:id/image', requireRole('admin', 'manager'), upload.single('image'
 });
 
 // ---- categories ----
-router.post('/:id/images', requireRole('admin', 'manager'), upload.array('images', 8), (req, res) => {
+router.post('/:id/images', requireRole('admin', 'manager'), upload.array('images', 8), async (req, res) => {
  if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
  const pid = Number(req.params.id);
  const product = db.prepare('SELECT id, image FROM products WHERE id=?').get(pid);
  if (!product) return res.status(404).json({ error: 'Product not found' });
- const urls = req.files.map(saveUploadedImage);
+ const urls = await Promise.all(req.files.map(saveUploadedImage));
  // The newly added photo becomes the one shown on the catalog and storefront.
  // Before this, only products without a photo changed: the seeded catalog
  // already had one, so uploading or taking a picture looked like a no-op.
