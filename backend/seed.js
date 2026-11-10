@@ -23,13 +23,6 @@ function seed() {
    );
   }
 
-  const custEmail = 'customer@shop.com';
-  if (!db.prepare('SELECT id FROM users WHERE email = ?').get(custEmail)) {
-   const hash = bcrypt.hashSync('cust123', 10);
-   db.prepare('INSERT INTO users (name, email, phone, password_hash, role_id, credit_limit) VALUES (?,?,?,?,5,500)')
-    .run('Online Customer', custEmail, '+254711000111', hash);
-  }
-
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES
    ('shop_name','CHUGAZ STATIONERY'),
    ('shop_address',''),

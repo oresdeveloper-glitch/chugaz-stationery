@@ -317,24 +317,12 @@ try {
       const adminPass = process.env.ADMIN_PASSWORD || 'admin123';
       const add = real.prepare("INSERT INTO users (name, email, password_hash, role_id, status) VALUES (?,?,?,?,'active')");
       add.run('Administrator', adminEmail, seedHash(adminPass), 1);
-      add.run('Manager', 'manager@shop.com', seedHash('manager123'), 2);
-      add.run('Cashier', 'cashier@shop.com', seedHash('cashier123'), 3);
-      add.run('Clerk', 'clerk@shop.com', seedHash('clerk123'), 4);
-      add.run('Online Customer', 'customer@shop.com', seedHash('cust123'), 5);
     }
 
-    // Office cashiers — ensured every start, idempotent.
+    // Offices are seeded; staff accounts (including office cashiers) are created
+    // by the admin through the Users screen. No default staff passwords are
+    // shipped with the application.
     real.exec("INSERT OR IGNORE INTO offices (name) VALUES ('Office A'), ('Office B')");
-    const officeA = real.prepare('SELECT id FROM offices WHERE name=?').get('Office A');
-    const officeB = real.prepare('SELECT id FROM offices WHERE name=?').get('Office B');
-    const cashierExists = real.prepare('SELECT id FROM users WHERE email=?');
-    const addCashier = real.prepare("INSERT INTO users (name, email, password_hash, role_id, office_id, status) VALUES (?,?,?,3,?,'active')");
-    for (const [n, e, pw, oid] of [
-      ['Cashier - Office A', 'cashier-a@shop.com', 'cashier123', officeA && officeA.id],
-      ['Cashier - Office B', 'cashier-b@shop.com', 'cashier123', officeB && officeB.id],
-    ]) {
-      if (oid && !cashierExists.get(e)) addCashier.run(n, e, seedHash(pw), oid);
-    }
   } catch (e) {
     console.error('[db] bootstrap seed skipped:', e && e.message ? e.message : e);
   }
