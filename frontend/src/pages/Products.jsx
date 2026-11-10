@@ -9,7 +9,7 @@ import BarcodeSheet from '../components/BarcodeSheet';
 import I from '../components/icons';
 import SafeImg from '../shop/SafeImg';
 import { prepareImageFile, prepareImageFiles } from '../lib/imageFile';
-import { noteProductDeleted, forgetProductTombstone } from '../lib/productTombstones';
+import { noteProductDeleted, forgetProductTombstone, deletedProductHints } from '../lib/productTombstones';
 
 const EMPTY = {
   sku: '', barcode: '', name: '', category_id: '', brand_id: '', unit: 'piece',
@@ -58,6 +58,15 @@ export default function Products() {
   };
 
   const setLists = latest();
+  const isTombstoned = (p) => {
+    if (!p) return false;
+    const hints = deletedProductHints();
+    return hints.some((h) => {
+      if (h.sku && p.sku && h.sku === p.sku) return true;
+      if (!h.sku && h.name && p.name && h.name === p.name) return true;
+      return false;
+    });
+  };
   const load = () => setLists(async () => {
     const [p, c, b] = await Promise.all([
       api(`/products${q ? `?q=${encodeURIComponent(q)}` : ''}`),
@@ -65,7 +74,7 @@ export default function Products() {
       api('/products/brands/all'),
     ]);
     return [p, c, b];
-  }, ([p, c, b]) => { setProducts(p); setCategories(c); setBrands(b); });
+  }, ([p, c, b]) => { setProducts((p || []).filter((x) => !isTombstoned(x))); setCategories(c); setBrands(b); });
 
   useEffect(() => {
     const t = setTimeout(load, 300);
