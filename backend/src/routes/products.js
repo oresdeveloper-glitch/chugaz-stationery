@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const { db, audit, transact } = require('../db');
 const { requireRole } = require('../auth');
-const { accountingUse, hasAccountingHistory, productPhotoUrls, purgeProductRows, dropUnusedMedia, tombstone, clearTombstones } = require('../product-cleanup');
+const { accountingUse, hasAccountingHistory, productPhotoUrls, purgeProductRows, dropUnusedMedia, tombstone, clearTombstones, applyTombstones } = require('../product-cleanup');
 const { record, forget, identityKeys } = require('../tombstones');
 const u = require('../units');
 
@@ -171,6 +171,7 @@ function familyIds(id) {
 // line points at it; otherwise it is archived instead.
 
 router.get('/', (req, res) => {
+ try { applyTombstones(); } catch (_) { /* cleanup must never fail the request */ }
  const { q, barcode, category_id, status, low, office_id } = req.query;
  const conds = [];
  const params = [];

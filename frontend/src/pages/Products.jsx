@@ -81,6 +81,13 @@ export default function Products() {
     return () => clearTimeout(t);
   }, [q, cat]);
   useEffect(() => onLive(load), [q, cat]);
+  // Cross-instance consistency on Vercel: a change made on another instance
+  // only reaches this browser through a later fetch. Poll periodically so
+  // edits/deletes/images show up for all accounts without a manual refresh.
+  useEffect(() => {
+    const id = setInterval(() => { load(); }, 30000);
+    return () => clearInterval(id);
+  }, [q, cat]);
   // A new search/filter starts from the first screenful again.
   useEffect(() => { setShown(60); }, [q, cat, showArchived, tab]);
 

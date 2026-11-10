@@ -142,6 +142,12 @@ export default function Pos() {
   }, [q]);
 
   useEffect(() => onLive(() => { loadShift(); loadProducts(q); }), [q]);
+  // Periodic refresh so changes made on another instance/instance (admin edits,
+  // new products, stock changes) reach this till without a manual reload.
+  useEffect(() => {
+    const id = setInterval(() => { loadProducts(q); loadShift(); }, 30000);
+    return () => clearInterval(id);
+  }, [q]);
 
   const addToCart = (p) => {
     setCart((c) => {
