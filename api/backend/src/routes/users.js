@@ -1,6 +1,7 @@
 const express = require('express');
 const { db, audit } = require('../db');
 const { requireRole } = require('../auth');
+const { record, forget, identityKeys } = require('../tombstones');
 const { hashPassword, passwordPolicy } = require('../pwd');
 const { checkEmailReal } = require('../mailer');
 
@@ -34,7 +35,8 @@ router.post('/', requireRole('admin'), asyncRoute(async (req, res) => {
  try {
   const info = db.prepare('INSERT INTO users (name, email, password_hash, role_id, office_id) VALUES (?,?,?,?,?)')
    .run(name, check.clean, hash, role_id, office_id ? Number(office_id) : null);
-  audit(req.user.id, 'CREATE', 'user', Number(info.lastInsertRowid), { email: check.clean });
+   forget('users', identityKeys('users', { email: check.clean }));
+   audit(req.user.id, 'CREATE', 'user', Number(info.lastInsertRowid), { email: check.clean });
   res.status(201).json({ id: Number(info.lastInsertRowid) });
   } catch (e) {
    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Email already exists' });
@@ -62,6 +64,7 @@ router.put('/:id', requireRole('admin'), (req, res) => {
   db.prepare('UPDATE users SET name=?, email=?, role_id=?, status=?, office_id=? WHERE id=?')
    .run(name ?? u.name, (email ?? u.email).toLowerCase().trim(), role_id ?? u.role_id, status ?? u.status, office_id === undefined ? u.office_id : (office_id ? Number(office_id) : null), req.params.id);
  }
+ forget('users', identityKeys('users', { email: (email ?? u.email) }));
  audit(req.user.id, 'UPDATE', 'user', Number(req.params.id), { fields: Object.keys(req.body) });
  res.json({ ok: true });
 });
@@ -70,6 +73,8 @@ router.delete('/:id', requireRole('admin'), (req, res) => {
  if (req.params.id == req.user.id) return res.status(400).json({ error: 'You cannot delete your own account' });
  // A user with sales/orders/audit history hits FK constraints — deactivate instead.
  const id = Number(req.params.id);
+ const target = db.prepare('SELECT id, email FROM users WHERE id=?').get(id);
+ if (!target) return res.status(404).json({ error: 'User not found' });
  const busy = db.prepare(`SELECT
    (SELECT COUNT(*) FROM sales WHERE created_by=?) s,
    (SELECT COUNT(*) FROM orders WHERE user_id=?) o,
@@ -83,7 +88,8 @@ router.delete('/:id', requireRole('admin'), (req, res) => {
   if (String(e.message).includes('FOREIGN KEY')) return res.status(409).json({ error: 'This user is referenced elsewhere — set their status to inactive instead' });
   throw e;
  }
- res.json({ ok: true });
+ const keys = record('users', identityKeys('users', target));
+ res.json({ ok: true, tombstone: { entity: 'users', keys } });
 });
 
 module.exports = router;

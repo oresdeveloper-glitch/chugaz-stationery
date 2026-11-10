@@ -1,6 +1,7 @@
 const express = require('express');
 const { db, audit } = require('../db');
 const { requireRole } = require('../auth');
+const { record, forget, identityKeys } = require('../tombstones');
 
 const router = express.Router();
 
@@ -15,6 +16,7 @@ router.post('/', requireRole('clerk', 'cashier', 'manager', 'admin'), (req, res)
   INSERT INTO customers (name, phone, email, address, credit_limit, balance, discount_rate)
   VALUES (?,?,?,?,?,?,?)
  `).run(c.name, c.phone || null, c.email || null, c.address || null, c.credit_limit || 0, c.balance || 0, c.discount_rate || 0);
+ forget('customers', identityKeys('customers', c));
  audit(req.user.id, 'CREATE', 'customer', Number(info.lastInsertRowid), { name: c.name });
  res.status(201).json({ id: Number(info.lastInsertRowid) });
 });
@@ -25,16 +27,20 @@ router.put('/:id', requireRole('admin'), (req, res) => {
   UPDATE customers SET name=?, phone=?, email=?, address=?, credit_limit=?, discount_rate=? WHERE id=?
  `).run(c.name, c.phone, c.email, c.address, c.credit_limit || 0, c.discount_rate || 0, req.params.id);
  if (info.changes === 0) return res.status(404).json({ error: 'Customer not found' });
+ forget('customers', identityKeys('customers', c));
  audit(req.user.id, 'UPDATE', 'customer', Number(req.params.id), { name: c.name });
  res.json({ ok: true });
 });
 
 router.delete('/:id', requireRole('admin'), (req, res) => {
+ const row = db.prepare('SELECT id, name, phone, email FROM customers WHERE id=?').get(req.params.id);
+ if (!row) return res.status(404).json({ error: 'Customer not found' });
  const used = db.prepare('SELECT COUNT(*) c FROM sales WHERE customer_id=?').get(req.params.id).c;
  if (used > 0) return res.status(409).json({ error: 'Customer has sales history' });
  db.prepare('DELETE FROM customers WHERE id=?').run(req.params.id);
+ const keys = record('customers', identityKeys('customers', row));
  audit(req.user.id, 'DELETE', 'customer', Number(req.params.id));
- res.json({ ok: true });
+ res.json({ ok: true, tombstone: { entity: 'customers', keys } });
 });
 
 router.get('/:id/history', (req, res) => {

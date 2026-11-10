@@ -1,4 +1,4 @@
-import { getToken, getUser, getDbPin, setDbPin, api, registerOnWrite } from './api';
+import { getToken, getUser, getDbPin, setDbPin, api, registerOnWrite, deletedRecordHints } from './api';
 import { deletedProductHints } from './productTombstones';
 
 // Wire the post-write backup hook so fresh rows are folded in before a cold reset.
@@ -18,8 +18,11 @@ const BACKUP_INTERVAL_MS = 3 * 60 * 1000;
 // in IndexedDB (one copy per origin), so a second tab re-downloading the whole
 // database bought nothing and cost the shop a full-file read + redacted copy.
 const BACKUP_AT_KEY = 'sst_backup_at';
-// A write near a cold reset may miss the 3-minute snapshot — schedule an 8s follow-up.
-const POST_WRITE_BACKUP_MS = 8 * 1000;
+// A write near a cold reset may miss the 3-minute snapshot — schedule a
+// follow-up within about a second. The old 8s window was long enough for a
+// refresh to land on a fresh instance before the write was ever captured.
+const POST_WRITE_BACKUP_MS = 1200;
+const FORCE_BACKUP_GAP_MS = 1500;
 
 let scheduled = false;
 let checkingP = null;
@@ -187,13 +190,29 @@ export function canKeep() {
 
 async function backupNow(force) {
   if (!canKeep() || !getToken()) return;
-  if (backing) return;
+  if (backing) {
+    // A forced snapshot that arrives during an in-flight one must not be lost:
+    // retry shortly so the just-written row still gets captured.
+    if (force) {
+      clearTimeout(postWriteTimer);
+      postWriteTimer = setTimeout(() => backupNow(true), 500);
+    }
+    return;
+  }
   // One snapshot per interval per BROWSER (all tabs share IndexedDB). Forced
   // calls come from the write hook, where the new row must be captured soon -
   // but not once per keystroke burst, so they get a much smaller gap.
   let at = 0;
   try { at = Number(localStorage.getItem(BACKUP_AT_KEY) || 0) || 0; } catch (_) { /* ignore */ }
-  if (Date.now() - at < (force ? 15000 : BACKUP_INTERVAL_MS)) return;
+  const gap = force ? FORCE_BACKUP_GAP_MS : BACKUP_INTERVAL_MS;
+  const waited = Date.now() - at;
+  if (waited < gap) {
+    if (force) {
+      clearTimeout(postWriteTimer);
+      postWriteTimer = setTimeout(() => backupNow(true), Math.max(150, gap - waited + 100));
+    }
+    return;
+  }
   backing = true;
   try {
     const pin = getDbPin();
@@ -259,6 +278,11 @@ async function restoreFromBackup(target) {
     // predate those deletes and the merge is additive.
     const deleted = deletedProductHints();
     if (deleted.length) fd.append('deleted', JSON.stringify(deleted));
+    // Non-product deletes: tell a freshly reset instance what this browser
+    // removed, so its snapshot merge cannot resurrect categories, suppliers,
+    // customers, users or expenses.
+    const deletedRecords = deletedRecordHints();
+    if (deletedRecords.length) fd.append('deleted_records', JSON.stringify(deletedRecords));
     const res = await fetchPinned(`${apiBase()}/api/system/restore-merge`, {
       method: 'POST',
       headers: authHeaders(),

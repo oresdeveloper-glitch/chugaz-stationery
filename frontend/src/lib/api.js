@@ -4,6 +4,85 @@ const SHOP_TOKEN_KEY = 'sst_shop_token';
 const SHOP_USER_KEY = 'sst_shop_user';
 // Persisted instance pin — keeps requests on the instance that holds the data.
 const DB_PIN_KEY = 'sst_db_pin';
+// Delete markers for entities merged back by the recovery snapshot. A DELETE
+// response carries { entity, keys }; remembering it here lets a refresh that
+// lands on a fresh instance tell that instance what this browser deleted.
+const DELETED_RECORDS_KEY = 'sst_deleted_records';
+const DELETED_TTL_MS = 10 * 60 * 1000;
+const DELETED_MAX = 500;
+
+function readDeletedRecords() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(DELETED_RECORDS_KEY) || '[]');
+    return Array.isArray(rows) ? rows : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function writeDeletedRecords(rows) {
+  try {
+    localStorage.setItem(DELETED_RECORDS_KEY, JSON.stringify(rows.slice(-DELETED_MAX)));
+  } catch (_) { /* private mode / quota: server tombstone still applies */ }
+}
+
+function noteTombstone(t) {
+  if (!t || !t.entity || !Array.isArray(t.keys) || !t.keys.length) return;
+  const now = Date.now();
+  const rows = readDeletedRecords().filter((r) => r && r.entity && r.key && now - Number(r.at || 0) < DELETED_TTL_MS);
+  for (const key of t.keys) {
+    const i = rows.findIndex((r) => r.entity === t.entity && r.key === key);
+    if (i >= 0) rows.splice(i, 1);
+    rows.push({ entity: t.entity, key, at: now });
+  }
+  writeDeletedRecords(rows);
+}
+
+// A create/update with the same identity is a deliberate re-add, so only the
+// stale hints for THAT identity must be cleared. Clearing every hint for the
+// entity would let other deleted rows be resurrected by an older snapshot.
+function payloadIdentityKeys(entity, body) {
+  if (!entity || !body || typeof body !== 'object') return [];
+  const s = (v) => (v == null ? '' : String(v).trim());
+  const keys = [];
+  if (entity === 'categories' || entity === 'brands' || entity === 'suppliers') {
+    const name = s(body.name);
+    if (name) keys.push(`name:${name}`);
+  } else if (entity === 'customers') {
+    if (s(body.phone)) keys.push(`phone:${s(body.phone)}`);
+    if (s(body.email)) keys.push(`email:${s(body.email).toLowerCase()}`);
+    if (!keys.length && s(body.name)) keys.push(`name:${s(body.name)}`);
+  } else if (entity === 'users') {
+    const email = s(body.email).toLowerCase();
+    if (email) keys.push(`email:${email}`);
+  } else if (entity === 'expenses') {
+    keys.push(`exp:${s(body.title)}|${Number(body.amount) || 0}|${s(body.expense_date)}|${s(body.notes)}`);
+  }
+  return keys;
+}
+
+function clearEntityHints(entity, body) {
+  const keys = payloadIdentityKeys(entity, body);
+  if (!keys.length) return;
+  writeDeletedRecords(readDeletedRecords().filter((r) => !(r && r.entity === entity && keys.includes(r.key))));
+}
+
+export function deletedRecordHints() {
+  const now = Date.now();
+  return readDeletedRecords()
+    .filter((r) => r && r.entity && r.key && now - Number(r.at || 0) < DELETED_TTL_MS)
+    .map((r) => ({ entity: r.entity, key: r.key, at: Number(r.at) || 0 }));
+}
+
+function entityForMutation(path) {
+  if (path.startsWith('/products/cats')) return 'categories';
+  if (path.startsWith('/products/brands')) return 'brands';
+  if (path.startsWith('/suppliers')) return 'suppliers';
+  if (path.startsWith('/customers')) return 'customers';
+  if (path.startsWith('/users')) return 'users';
+  if (path.startsWith('/expenses')) return 'expenses';
+  return null;
+}
 
 // Registered by dbkeep.js (cycle-free) to run an urgent backup after each write.
 let onWriteFn = null;
@@ -344,6 +423,16 @@ async function request(path, options = {}, shop = false) {
   }
   // Write landed: nudge the live check so open dashboards resync right away.
   if (!idempotent) {
+    if (data && data.tombstone) noteTombstone(data.tombstone);
+    const method = String(options.method || 'GET').toUpperCase();
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+      // options.body was serialized above; recover the identity fields so only
+      // a re-created row's own delete hint is cleared.
+      let sent = options.body;
+      if (typeof sent === 'string') { try { sent = JSON.parse(sent); } catch (_) { sent = null; } }
+      if (sent instanceof FormData) sent = null;
+      clearEntityHints(entityForMutation(path), sent);
+    }
     try { window.dispatchEvent(new Event('chugaz-mutated')); } catch {}
     try { if (onWriteFn) onWriteFn(); } catch {}
   }

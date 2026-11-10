@@ -9,6 +9,13 @@ try {
 
 const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'stationery.db');
 
+// A brand-new file is seeded on this boot. Seed rows are deliberately stamped
+// with an old timestamp (see ensureVersioning/seed epoch below) so a browser
+// snapshot from before a disk reset can restore them, while a row the shop
+// actually edited always keeps its newer timestamp.
+let isNewDb = false;
+try { isNewDb = !fs.existsSync(DB_PATH) || fs.statSync(DB_PATH).size === 0; } catch (_) { isNewDb = false; }
+
 // Load node:sqlite dynamically so @vercel/node (esbuild) does not rewrite
 // the mandatory 'node:' prefix to a bare 'sqlite' package at build time.
 function loadDatabaseSync() {
@@ -22,13 +29,69 @@ function loadDatabaseSync() {
 }
 
 function createStubDb() {
-  const stmt = { get: () => undefined, all: () => [], run: () => ({ lastID: 0, changes: 0 }) };
+  // Keep the server alive so every write can be answered with a real 503
+  // instead of the process crashing at module load. Reads return empty data.
+  const stmt = { get: () => ({}), all: () => [], run: () => ({ lastID: 0, lastInsertRowid: 0, changes: 0 }) };
   return {
     exec: () => {},
     prepare: () => stmt,
     close: () => {},
     __stub: true,
   };
+}
+
+// Tables whose rows can be merged back from a browser snapshot. `updated_at`
+// is the conflict clock: a merge may only overwrite a row when the snapshot
+// carries a strictly newer value. Without this, a snapshot taken before an
+// edit was merged back afterwards and silently reverted the edit - the
+// "saved successfully, then came back after refresh" symptom.
+const VERSIONED_TABLES = ['offices', 'users', 'categories', 'brands', 'products', 'suppliers', 'customers'];
+const SEED_EPOCH = '1970-01-01 00:00:00';
+
+function colExists(conn, table, column) {
+  try {
+    const row = conn.prepare('SELECT COUNT(*) AS c FROM pragma_table_info(?) WHERE name = ?').get(table, column);
+    return !!(row && row.c > 0);
+  } catch (_) {
+    return false;
+  }
+}
+
+function ensureVersioning(conn) {
+  for (const t of VERSIONED_TABLES) {
+    try {
+      if (!colExists(conn, t, 'updated_at')) conn.exec(`ALTER TABLE ${t} ADD COLUMN updated_at TEXT`);
+      // Backfill once: keep the row's real creation time where the table has
+      // one, otherwise treat it as seed data (old epoch).
+      try {
+        conn.exec(`UPDATE ${t} SET updated_at = COALESCE(updated_at, ${colExists(conn, t, 'created_at') ? 'created_at' : `'${SEED_EPOCH}'`}, '${SEED_EPOCH}') WHERE updated_at IS NULL`);
+      } catch (_) { /* table without created_at */ }
+      // Only stamp inserts that did not bring their own timestamp: a merge
+      // inserts the snapshot's updated_at and must preserve it.
+      conn.exec(`DROP TRIGGER IF EXISTS trg_${t}_touch_insert`);
+      conn.exec(`CREATE TRIGGER trg_${t}_touch_insert AFTER INSERT ON ${t} FOR EACH ROW WHEN NEW.updated_at IS NULL BEGIN UPDATE ${t} SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = NEW.id; END`);
+      // Any ordinary UPDATE bumps the clock; a merge that explicitly writes
+      // updated_at keeps the snapshot's value.
+      conn.exec(`DROP TRIGGER IF EXISTS trg_${t}_touch_update`);
+      conn.exec(`CREATE TRIGGER trg_${t}_touch_update AFTER UPDATE ON ${t} FOR EACH ROW WHEN NEW.updated_at IS OLD.updated_at BEGIN UPDATE ${t} SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = NEW.id; END`);
+    } catch (e) {
+      console.error(`[db] versioning ${t} skipped:`, e && e.message ? e.message : e);
+    }
+  }
+  // Deletes of entities other than products: without a marker an additive
+  // snapshot merge re-creates the row and the delete looks undone after a
+  // refresh. Products keep their dedicated deleted_products table.
+  try {
+    conn.exec(`CREATE TABLE IF NOT EXISTS deleted_records (
+      entity TEXT NOT NULL,
+      key TEXT NOT NULL,
+      deleted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+      PRIMARY KEY (entity, key)
+    )`);
+    conn.exec('CREATE INDEX IF NOT EXISTS idx_deleted_records_entity ON deleted_records(entity)');
+  } catch (e) {
+    console.error('[db] deleted_records skipped:', e && e.message ? e.message : e);
+  }
 }
 
 // node:sqlite compiles the SQL text on every prepare(). Hot paths prepare the
@@ -149,7 +212,7 @@ try {
     // uses (sku, else name). Browser snapshots are merged back after a cold
     // start; without this a snapshot taken before the delete re-created the
     // product a few seconds later.
-    real.exec('CREATE TABLE IF NOT EXISTS deleted_products (\n id INTEGER PRIMARY KEY AUTOINCREMENT,\n sku TEXT,\n name TEXT NOT NULL,\n deleted_at TEXT NOT NULL DEFAULT (datetime(\'now\'))\n)');
+    real.exec('CREATE TABLE IF NOT EXISTS deleted_products (\n id INTEGER PRIMARY KEY AUTOINCREMENT,\n sku TEXT,\n name TEXT NOT NULL,\n deleted_at TEXT NOT NULL DEFAULT (strftime(\'%Y-%m-%d %H:%M:%f\',\'now\'))\n)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_deleted_products_sku ON deleted_products(sku)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_deleted_products_name ON deleted_products(name)');
     if (!hasColumn('carts', 'guest_id')) {
@@ -182,6 +245,7 @@ try {
     real.exec('CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(order_date)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_stock_created ON stock_movements(created_at)');
     real.exec('CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)');
+    ensureVersioning(real);
     fixBahashaSpelling(real);
   }
   migrate();
@@ -274,6 +338,15 @@ try {
     console.error('[db] product_categories backfill skipped:', e && e.message ? e.message : e);
   }
 
+  // First boot: everything inserted so far is seed data. Stamp it old so a
+  // recovery snapshot (whose rows carry real timestamps) can restore it, while
+  // any later edit gets a newer timestamp from the triggers above.
+  if (isNewDb) {
+    for (const t of VERSIONED_TABLES) {
+      try { real.exec(`UPDATE ${t} SET updated_at = '${SEED_EPOCH}'`); } catch (_) { /* table missing */ }
+    }
+  }
+
   db = real;
   dbReady = true;
 } catch (e) {
@@ -283,7 +356,9 @@ try {
 }
 
 function transact(fn) {
-  if (db.__stub) return fn();
+  // A stubbed/unavailable database must fail loudly. Returning success here was
+  // how a CRUD call could report 200 while nothing was ever written.
+  if (db.__stub) throw new Error('Database unavailable — the change was not saved');
   db.exec('BEGIN');
   try {
     const result = fn();
@@ -317,12 +392,15 @@ function reopenDb() {
     // writes after them don't pay a per-statement fsync stall.
     fresh.exec('PRAGMA synchronous = NORMAL');
     fresh.exec('PRAGMA foreign_keys = ON');
+    // Restored files can predate the versioning columns/triggers and the
+    // delete-marker table - add them before any query runs.
+    ensureVersioning(fresh);
     // Restored file may predate the join table — rebuild it before queries run.
     try {
       fresh.exec('CREATE TABLE IF NOT EXISTS product_categories (\n product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,\n category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,\n PRIMARY KEY (product_id, category_id)\n)');
       fresh.exec('CREATE INDEX IF NOT EXISTS idx_product_categories_cat ON product_categories(category_id)');
       fresh.exec('INSERT OR IGNORE INTO product_categories (product_id, category_id) SELECT id, category_id FROM products WHERE category_id IS NOT NULL');
-      fresh.exec('CREATE TABLE IF NOT EXISTS deleted_products (\n id INTEGER PRIMARY KEY AUTOINCREMENT,\n sku TEXT,\n name TEXT NOT NULL,\n deleted_at TEXT NOT NULL DEFAULT (datetime(\'now\'))\n)');
+      fresh.exec('CREATE TABLE IF NOT EXISTS deleted_products (\n id INTEGER PRIMARY KEY AUTOINCREMENT,\n sku TEXT,\n name TEXT NOT NULL,\n deleted_at TEXT NOT NULL DEFAULT (strftime(\'%Y-%m-%d %H:%M:%f\',\'now\'))\n)');
       fresh.exec('CREATE INDEX IF NOT EXISTS idx_deleted_products_sku ON deleted_products(sku)');
       fresh.exec('CREATE INDEX IF NOT EXISTS idx_deleted_products_name ON deleted_products(name)');
     } catch (_) { /* table may be missing on a stubbed environment */ }
@@ -333,6 +411,8 @@ function reopenDb() {
     return false;
   }
 }
+
+function isDbReady() { return dbReady && !db.__stub; }
 
 function audit(userId, action, entity, entityId, details) {
   try {
@@ -360,4 +440,4 @@ function writeRedactedCopy(src, dst) {
   }
 }
 
-module.exports = { db: dbProxy, DB_PATH, transact, audit, dbReady, reopenDb, writeRedactedCopy, fixBahashaSpelling };
+module.exports = { db: dbProxy, DB_PATH, transact, audit, dbReady, isDbReady, reopenDb, writeRedactedCopy, fixBahashaSpelling, SEED_EPOCH };

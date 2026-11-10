@@ -3,6 +3,7 @@ const multer = require('multer');
 const { db, audit, transact } = require('../db');
 const { requireRole } = require('../auth');
 const { accountingUse, hasAccountingHistory, productPhotoUrls, purgeProductRows, dropUnusedMedia, tombstone, clearTombstones } = require('../product-cleanup');
+const { record, forget, identityKeys } = require('../tombstones');
 const u = require('../units');
 
 const router = express.Router();
@@ -555,6 +556,7 @@ router.post('/cats', requireRole('admin', 'manager'), (req, res) => {
  }
  try {
   const info = db.prepare('INSERT INTO categories (name, description, parent_id) VALUES (?,?,?)').run(name, description || null, parent ? parent.id : null);
+  forget('categories', identityKeys('categories', { name }));
   audit(req.user.id, 'CREATE', 'category', Number(info.lastInsertRowid), { name });
   res.status(201).json({ id: Number(info.lastInsertRowid) });
  } catch (e) {
@@ -574,6 +576,7 @@ router.put('/cats/:id', requireRole('admin', 'manager'), (req, res) => {
   if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Category already exists' });
   throw e;
  }
+ forget('categories', identityKeys('categories', { name }));
  audit(req.user.id, 'UPDATE', 'category', Number(req.params.id), { name });
  res.json({ ok: true });
 });
@@ -582,13 +585,16 @@ router.put('/cats/:id', requireRole('admin', 'manager'), (req, res) => {
 // product (primary or extra membership) still points at it.
 router.delete('/cats/:id', requireRole('admin'), (req, res) => {
  const catId = Number(req.params.id);
+ const row = db.prepare('SELECT id, name FROM categories WHERE id=?').get(catId);
+ if (!row) return res.status(404).json({ error: 'Category not found' });
  const used = db.prepare('SELECT COUNT(*) c FROM products WHERE category_id = ? OR id IN (SELECT product_id FROM product_categories WHERE category_id = ?)').get(catId, catId).c;
  if (used > 0) return res.status(409).json({ error: 'Category is used by products' });
  const subs = db.prepare('SELECT COUNT(*) c FROM categories WHERE parent_id=?').get(req.params.id).c;
  if (subs > 0) return res.status(409).json({ error: 'Delete its subcategories first' });
  db.prepare('DELETE FROM categories WHERE id=?').run(req.params.id);
+ const keys = record('categories', identityKeys('categories', row));
  audit(req.user.id, 'DELETE', 'category', Number(req.params.id));
- res.json({ ok: true });
+ res.json({ ok: true, tombstone: { entity: 'categories', keys } });
 });
 
 // ---- brands ----
@@ -601,6 +607,7 @@ router.post('/brands', requireRole('admin'), (req, res) => {
  if (!name) return res.status(400).json({ error: 'Name required' });
  try {
   const info = db.prepare('INSERT INTO brands (name) VALUES (?)').run(name);
+  forget('brands', identityKeys('brands', { name }));
   audit(req.user.id, 'CREATE', 'brand', Number(info.lastInsertRowid), { name });
   res.status(201).json({ id: Number(info.lastInsertRowid) });
  } catch (e) {
@@ -611,16 +618,20 @@ router.post('/brands', requireRole('admin'), (req, res) => {
 
 router.put('/brands/:id', requireRole('admin'), (req, res) => {
  db.prepare('UPDATE brands SET name=? WHERE id=?').run(req.body.name, req.params.id);
+ forget('brands', identityKeys('brands', { name: req.body.name }));
  audit(req.user.id, 'UPDATE', 'brand', Number(req.params.id), { name: req.body.name });
  res.json({ ok: true });
 });
 
 router.delete('/brands/:id', requireRole('admin'), (req, res) => {
+ const row = db.prepare('SELECT id, name FROM brands WHERE id=?').get(req.params.id);
+ if (!row) return res.status(404).json({ error: 'Brand not found' });
  const used = db.prepare('SELECT COUNT(*) c FROM products WHERE brand_id=?').get(req.params.id).c;
  if (used > 0) return res.status(409).json({ error: 'Brand is used by products' });
  db.prepare('DELETE FROM brands WHERE id=?').run(req.params.id);
+ const keys = record('brands', identityKeys('brands', row));
  audit(req.user.id, 'DELETE', 'brand', Number(req.params.id));
- res.json({ ok: true });
+ res.json({ ok: true, tombstone: { entity: 'brands', keys } });
 });
 
 module.exports = router;

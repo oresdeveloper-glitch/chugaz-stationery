@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS deleted_products (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sku TEXT,
   name TEXT NOT NULL,
-  deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+  deleted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_deleted_products_sku ON deleted_products(sku);
 CREATE INDEX IF NOT EXISTS idx_deleted_products_name ON deleted_products(name);

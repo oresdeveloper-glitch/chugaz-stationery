@@ -54,6 +54,23 @@ app.use((req, res, next) => {
   next();
 });
 
+// Never report success when the database could not be opened. The old stub
+// connection accepted every write and returned 200 while storing nothing.
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  try {
+    // eslint-disable-next-line no-eval
+    const m = eval('require')('./backend/src/db');
+    const ready = typeof m.isDbReady === 'function' ? m.isDbReady() : !!(m && m.dbReady);
+    if (!ready) {
+      return res.status(503).json({ error: 'Database unavailable — the change was not saved', code: 'db_unavailable' });
+    }
+  } catch (_) {
+    return res.status(503).json({ error: 'Database unavailable — the change was not saved', code: 'db_unavailable' });
+  }
+  next();
+});
+
 // Instance identity for diagnostics (ephemeral on serverless: a changing id
 // across calls proves requests land on different instances).
 const INSTANCE_ID = require('crypto').randomBytes(4).toString('hex');

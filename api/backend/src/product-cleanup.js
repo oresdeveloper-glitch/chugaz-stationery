@@ -70,7 +70,8 @@ function dropUnusedMedia(url) {
 // reappeared on the next refresh.
 function tombstone(ids) {
  const get = db.prepare('SELECT sku, name FROM products WHERE id = ?');
- const ins = db.prepare('INSERT INTO deleted_products (sku, name) VALUES (?,?)');
+ const ins = db.prepare(`INSERT INTO deleted_products (sku, name, deleted_at)
+  VALUES (?,?, strftime('%Y-%m-%d %H:%M:%f','now'))`);
  for (const id of ids) {
   const row = get.get(id);
   if (row) ins.run(row.sku || null, row.name || '');
@@ -94,15 +95,31 @@ function clearTombstones(sku, name) {
 function importTombstones(rows) {
  if (!Array.isArray(rows) || !rows.length) return 0;
  let added = 0;
- const ins = db.prepare(`INSERT INTO deleted_products (sku, name)
-  SELECT ?, ? WHERE NOT EXISTS (
+ const now = db.prepare("SELECT strftime('%Y-%m-%d %H:%M:%f','now') AS t").get().t;
+ const stamp = (r) => {
+  if (r.deleted_at) return String(r.deleted_at);
+  if (r.at) {
+   const d = new Date(Number(r.at));
+   if (!Number.isNaN(d.getTime())) return d.toISOString().replace('T', ' ').replace('Z', '');
+  }
+  return now;
+ };
+ // Never re-import a tombstone over a product the shop deliberately re-created
+ // after the delete: its updated_at is newer than the tombstone's timestamp.
+ const ins = db.prepare(`INSERT INTO deleted_products (sku, name, deleted_at)
+  SELECT ?, ?, ? WHERE NOT EXISTS (
    SELECT 1 FROM deleted_products WHERE COALESCE(sku, '') = COALESCE(?, '') AND name = ?
+  ) AND NOT EXISTS (
+   SELECT 1 FROM products p
+   WHERE COALESCE(p.sku, '') = COALESCE(?, '') AND p.name = ?
+    AND p.updated_at IS NOT NULL AND p.updated_at > ?
   )`);
  for (const r of rows) {
   if (!r || (!r.sku && !r.name)) continue;
   const sku = r.sku || null;
   const name = String(r.name || '');
-  const info = ins.run(sku, name, sku, name);
+  const at = stamp(r);
+  const info = ins.run(sku, name, at, sku, name, sku, name, at);
   added += Number(info.changes) || 0;
  }
  return added;
@@ -113,13 +130,19 @@ function importTombstones(rows) {
 function applyTombstones() {
  let rows = [];
  try {
-  rows = db.prepare(`SELECT DISTINCT p.id FROM deleted_products dp JOIN products p
+  rows = db.prepare(`SELECT DISTINCT p.id, p.updated_at, dp.deleted_at FROM deleted_products dp JOIN products p
    ON (dp.sku IS NOT NULL AND p.sku = dp.sku)
    OR (dp.sku IS NULL AND p.name = dp.name)`).all();
  } catch (_) { return 0; }
  let removed = 0;
+ const sec = (ts) => (ts == null ? '' : String(ts).slice(0, 19));
  for (const row of rows) {
   const id = Number(row.id);
+  // A product deliberately re-created after the delete has a newer clock and
+  // must survive this pass (otherwise re-adding it would be undone on merge).
+  // Compare at second precision: older tombstones stored no milliseconds, and
+  // a same-second edit still belongs to the deleted row.
+  if (row.updated_at && row.deleted_at && sec(row.updated_at) > sec(row.deleted_at)) continue;
   if (hasAccountingHistory([id])) continue;
   const urls = productPhotoUrls([id]);
   purgeProductRows([id]);

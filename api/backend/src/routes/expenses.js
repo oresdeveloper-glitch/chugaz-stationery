@@ -1,6 +1,7 @@
 const express = require('express');
 const { db, audit } = require('../db');
 const { requireRole } = require('../auth');
+const { record, forget, identityKeys } = require('../tombstones');
 
 const router = express.Router();
 
@@ -21,15 +22,21 @@ router.get('/categories', requireRole('manager', 'admin'), (req, res) => {
 router.post('/', requireRole('manager', 'admin'), (req, res) => {
  const e = req.body;
  if (!e.title || !e.amount) return res.status(400).json({ error: 'Title and amount required' });
+ const when = e.expense_date || new Date().toISOString();
  const info = db.prepare('INSERT INTO expenses (title, category, amount, expense_date, notes, created_by) VALUES (?,?,?,?,?,?)')
-  .run(e.title, e.category || null, Number(e.amount), e.expense_date || new Date().toISOString(), e.notes || null, req.user.id);
+  .run(e.title, e.category || null, Number(e.amount), when, e.notes || null, req.user.id);
+ forget('expenses', identityKeys('expenses', { ...e, expense_date: when }));
  audit(req.user.id, 'CREATE', 'expense', Number(info.lastInsertRowid), { title: e.title, amount: e.amount });
  res.status(201).json({ id: Number(info.lastInsertRowid) });
 });
 
 router.delete('/:id', requireRole('manager', 'admin'), (req, res) => {
+ const row = db.prepare('SELECT id, title, amount, expense_date, notes FROM expenses WHERE id=?').get(req.params.id);
+ if (!row) return res.status(404).json({ error: 'Expense not found' });
  db.prepare('DELETE FROM expenses WHERE id=?').run(req.params.id);
- res.json({ ok: true });
+ const keys = record('expenses', identityKeys('expenses', row));
+ audit(req.user.id, 'DELETE', 'expense', Number(req.params.id));
+ res.json({ ok: true, tombstone: { entity: 'expenses', keys } });
 });
 
 module.exports = router;

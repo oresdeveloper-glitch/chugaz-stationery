@@ -75,6 +75,22 @@ app.use((req, res, next) => {
  next();
 });
 
+// Never report success when the database could not be opened. The old stub
+// connection accepted every write and returned 200 while storing nothing.
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  try {
+    const m = require('./src/db');
+    const ready = typeof m.isDbReady === 'function' ? m.isDbReady() : !!m.dbReady;
+    if (!ready) {
+      return res.status(503).json({ error: 'Database unavailable — the change was not saved', code: 'db_unavailable' });
+    }
+  } catch (_) {
+    return res.status(503).json({ error: 'Database unavailable — the change was not saved', code: 'db_unavailable' });
+  }
+  next();
+});
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // Uploaded product photos live in the database, so they survive a recycled
 // serverless disk and travel with backups. Public: the storefront needs them.
@@ -135,7 +151,7 @@ app.get('/api/health', (req, res) => {
     }
     res.json({ ok: true, db: m.dbReady ? 'connected' : 'degraded', users, db_marker, sales, orders, categories, reset_at });
   } catch (_) {
-    res.json({ ok: true, db: 'connected', users: null, db_marker: null, sales: null, orders: null, reset_at: null });
+    res.json({ ok: true, db: 'degraded', users: null, db_marker: null, sales: null, orders: null, reset_at: null });
   }
 });
 

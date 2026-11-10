@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const { db, DB_PATH, audit, reopenDb, writeRedactedCopy, fixBahashaSpelling } = require('../db');
+const { identityKeys, isDeleted, importHints, applyAll } = require('../tombstones');
 const { requireRole } = require('../auth');
 const { importTombstones, applyTombstones } = require('../product-cleanup');
 
@@ -149,11 +150,27 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
   const ins = (t, cl, vals) => Number(db.prepare(`INSERT INTO ${t} (${cl.join(', ')}) VALUES (${cl.map(() => '?').join(', ')})`).run(...vals).lastInsertRowid);
   const has = (t, where, params) => !!db.prepare(`SELECT 1 FROM ${t} WHERE ${where}`).get(...params);
 
+  // Conflict clock: a snapshot may only overwrite a row when it carries a
+  // strictly newer updated_at. Legacy snapshots have no updated_at at all, so
+  // they may only fill rows that are still seed data (old epoch) - never a row
+  // the shop has edited since.
+  const isSeedTs = (ts) => !ts || String(ts) <= '1970-01-01 00:00:01';
+  const shouldOverwrite = (serverTs, bakTs, bakHasTs) => {
+    if (!bakHasTs) return isSeedTs(serverTs);
+    if (!bakTs) return false;
+    if (!serverTs) return true;
+    return String(bakTs) > String(serverTs);
+  };
+
   const officeMap = new Map(), catMap = new Map(), brandMap = new Map(), userMap = new Map(),
    custMap = new Map(), suppMap = new Map(), prodMap = new Map(), saleMap = new Map(),
    saleItemMap = new Map(), saleRetMap = new Map(), purchMap = new Map(), purchRetMap = new Map(),
    orderMap = new Map(), orderRetMap = new Map(), addrMap = new Map(), bakStock = new Map();
   const saleBakNew = new Set(), purchBakNew = new Set(), orderBakNew = new Set();
+  // Products whose row was actually inserted or updated from the snapshot. Only
+  // these may have their stock recomputed; an older snapshot must not overwrite
+  // a stock edit the live database already accepted.
+  const prodFromBackup = new Set();
 
   const remapV = (col, v, remap) => {
    if (v === null || v === undefined) return v;
@@ -163,16 +180,18 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
    return mapped === undefined ? v : mapped;
   };
 
-  const mergeByKey = (t, keyCols, map, remap = {}, { update = true, onRow = null, skip = null } = {}) => {
+  const mergeByKey = (t, keyCols, map, remap = {}, { update = true, onRow = null, skip = null, entity = null } = {}) => {
    if (!tableExists(t)) return;
    const cl = commonCols(t);
    if (!keyCols.every((c) => cl.includes(c))) return;
+   const hasTs = cl.includes('updated_at');
    for (const r of bakRows(t, cl)) {
+    if (entity && isDeleted(entity, identityKeys(entity, r))) continue;
     const where = keyCols.map((c) => `${c} = ?`).join(' AND ');
-    const ex = db.prepare(`SELECT id FROM ${t} WHERE ${where}`).get(...keyCols.map((c) => r[c]));
+    const ex = db.prepare(`SELECT id${hasTs ? ', updated_at' : ''} FROM ${t} WHERE ${where}`).get(...keyCols.map((c) => r[c]));
     if (ex) {
      map.set(Number(r.__id), Number(ex.id));
-     if (update) {
+     if (update && shouldOverwrite(hasTs ? ex.updated_at : null, r.updated_at, hasTs)) {
       const upd = cl.filter((c) => !keyCols.includes(c) && !(skip && skip(c, r[c])));
       if (upd.length) db.prepare(`UPDATE ${t} SET ${upd.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...upd.map((c) => remapV(c, r[c], remap)), Number(ex.id));
      }
@@ -185,24 +204,42 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
    }
   };
 
+  // Delete markers for non-product entities: from the snapshot itself and from
+  // the browser that performed the delete. A fresh instance has no marker yet,
+  // so the browser hint is what stops a snapshot from resurrecting the row.
+  let recRows = [];
+  if (tableExists('deleted_records')) {
+   try { recRows = db.prepare('SELECT entity, key FROM bak.deleted_records').all(); } catch (_) { recRows = []; }
+  }
+  const recHint = req.body && req.body.deleted_records;
+  if (recHint) {
+   try {
+    const parsed = typeof recHint === 'string' ? JSON.parse(recHint) : recHint;
+    if (Array.isArray(parsed)) recRows = recRows.concat(parsed);
+   } catch (_) { /* ignore a malformed hint */ }
+  }
+
   db.exec('BEGIN');
   try {
    db.exec('PRAGMA defer_foreign_keys = ON');
+   const recAdded = importHints(recRows);
+   if (recAdded) bump('deleted_records', recAdded);
 
    mergeByKey('offices', ['name'], officeMap, {});
-   mergeByKey('categories', ['name'], catMap, { parent_id: catMap }, { update: false });
-   mergeByKey('brands', ['name'], brandMap, {});
+   mergeByKey('categories', ['name'], catMap, { parent_id: catMap }, { update: false, entity: 'categories' });
+   mergeByKey('brands', ['name'], brandMap, {}, { entity: 'brands' });
    if (tableExists('users')) {
     if (mergeAll) {
-     // Empty password_hash marks a redacted (manager-downloaded) backup — never
+     // Empty password_hash marks a redacted (manager-downloaded) backup - never
      // let it overwrite a real password.
-     mergeByKey('users', ['email'], userMap, { office_id: officeMap }, { skip: (c, v) => c === 'password_hash' && !v });
+     mergeByKey('users', ['email'], userMap, { office_id: officeMap }, { skip: (c, v) => c === 'password_hash' && !v, entity: 'users' });
      } else {
       // Manager merges map accounts by email without writing them; unknown emails
       // land as passwordless customers so created_by remapping still resolves.
       const ul = commonCols('users');
       if (ul.includes('email')) {
        for (const r of bakRows('users', ul)) {
+        if (isDeleted('users', identityKeys('users', r))) continue;
         const ex = db.prepare('SELECT id FROM users WHERE email = ?').get(r.email);
         if (ex) {
          userMap.set(Number(r.__id), Number(ex.id));
@@ -219,13 +256,16 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
    if (tableExists('customers')) {
     const cl = commonCols('customers');
     for (const r of bakRows('customers', cl)) {
-     const ex = (r.phone && has('customers', 'phone = ?', [r.phone])) ? db.prepare('SELECT id FROM customers WHERE phone = ?').get(r.phone)
-      : (r.email && has('customers', 'email = ?', [r.email])) ? db.prepare('SELECT id FROM customers WHERE email = ?').get(r.email)
-      : has('customers', 'name = ?', [r.name]) ? db.prepare('SELECT id FROM customers WHERE name = ?').get(r.name) : null;
+     if (isDeleted('customers', identityKeys('customers', r))) continue;
+     const ex = (r.phone && has('customers', 'phone = ?', [r.phone])) ? db.prepare('SELECT id, updated_at FROM customers WHERE phone = ?').get(r.phone)
+      : (r.email && has('customers', 'email = ?', [r.email])) ? db.prepare('SELECT id, updated_at FROM customers WHERE email = ?').get(r.email)
+      : has('customers', 'name = ?', [r.name]) ? db.prepare('SELECT id, updated_at FROM customers WHERE name = ?').get(r.name) : null;
      if (ex) {
       custMap.set(Number(r.__id), Number(ex.id));
-      const upd = cl.filter((c) => c !== 'name');
-      if (upd.length) db.prepare(`UPDATE customers SET ${upd.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...upd.map((c) => r[c]), Number(ex.id));
+      if (shouldOverwrite(ex.updated_at, r.updated_at, cl.includes('updated_at'))) {
+       const upd = cl.filter((c) => c !== 'name');
+       if (upd.length) db.prepare(`UPDATE customers SET ${upd.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...upd.map((c) => r[c]), Number(ex.id));
+      }
       continue;
      }
      const id = ins('customers', cl, cl.map((c) => r[c]));
@@ -233,23 +273,27 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
      bump('customers');
     }
    }
-   mergeByKey('suppliers', ['name'], suppMap, {});
+   mergeByKey('suppliers', ['name'], suppMap, {}, { entity: 'suppliers' });
 
    if (tableExists('products')) {
     const cl = commonCols('products');
     for (const r of bakRows('products', cl)) {
-     const ex = (r.sku && has('products', 'sku = ?', [r.sku])) ? db.prepare('SELECT id FROM products WHERE sku = ?').get(r.sku)
-      : has('products', 'name = ?', [r.name]) ? db.prepare('SELECT id FROM products WHERE name = ?').get(r.name) : null;
+     const ex = (r.sku && has('products', 'sku = ?', [r.sku])) ? db.prepare('SELECT id, updated_at FROM products WHERE sku = ?').get(r.sku)
+      : has('products', 'name = ?', [r.name]) ? db.prepare('SELECT id, updated_at FROM products WHERE name = ?').get(r.name) : null;
      const remapCols = { category_id: catMap, brand_id: brandMap };
      if (ex) {
       prodMap.set(Number(r.__id), Number(ex.id));
-      bakStock.set(Number(r.__id), Number(r.current_stock) || 0);
-      const upd = cl.filter((c) => c !== 'sku');
-      if (upd.length) db.prepare(`UPDATE products SET ${upd.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...upd.map((c) => remapV(c, r[c], remapCols)), Number(ex.id));
+      if (shouldOverwrite(ex.updated_at, r.updated_at, cl.includes('updated_at'))) {
+       bakStock.set(Number(r.__id), Number(r.current_stock) || 0);
+       prodFromBackup.add(Number(r.__id));
+       const upd = cl.filter((c) => c !== 'sku');
+       if (upd.length) db.prepare(`UPDATE products SET ${upd.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...upd.map((c) => remapV(c, r[c], remapCols)), Number(ex.id));
+      }
      } else {
       const id = ins('products', cl, cl.map((c) => remapV(c, r[c], remapCols)));
       prodMap.set(Number(r.__id), id);
       bakStock.set(Number(r.__id), Number(r.current_stock) || 0);
+      prodFromBackup.add(Number(r.__id));
       bump('products');
      }
     }
@@ -401,6 +445,7 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
    if (tableExists('expenses')) {
     const cl = commonCols('expenses');
     for (const r of bakRows('expenses', cl)) {
+     if (isDeleted('expenses', identityKeys('expenses', r))) continue;
      const rem = cl.map((c) => remapV(c, r[c], { created_by: userMap }));
      const idx = (c) => cl.indexOf(c);
      if (has('expenses', 'title = ? AND amount = ? AND expense_date = ? AND COALESCE(notes, \'\') = ? AND COALESCE(created_by, 0) = ?',
@@ -530,22 +575,17 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
    }
 
    if (tableExists('settings') && mergeAll) {
-    db.prepare("INSERT INTO settings (key, value) SELECT key, value FROM bak.settings WHERE key <> 'db_marker' ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
-   }
-
-   if (prodMap.size && tableExists('sale_items')) {
-    const serverSales = "SELECT s.id FROM sales s WHERE COALESCE(s.invoice_number, '') NOT IN (SELECT COALESCE(invoice_number, '') FROM bak.sales)";
-    const sold = new Map();
-    for (const row of db.prepare(`SELECT si.product_id pid, SUM(si.quantity) q FROM sale_items si WHERE si.sale_id IN (${serverSales}) GROUP BY si.product_id`).all()) sold.set(Number(row.pid), Number(row.q) || 0);
-    for (const row of db.prepare(`SELECT sri.product_id pid, SUM(sri.quantity) q FROM sale_return_items sri JOIN sale_returns sr ON sr.id = sri.return_id WHERE sr.sale_id IN (${serverSales}) GROUP BY sri.product_id`).all()) sold.set(Number(row.pid), (sold.get(Number(row.pid)) || 0) - (Number(row.q) || 0));
-    const serverPurch = `SELECT p.id FROM purchases p WHERE NOT ((p.invoice_number IS NOT NULL AND p.invoice_number IN (SELECT invoice_number FROM bak.purchases WHERE invoice_number IS NOT NULL)) OR (p.invoice_number IS NULL AND EXISTS (SELECT 1 FROM bak.purchases b2 WHERE b2.invoice_number IS NULL AND b2.purchase_date = p.purchase_date AND b2.total = p.total AND COALESCE(b2.notes, '') = COALESCE(p.notes, ''))))`;
-    for (const row of db.prepare(`SELECT pi.product_id pid, SUM(pi.quantity) q FROM purchase_items pi WHERE pi.purchase_id IN (${serverPurch}) GROUP BY pi.product_id`).all()) sold.set(Number(row.pid), (sold.get(Number(row.pid)) || 0) - (Number(row.q) || 0));
-    for (const row of db.prepare(`SELECT pri.product_id pid, SUM(pri.quantity) q FROM purchase_return_items pri JOIN purchase_returns pr ON pr.id = pri.return_id WHERE pr.purchase_id IN (${serverPurch}) GROUP BY pri.product_id`).all()) sold.set(Number(row.pid), (sold.get(Number(row.pid)) || 0) + (Number(row.q) || 0));
-    const updStock = db.prepare('UPDATE products SET current_stock = ? WHERE id = ?');
-    for (const [bakId, targetId] of prodMap) {
-     const base = bakStock.get(bakId);
-     if (base === undefined) continue;
-     updStock.run(base - (sold.get(targetId) || 0), targetId);
+    // Restore shop settings on a genuinely fresh instance (different marker).
+    // When the marker matches, the snapshot is the same database at an older
+    // moment: overwriting settings here would revert a just-saved change.
+    let bakMarker = null, curMarker = null;
+    try { bakMarker = db.prepare("SELECT value FROM bak.settings WHERE key='db_marker'").get()?.value || null; } catch (_) {}
+    try { curMarker = db.prepare("SELECT value FROM settings WHERE key='db_marker'").get()?.value || null; } catch (_) {}
+    const freshInstance = !!bakMarker && bakMarker !== curMarker;
+    if (freshInstance) {
+     db.prepare("INSERT INTO settings (key, value) SELECT key, value FROM bak.settings WHERE key NOT IN ('db_marker','reset_at') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
+    } else {
+     db.prepare("INSERT OR IGNORE INTO settings (key, value) SELECT key, value FROM bak.settings WHERE key NOT IN ('db_marker','reset_at')").run();
     }
    }
 
@@ -553,10 +593,15 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
    // additively, which used to re-create the product seconds after the delete.
    // Fold in every delete marker - from the backup file itself and from the
    // browser doing the merge - then remove the matching products that have no
-   // accounting history (invoice/purchase lines keep their products).
+   // accounting history (invoice/purchase lines keep their products). This runs
+   // BEFORE stock recalculation: that UPDATE would bump updated_at and make a
+   // merge-recreated row look like a deliberate re-add.
    let tombRows = [];
    if (tableExists('deleted_products')) {
-    try { tombRows = bakRows('deleted_products', ['sku', 'name']); } catch (_) { tombRows = []; }
+    try {
+     const dpCols = commonCols('deleted_products');
+     tombRows = bakRows('deleted_products', ['sku', 'name', 'deleted_at'].filter((c) => dpCols.includes(c)));
+    } catch (_) { tombRows = []; }
    }
    // Only roles that may delete products anyway can add client hints; a
    // cashier/clerk merge still imports the backup's own tombstones.
@@ -571,6 +616,27 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
    if (tombAdded) bump('deleted_products', tombAdded);
    const purged = applyTombstones();
    if (purged) bump('removed_deleted_products', purged);
+   const purgedRecords = applyAll();
+   if (purgedRecords) bump('removed_deleted_records', purgedRecords);
+
+   if (prodMap.size && tableExists('sale_items')) {
+    const serverSales = "SELECT s.id FROM sales s WHERE COALESCE(s.invoice_number, '') NOT IN (SELECT COALESCE(invoice_number, '') FROM bak.sales)";
+    const sold = new Map();
+    for (const row of db.prepare(`SELECT si.product_id pid, SUM(si.quantity) q FROM sale_items si WHERE si.sale_id IN (${serverSales}) GROUP BY si.product_id`).all()) sold.set(Number(row.pid), Number(row.q) || 0);
+    for (const row of db.prepare(`SELECT sri.product_id pid, SUM(sri.quantity) q FROM sale_return_items sri JOIN sale_returns sr ON sr.id = sri.return_id WHERE sr.sale_id IN (${serverSales}) GROUP BY sri.product_id`).all()) sold.set(Number(row.pid), (sold.get(Number(row.pid)) || 0) - (Number(row.q) || 0));
+    const serverPurch = `SELECT p.id FROM purchases p WHERE NOT ((p.invoice_number IS NOT NULL AND p.invoice_number IN (SELECT invoice_number FROM bak.purchases WHERE invoice_number IS NOT NULL)) OR (p.invoice_number IS NULL AND EXISTS (SELECT 1 FROM bak.purchases b2 WHERE b2.invoice_number IS NULL AND b2.purchase_date = p.purchase_date AND b2.total = p.total AND COALESCE(b2.notes, '') = COALESCE(p.notes, ''))))`;
+    for (const row of db.prepare(`SELECT pi.product_id pid, SUM(pi.quantity) q FROM purchase_items pi WHERE pi.purchase_id IN (${serverPurch}) GROUP BY pi.product_id`).all()) sold.set(Number(row.pid), (sold.get(Number(row.pid)) || 0) - (Number(row.q) || 0));
+    for (const row of db.prepare(`SELECT pri.product_id pid, SUM(pri.quantity) q FROM purchase_return_items pri JOIN purchase_returns pr ON pr.id = pri.return_id WHERE pr.purchase_id IN (${serverPurch}) GROUP BY pri.product_id`).all()) sold.set(Number(row.pid), (sold.get(Number(row.pid)) || 0) + (Number(row.q) || 0));
+    const updStock = db.prepare('UPDATE products SET current_stock = ? WHERE id = ?');
+    for (const [bakId, targetId] of prodMap) {
+     // Only products the snapshot actually won: never recompute stock over a
+     // newer stock edit that is already in the live database.
+     if (!prodFromBackup.has(bakId)) continue;
+     const base = bakStock.get(bakId);
+     if (base === undefined) continue;
+     updStock.run(base - (sold.get(targetId) || 0), targetId);
+    }
+   }
 
    db.exec('COMMIT');
   } catch (e) {

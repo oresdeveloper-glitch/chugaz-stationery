@@ -63,5 +63,5 @@ export function forgetProductTombstone(product) {
 }
 
 export function deletedProductHints() {
-  return live(read()).map((r) => ({ sku: r.sku || null, name: r.name || '' }));
+  return live(read()).map((r) => ({ sku: r.sku || null, name: r.name || '', at: Number(r.at) || 0 }));
 }

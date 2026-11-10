@@ -1,6 +1,7 @@
 const express = require('express');
 const { db, audit } = require('../db');
 const { requireRole } = require('../auth');
+const { record, forget, identityKeys } = require('../tombstones');
 
 const router = express.Router();
 
@@ -15,6 +16,7 @@ router.post('/', requireRole('manager', 'admin'), (req, res) => {
   INSERT INTO suppliers (name, phone, email, address, tax_number, balance)
   VALUES (?,?,?,?,?,?)
  `).run(s.name, s.phone || null, s.email || null, s.address || null, s.tax_number || null, s.balance || 0);
+ forget('suppliers', identityKeys('suppliers', { name: s.name }));
  audit(req.user.id, 'CREATE', 'supplier', Number(info.lastInsertRowid), { name: s.name });
  res.status(201).json({ id: Number(info.lastInsertRowid) });
 });
@@ -25,16 +27,20 @@ router.put('/:id', requireRole('manager', 'admin'), (req, res) => {
   UPDATE suppliers SET name=?, phone=?, email=?, address=?, tax_number=? WHERE id=?
  `).run(s.name, s.phone, s.email, s.address, s.tax_number, req.params.id);
  if (info.changes === 0) return res.status(404).json({ error: 'Supplier not found' });
+ forget('suppliers', identityKeys('suppliers', { name: s.name }));
  audit(req.user.id, 'UPDATE', 'supplier', Number(req.params.id), { name: s.name });
  res.json({ ok: true });
 });
 
 router.delete('/:id', requireRole('admin'), (req, res) => {
+ const row = db.prepare('SELECT id, name FROM suppliers WHERE id=?').get(req.params.id);
+ if (!row) return res.status(404).json({ error: 'Supplier not found' });
  const used = db.prepare('SELECT COUNT(*) c FROM purchases WHERE supplier_id=?').get(req.params.id).c;
  if (used > 0) return res.status(409).json({ error: 'Supplier has purchase history' });
  db.prepare('DELETE FROM suppliers WHERE id=?').run(req.params.id);
+ const keys = record('suppliers', identityKeys('suppliers', row));
  audit(req.user.id, 'DELETE', 'supplier', Number(req.params.id));
- res.json({ ok: true });
+ res.json({ ok: true, tombstone: { entity: 'suppliers', keys } });
 });
 
 router.get('/:id/purchases', (req, res) => {
