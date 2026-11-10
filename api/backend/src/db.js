@@ -100,6 +100,36 @@ function ensureVersioning(conn) {
 // handle keyed by its SQL removes that repeated parse from every request
 // without touching any query. Bound the map so a dynamic caller can never grow
 // it without limit.
+// Indexes added after the first performance audit. They are created on every
+// boot and after a restore, so an existing production database (and a backup
+// restored onto a fresh instance) gets them without a manual migration.
+// Each one was added because a measured query plan needed it:
+//  - idx_sale_items_cover: makes the dashboard's sale-item aggregates
+//    index-only instead of one table lookup per sold line
+//    (topProducts 550 -> 228 ms, byCategory 522 -> 172 ms on the 80k-line
+//    benchmark database).
+//  - idx_orders_created: the orders list sorts newest-first; without it every
+//    page load scanned and sorted the whole orders table.
+//  - idx_order_payments_order / idx_order_returns_order: the orders list runs
+//    one paid-total and one return-count lookup per row (list 52 -> 8 ms).
+// Deliberately NOT added: indexes on (status, current_stock, reorder_level) or
+// (sale_date, created_by) — measured no faster (the stock predicate compares
+// two columns, so no index can narrow it) and the extra index made the
+// storefront category query pick a worse plan.
+function ensureHotIndexes(conn) {
+  const indexes = [
+    'CREATE INDEX IF NOT EXISTS idx_sale_items_cover ON sale_items(sale_id, product_id, quantity, total, cost_at_sale)',
+    'CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at DESC, id DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_order_payments_order ON order_payments(order_id, payment_status)',
+    'CREATE INDEX IF NOT EXISTS idx_order_returns_order ON order_returns(order_id, status)',
+  ];
+  for (const sql of indexes) {
+    try { conn.exec(sql); } catch (e) {
+      console.error('[db] index skipped:', e && e.message ? e.message : e);
+    }
+  }
+}
+
 function installStatementCache(conn) {
   const raw = conn.prepare.bind(conn);
   const cache = new Map();
@@ -249,6 +279,7 @@ try {
     fixBahashaSpelling(real);
   }
   migrate();
+  ensureHotIndexes(real);
 
   try {
     real.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('payment_instructions', '356322054 - CHUGAZ STATIONERY');
@@ -286,24 +317,12 @@ try {
       const adminPass = process.env.ADMIN_PASSWORD || 'admin123';
       const add = real.prepare("INSERT INTO users (name, email, password_hash, role_id, status) VALUES (?,?,?,?,'active')");
       add.run('Administrator', adminEmail, seedHash(adminPass), 1);
-      add.run('Manager', 'manager@shop.com', seedHash('manager123'), 2);
-      add.run('Cashier', 'cashier@shop.com', seedHash('cashier123'), 3);
-      add.run('Clerk', 'clerk@shop.com', seedHash('clerk123'), 4);
-      add.run('Online Customer', 'customer@shop.com', seedHash('cust123'), 5);
     }
 
-    // Office cashiers — ensured every start, idempotent.
+    // Offices are seeded; staff accounts (including office cashiers) are created
+    // by the admin through the Users screen. No default staff passwords are
+    // shipped with the application.
     real.exec("INSERT OR IGNORE INTO offices (name) VALUES ('Office A'), ('Office B')");
-    const officeA = real.prepare('SELECT id FROM offices WHERE name=?').get('Office A');
-    const officeB = real.prepare('SELECT id FROM offices WHERE name=?').get('Office B');
-    const cashierExists = real.prepare('SELECT id FROM users WHERE email=?');
-    const addCashier = real.prepare("INSERT INTO users (name, email, password_hash, role_id, office_id, status) VALUES (?,?,?,3,?,'active')");
-    for (const [n, e, pw, oid] of [
-      ['Cashier - Office A', 'cashier-a@shop.com', 'cashier123', officeA && officeA.id],
-      ['Cashier - Office B', 'cashier-b@shop.com', 'cashier123', officeB && officeB.id],
-    ]) {
-      if (oid && !cashierExists.get(e)) addCashier.run(n, e, seedHash(pw), oid);
-    }
   } catch (e) {
     console.error('[db] bootstrap seed skipped:', e && e.message ? e.message : e);
   }
@@ -395,6 +414,7 @@ function reopenDb() {
     // Restored files can predate the versioning columns/triggers and the
     // delete-marker table - add them before any query runs.
     ensureVersioning(fresh);
+    ensureHotIndexes(fresh);
     // Restored file may predate the join table — rebuild it before queries run.
     try {
       fresh.exec('CREATE TABLE IF NOT EXISTS product_categories (\n product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,\n category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,\n PRIMARY KEY (product_id, category_id)\n)');

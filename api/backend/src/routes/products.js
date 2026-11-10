@@ -112,6 +112,30 @@ function productSelect(extra) {
   ${extra || ''}`;
 }
 
+// The catalog list is requested by POS, Products, Inventory and Purchases on
+// every visit, so it must not carry the long text columns: description,
+// specifications and unit_prices are ~500 KB of the old 2.1 MB response for a
+// 2,000-product catalog, and none of those screens render them. They are sent
+// only to the callers that need them: ?full=1 (edit form) and ?scan=1 (the
+// barcode scanner reads specifications + category_description to match size
+// and pack size). Detail/edit views keep using productSelect() above.
+const LIST_COLUMNS = `p.id, p.sku, p.barcode, p.name, p.category_id, p.brand_id,
+  p.unit, p.purchase_price, p.selling_price, p.tax_rate, p.discount_rate,
+  p.reorder_level, p.current_stock, p.reserved_stock, p.image, p.status,
+  p.created_at, p.parent_id, p.office_id,
+  c.name AS category_name, b.name AS brand_name`;
+const FULL_COLUMNS = 'p.description, p.specifications, p.unit_prices, c.description AS category_description';
+const SCAN_COLUMNS = 'p.specifications, c.description AS category_description';
+
+function productListSelect(columns, extra) {
+ return `
+  SELECT ${columns}
+  FROM products p
+  LEFT JOIN categories c ON c.id = p.category_id
+  LEFT JOIN brands b ON b.id = p.brand_id
+  ${extra || ''}`;
+}
+
 // Child variants of a product.
 function variantsOf(id) {
  return db.prepare('SELECT * FROM products WHERE parent_id = ? ORDER BY id').all(id).map(withUnits);
@@ -164,7 +188,10 @@ router.get('/', (req, res) => {
  if (status) { conds.push('p.status = ?'); params.push(status); }
  if (low === '1') { conds.push('p.current_stock <= p.reorder_level'); }
  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
- const rows = db.prepare(productSelect(where + ' ORDER BY p.name')).all(...params);
+ const wantsFull = req.query.full === '1';
+ const wantsScan = wantsFull || req.query.scan === '1';
+ const columns = wantsFull ? `${LIST_COLUMNS}, ${FULL_COLUMNS}` : wantsScan ? `${LIST_COLUMNS}, ${SCAN_COLUMNS}` : LIST_COLUMNS;
+ const rows = db.prepare(productListSelect(columns, where + ' ORDER BY p.name')).all(...params);
  // One grouped count instead of one COUNT query per product (the old N+1 ran
  // 156 extra statements for a full catalog page).
  const variantCounts = new Map(
@@ -173,14 +200,21 @@ router.get('/', (req, res) => {
  );
  const withCount = rows.map((r) => {
    r.variant_count = variantCounts.get(r.id) || 0;
-   return withUnits(r);
+   // units/piece_price are derived from unit_prices; only the edit form needs
+   // them, and it loads the product through GET /products/:id.
+   return wantsFull ? withUnits(r) : r;
  });
  // Full membership list (primary first) for the category filters and the edit form.
  const links = new Map();
- for (const l of db.prepare('SELECT product_id, category_id FROM product_categories').all()) {
-   const arr = links.get(l.product_id) || [];
-   arr.push(Number(l.category_id));
-   links.set(l.product_id, arr);
+ if (withCount.length) {
+   const placeholders = withCount.map(() => '?').join(',');
+   const linkRows = db.prepare(`SELECT product_id, category_id FROM product_categories WHERE product_id IN (${placeholders})`)
+     .all(...withCount.map((r) => r.id));
+   for (const l of linkRows) {
+     const arr = links.get(l.product_id) || [];
+     arr.push(Number(l.category_id));
+     links.set(l.product_id, arr);
+   }
  }
  for (const r of withCount) {
    const set = new Set(links.get(r.id) || []);

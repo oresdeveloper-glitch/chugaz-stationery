@@ -373,3 +373,10 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+
+-- Performance indexes (kept in sync with ensureHotIndexes() in db.js, which
+-- also applies them to existing databases and restored backups).
+CREATE INDEX IF NOT EXISTS idx_sale_items_cover ON sale_items(sale_id, product_id, quantity, total, cost_at_sale);
+CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_order_payments_order ON order_payments(order_id, payment_status);
+CREATE INDEX IF NOT EXISTS idx_order_returns_order ON order_returns(order_id, status);
