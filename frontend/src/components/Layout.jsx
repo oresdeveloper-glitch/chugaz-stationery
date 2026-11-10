@@ -6,6 +6,7 @@ import { dbKeepInit } from '../lib/dbkeep';
 import Modal from './Modal';
 import { useToast } from './Toast';
 import SaleBell from './SaleBell';
+import { StaffClock } from './Clock';
 import I from './icons';
 
 // Placeholder shown while a page chunk downloads. Deliberately shaped like a
@@ -36,7 +37,6 @@ export default function Layout({ user, setUser, children }) {
   const location = useLocation();
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const [clock, setClock] = useState(new Date());
   const [userMenu, setUserMenu] = useState(false);
   const [pwdModal, setPwdModal] = useState(false);
   const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' });
@@ -49,12 +49,6 @@ export default function Layout({ user, setUser, children }) {
   // the user was still signed out, so no admin backup had been scheduled yet).
   useEffect(() => {
     dbKeepInit();
-  }, []);
-
-  // Live clock
-  useEffect(() => {
-    const id = setInterval(() => setClock(new Date()), 1000);
-    return () => clearInterval(id);
   }, []);
 
   // Close dropdowns on outside click
@@ -167,8 +161,6 @@ export default function Layout({ user, setUser, children }) {
     }
   };
 
-  const timeStr = clock.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const dateStr = clock.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   const breadcrumb = location.pathname === '/' ? 'Dashboard' : `${active.label || 'Home'}`;
   const avatar = (user?.name || '?').trim().charAt(0).toUpperCase();
   const roleLabel = user?.role === 'cashier' ? 'Cashier' : user?.role === 'admin' ? 'Administrator' : user?.role === 'manager' ? 'Manager' : (user?.role || '');
@@ -205,8 +197,7 @@ export default function Layout({ user, setUser, children }) {
               {user?.office && <span className="staff-session-office">{user.office}</span>}
             </div>
             <div className="staff-clock" title="Current time">
-              <span className="staff-clock-time">{timeStr}</span>
-              <span className="staff-clock-date">{dateStr}</span>
+              <StaffClock />
             </div>
             <div className="staff-user-wrap">
               <button className="staff-user-chip" onClick={() => setUserMenu((v) => !v)} aria-label="Account menu">

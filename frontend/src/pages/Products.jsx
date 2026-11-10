@@ -43,6 +43,7 @@ export default function Products() {
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [shown, setShown] = useState(60);
   const toast = useToast();
 
   const genBarcode = async () => {
@@ -71,6 +72,8 @@ export default function Products() {
     return () => clearTimeout(t);
   }, [q, cat]);
   useEffect(() => onLive(load), [q, cat]);
+  // A new search/filter starts from the first screenful again.
+  useEffect(() => { setShown(60); }, [q, cat, showArchived, tab]);
 
   const save = async (e) => {
     e.preventDefault();
@@ -320,6 +323,12 @@ export default function Products() {
   const archivedCount = products.filter((p) => p.status === 'inactive').length;
   const visible = showArchived ? products : products.filter((p) => p.status !== 'inactive');
   const filtered = catIds ? visible.filter((p) => productInCats(p, catIds)) : visible;
+  // Rendering every card at once made the catalog page janky once the shop had
+  // hundreds of items: 2,000 cards is 2,000 image slots and ~12,000 nodes. Show
+  // a first screenful and grow on demand; search/filtering still runs over the
+  // full list, so nothing becomes unreachable.
+  const page = filtered.slice(0, shown);
+  const hasMore = filtered.length > page.length;
   const openBarcodeCat = (c) => setBarcodeCat({ id: c.id, name: c.name, barcode: c.barcode || categoryBarcode(c.id) });
   const editCatBarcode = catModal?.id ? (categories.find((c) => c.id === catModal.id)?.barcode || categoryBarcode(catModal.id)) : null;
 
@@ -370,7 +379,7 @@ export default function Products() {
 
       {tab === 'products' && (
         <div className="catalog-grid">
-          {filtered.map((p) => (
+          {page.map((p) => (
             <div key={p.id} className="catalog-card" style={{ cursor: 'default' }}>
               <div className="catalog-img">
                 {p.image ? <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || 'P'} loading="lazy" /> : <span style={{ display: 'grid', placeItems: 'center', width: '100%', height: '100%', background: 'var(--panel-2)', color: 'var(--muted)', fontWeight: 600 }}>{p.name?.[0] || 'P'}</span>}
@@ -425,6 +434,12 @@ export default function Products() {
             </div>
           ))}
           {!filtered.length && <p className="muted" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 30 }}>No products match your search.</p>}
+          {hasMore && (
+            <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '14px 0 4px' }}>
+              <span className="muted small">Showing {page.length} of {filtered.length}</span>
+              <button className="btn" onClick={() => setShown((n) => n + 120)}>Show more</button>
+            </div>
+          )}
         </div>
       )}
 

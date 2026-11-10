@@ -125,7 +125,7 @@ export default function ScanScreen() {
 
   const doScan = async (raw) => {
     try {
-      const exact = await api(`/products?barcode=${encodeURIComponent(raw)}`);
+      const exact = await api(`/products?scan=1&barcode=${encodeURIComponent(raw)}`);
       const active = exact.filter((p) => p.status === 'active');
       if (active.length === 1) { add(active[0]); return; }
       if (active.length > 1) {
@@ -142,7 +142,7 @@ export default function ScanScreen() {
     flashMessage(false, `x No product for ${raw}`);
     setUnknown({ raw, q: raw, results: null, searching: true });
     try {
-      const byName = await api(`/products?q=${encodeURIComponent(raw)}`);
+      const byName = await api(`/products?scan=1&q=${encodeURIComponent(raw)}`);
       setUnknown({ raw, q: raw, results: byName.filter((p) => p.status === 'active').slice(0, 20), searching: false });
     } catch {
       setUnknown({ raw, q: raw, results: [], searching: false });
@@ -158,7 +158,7 @@ export default function ScanScreen() {
     if (!term) return;
     setUnknown({ ...unknown, searching: true });
     try {
-      const rows = await api(`/products?q=${encodeURIComponent(term)}`);
+      const rows = await api(`/products?scan=1&q=${encodeURIComponent(term)}`);
       setUnknown({ ...unknown, results: rows.filter((p) => p.status === 'active').slice(0, 20), searching: false });
     } catch {
       setUnknown({ ...unknown, results: [], searching: false });

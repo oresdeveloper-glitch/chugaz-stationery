@@ -41,12 +41,47 @@ const ALLOWED_PIECE_NAMES = ["REAM A3 MAGNA PIECE","REAM A3 A1 PIECE","REAM A4 (
 const PIECE_ALLOW = `(p.name IN ('${ALLOWED_PIECE_NAMES.join("','")}') OR p.name LIKE '%REAM A2%' OR p.name LIKE '%MANILA%' OR p.name LIKE '%TRANSPARENT%')`;
 const SHOP_FILTER = `(p.unit IN ${STORE_UNITS} OR (p.unit='piece' AND ${PIECE_ALLOW}))`;
 
+// The storefront grid only renders these columns. Returning p.* also shipped
+// description/specifications/unit_prices (the long text) and the shop's own
+// purchase price to the public endpoint; the product page fetches the full row
+// from /shop/products/:id instead.
+const SHOP_LIST_COLUMNS = `p.id, p.sku, p.barcode, p.name, p.category_id, p.unit,
+  p.selling_price, p.image, p.status, c.name AS category_name, b.name AS brand_name`;
+
 router.get('/categories', (req, res) => {
+ // One pass over the shop catalog instead of two correlated subqueries per
+ // category (52 full scans of products for the seeded 26 categories). `members`
+ // resolves a product's primary category and its extra category links, then
+ // each category is counted once.
  const rows = db.prepare(`
+  WITH members AS (
+   SELECT p.id, p.image, p.category_id AS cat, NULL AS link_cat
+   FROM products p
+   WHERE p.status = 'active' AND p.parent_id IS NULL AND ${SHOP_FILTER}
+   UNION ALL
+   SELECT p.id, p.image, NULL AS cat, pc.category_id AS link_cat
+   FROM products p JOIN product_categories pc ON pc.product_id = p.id
+   WHERE p.status = 'active' AND p.parent_id IS NULL AND ${SHOP_FILTER}
+  ),
+  tagged AS (
+   SELECT id, image, cat AS category_id FROM members WHERE cat IS NOT NULL
+   UNION
+   SELECT id, image, link_cat AS category_id FROM members WHERE link_cat IS NOT NULL
+  ),
+  counts AS (
+   SELECT category_id, COUNT(*) AS product_count FROM tagged GROUP BY category_id
+  ),
+  first_image AS (
+   SELECT category_id, MIN(id) AS product_id FROM tagged
+   WHERE image IS NOT NULL AND image != '' GROUP BY category_id
+  )
   SELECT c.id, c.name, c.description,
-   (SELECT COUNT(*) FROM products p WHERE (p.category_id = c.id OR EXISTS(SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = c.id)) AND p.status = 'active' AND p.parent_id IS NULL AND ${SHOP_FILTER}) AS product_count,
-   (SELECT p.image FROM products p WHERE (p.category_id = c.id OR EXISTS(SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = c.id)) AND p.status = 'active' AND p.parent_id IS NULL AND ${SHOP_FILTER} AND p.image IS NOT NULL AND p.image != '' ORDER BY p.id LIMIT 1) AS image
-  FROM categories c ORDER BY c.name
+   COALESCE(counts.product_count, 0) AS product_count,
+   (SELECT p.image FROM products p WHERE p.id = first_image.product_id) AS image
+  FROM categories c
+  LEFT JOIN counts ON counts.category_id = c.id
+  LEFT JOIN first_image ON first_image.category_id = c.id
+  ORDER BY c.name
  `).all();
  res.json(rows);
 });
@@ -70,18 +105,14 @@ router.get('/products', (req, res) => {
   : sort === 'name' ? 'p.name ASC'
   : 'p.name ASC';
  const rows = db.prepare(`
-  SELECT p.*, c.name AS category_name, b.name AS brand_name
+  SELECT ${SHOP_LIST_COLUMNS}
   FROM products p
   LEFT JOIN categories c ON c.id = p.category_id
   LEFT JOIN brands b ON b.id = p.brand_id
   WHERE ${conds.join(' AND ')}
   ORDER BY ${orderBy} LIMIT 500
  `).all(...params);
- for (const r of rows) {
-  r.piece_price = u.piecePrice(r);
-  r.units = u.unitsFor(r).map((x) => ({ ...x, price: u.unitPrice(x.id, r) }));
-  sanitize(r);
- }
+ for (const r of rows) sanitize(r);
  res.json(rows);
 });
 

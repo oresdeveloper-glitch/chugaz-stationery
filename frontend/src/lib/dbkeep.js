@@ -18,6 +18,12 @@ const BACKUP_INTERVAL_MS = 3 * 60 * 1000;
 // in IndexedDB (one copy per origin), so a second tab re-downloading the whole
 // database bought nothing and cost the shop a full-file read + redacted copy.
 const BACKUP_AT_KEY = 'sst_backup_at';
+// Data-version stamp of the last successful snapshot ("marker:data_version:user").
+// The snapshot is a WHOLE-FILE download, and the periodic tick used to refetch
+// it every few minutes even when nothing had changed — several megabytes of
+// transfer per browser per tick for an identical file. When the pinned
+// instance reports the same data version, the stored copy is still current.
+const BACKUP_VER_KEY = 'sst_backup_version';
 // A write near a cold reset may miss the 3-minute snapshot — schedule a
 // follow-up within about a second. The old 8s window was long enough for a
 // refresh to land on a fresh instance before the write was ever captured.
@@ -124,6 +130,7 @@ async function applyResetEpoch(h) {
   if (!server || server <= readResetAt()) return false;
   storeResetAt(server);
   try { await idbDel(BACKUP_KEY); } catch (_) { /* private mode etc. */ }
+  try { localStorage.removeItem(BACKUP_VER_KEY); } catch (_) { /* private mode etc. */ }
   try { localStorage.setItem(SO_KEY, `${Number(h.sales) || 0}:${Number(h.orders) || 0}`); } catch (_) { /* private mode etc. */ }
   console.info('[dbkeep] deliberate reset epoch', server, '— snapshot and high-water forgotten');
   return true;
@@ -224,15 +231,29 @@ async function backupNow(force) {
     // see that every sale is gone - and replacing the good snapshot with
     // that emptier copy was the irrecoverable-loss path. Refuse any downgrade.
     let counts = null;
+    let dataVersion = null;
     try {
       const s = await api('/sync');
-      if (s) counts = { sales: Number(s.sales) || 0, orders: Number(s.orders) || 0 };
+      if (s) {
+        counts = { sales: Number(s.sales) || 0, orders: Number(s.orders) || 0 };
+        dataVersion = s.data_version || s.version || null;
+      }
     } catch (_) { /* counts unknown - fall back to the stored high-water */ }
     const snap = await idbGet(BACKUP_KEY);
     const known = readSo();
     const keepSales = Math.max(Number(snap && snap.sales) || 0, known.sales);
     const keepOrders = Math.max(Number(snap && snap.orders) || 0, known.orders);
     if (counts && (counts.sales < keepSales || (counts.sales === keepSales && counts.orders < keepOrders))) return;
+    // Nothing changed on this instance since the last snapshot: the stored
+    // copy is byte-identical, so skip the whole-file transfer. The stamp
+    // includes the user id because the server strips password hashes from
+    // non-admin downloads — a different user must still get their own copy.
+    const user = getUser();
+    const stamp = dataVersion ? `${pin || localStorage.getItem(MARKER_KEY) || ''}:${dataVersion}:${(user && user.id) || 0}` : null;
+    if (stamp && snap && snap.blob && localStorage.getItem(BACKUP_VER_KEY) === stamp) {
+      try { localStorage.setItem(BACKUP_AT_KEY, String(Date.now())); } catch (_) { /* ignore */ }
+      return;
+    }
     const res = await fetchPinned(`${apiBase()}/api/system/backup`, { headers: authHeaders() }, pin);
     if (!res || !res.ok) return;
     const marker = res.headers.get('X-Db-Marker') || pin;
@@ -245,6 +266,11 @@ async function backupNow(force) {
     });
     if (counts) bumpSo(counts.sales, counts.orders);
     localStorage.setItem(MARKER_KEY, marker);
+    if (stamp) {
+      try { localStorage.setItem(BACKUP_VER_KEY, stamp); } catch (_) { /* ignore */ }
+    } else {
+      try { localStorage.removeItem(BACKUP_VER_KEY); } catch (_) { /* ignore */ }
+    }
     try { localStorage.setItem(BACKUP_AT_KEY, String(Date.now())); } catch (_) { /* ignore */ }
   } catch (e) {
     console.warn('[dbkeep] backup failed:', e && e.message ? e.message : e);
@@ -294,6 +320,8 @@ async function restoreFromBackup(target) {
       localStorage.setItem(MARKER_KEY, marker);
       setDbPin(marker);
     }
+    // The merged file differs from the stored snapshot now.
+    try { localStorage.removeItem(BACKUP_VER_KEY); } catch (_) { /* ignore */ }
     console.info('[dbkeep] merged backup — refreshing open pages in place');
     try { window.dispatchEvent(new CustomEvent('chugaz-live', { detail: { kinds: ['sync'] } })); } catch (e) { /* ignore */ }
     return 'ok';

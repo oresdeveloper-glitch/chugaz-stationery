@@ -130,7 +130,7 @@ export default function Pos() {
 
   useEffect(() => {
     loadProducts();
-    api('/customers').then(setCustomers).catch(() => {});
+    api('/customers?view=pos').then(setCustomers).catch(() => {});
     api('/system/settings').then(setSettings).catch(() => {});
     api('/products/cats/all').then(setCats).catch(() => {});
     searchRef.current?.focus();
@@ -326,7 +326,7 @@ export default function Pos() {
                 )}
                 {visible.map((p) => (
                   <button type="button" className="pos-tile" key={p.id} onClick={() => addToCart(p)}>
-                    <div className="pimg">{p.image ? <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || "P"} /> : <span style={{fontWeight:700,color:"var(--muted)"}}>{p.name?.[0] || "P"}</span>}</div>
+                    <div className="pimg">{p.image ? <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || "P"} loading="lazy" /> : <span style={{fontWeight:700,color:"var(--muted)"}}>{p.name?.[0] || "P"}</span>}</div>
                     <div className="pname">{p.name}</div>
                     <div className="pprice">{fmt(p.selling_price)}</div>
                     <div className="pstock">{p.in_stock ? `${fmt(p.in_stock)} ${p.unit || ''} in stock`.trim() : 'Out of stock'}</div>

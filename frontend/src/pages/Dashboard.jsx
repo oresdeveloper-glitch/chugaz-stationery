@@ -4,6 +4,7 @@ import { api, fmt, fmtAgo, fmtDateTime, getUser, onLive, latest } from '../lib/a
 import { dbKeepInit } from '../lib/dbkeep';
 import { useToast } from '../components/Toast';
 import { LineChart, Donut, SplitBar, HBarList, BarChart, Spark } from '../components/charts';
+import { DashClock } from '../components/Clock';
 import { canRole } from '../lib/roles';
 import I from '../components/icons';
 
@@ -128,7 +129,6 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [range, setRange] = useState(isCashier ? 'today' : 'month');
-  const [clock, setClock] = useState(new Date());
   const toast = useToast();
   const rangeRef = useRef(range);
   rangeRef.current = range;
@@ -154,10 +154,6 @@ export default function Dashboard() {
     dbKeepInit().catch(() => { /* non-fatal: the numbers are still fetched */ });
   }, []);
   useEffect(() => onLive(() => { load(rangeRef.current); }), []);
-  useEffect(() => {
-    const id = setInterval(() => setClock(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
 
   if (!data) {
     if (loadError) {
@@ -181,8 +177,6 @@ export default function Dashboard() {
   const patternData = isToday ? hourData : weekdayData;
   const netTotal = trendData.reduce((s, d) => s + Number(d.net || 0), 0);
   const totalAlerts = data.alerts.low_stock.length + data.alerts.out_of_stock.length + (data.kpi.pending_orders.count > 0 ? 1 : 0) + (data.kpi.receivables.count > 0 ? 1 : 0) + (data.kpi.payables.count > 0 ? 1 : 0);
-  const dateLabel = clock.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  const timeLabel = clock.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
   const lowStockList = [...data.alerts.low_stock, ...data.alerts.out_of_stock];
 
@@ -194,7 +188,7 @@ export default function Dashboard() {
           <h1>{greetText()}, {(user?.name || '').split(' ')[0] || 'there'}</h1>
           <div className="dash-greet">
             <span className="role-chip">{role}</span>
-            <span className="muted small">{dateLabel} · {timeLabel}</span>
+            <DashClock />
           </div>
         </div>
         <div className="dash-toolbar">

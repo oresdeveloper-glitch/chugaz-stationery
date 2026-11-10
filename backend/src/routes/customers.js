@@ -6,6 +6,12 @@ const { record, forget, identityKeys } = require('../tombstones');
 const router = express.Router();
 
 router.get('/', (req, res) => {
+ // The POS customer picker only needs id + name. Sending the whole customer
+ // book (address, email, credit limit, balance) made that dropdown a 240 KB
+ // download on every till screen; ?view=pos trims it to a few KB.
+ if (req.query.view === 'pos') {
+  return res.json(db.prepare('SELECT id, name FROM customers ORDER BY name').all());
+ }
  res.json(db.prepare('SELECT * FROM customers ORDER BY name').all());
 });
 
