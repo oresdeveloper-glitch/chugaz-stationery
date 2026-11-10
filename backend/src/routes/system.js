@@ -209,7 +209,7 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
   // so the browser hint is what stops a snapshot from resurrecting the row.
   let recRows = [];
   if (tableExists('deleted_records')) {
-   try { recRows = db.prepare('SELECT entity, key FROM bak.deleted_records').all(); } catch (_) { recRows = []; }
+   try { recRows = db.prepare('SELECT entity, key, deleted_at FROM bak.deleted_records').all(); } catch (_) { recRows = []; }
   }
   const recHint = req.body && req.body.deleted_records;
   if (recHint) {

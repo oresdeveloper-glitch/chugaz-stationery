@@ -23,7 +23,9 @@ function record(entity, keys, at) {
     const ts = at ? String(at) : db.prepare("SELECT strftime('%Y-%m-%d %H:%M:%f','now') AS t").get().t;
     const ins = db.prepare(`INSERT INTO deleted_records (entity, key, deleted_at)
       VALUES (?, ?, ?)
-      ON CONFLICT(entity, key) DO UPDATE SET deleted_at = excluded.deleted_at`);
+      ON CONFLICT(entity, key) DO UPDATE SET deleted_at =
+        CASE WHEN excluded.deleted_at > deleted_records.deleted_at
+             THEN excluded.deleted_at ELSE deleted_records.deleted_at END`);
     for (const key of clean) ins.run(entity, key, ts);
     // A marker only needs to outlive snapshots taken before the delete.
     db.prepare(`DELETE FROM deleted_records WHERE rowid NOT IN (
