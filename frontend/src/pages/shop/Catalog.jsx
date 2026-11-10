@@ -145,14 +145,14 @@ export default function Catalog() {
               </div>
             )}
             {products.map((p) => (
-              <Link key={p.id} to={`/shop/product/${p.id}`} className="catalog-card" style={p.in_stock === false ? { opacity: 0.62 } : {}}>
+              <Link key={p.id} to={`/shop/product/${p.id}`} className="catalog-card" style={p.in_stock === 0 || p.in_stock === false ? { opacity: 0.62 } : {}}>
                 <div className="catalog-img">
                   <SafeImg src={p.image} alt={p.name} letter={p.name?.[0] || "P"} loading="lazy" />
                 </div>
                 <div className="catalog-card-body">
                   <div className="catalog-name">
                     {p.name}
-                    {p.in_stock === false && <span className="badge red" style={{ marginLeft: 8, verticalAlign: 'middle' }}>Out of stock</span>}
+                    {p.in_stock === 0 || p.in_stock === false && <span className="badge red" style={{ marginLeft: 8, verticalAlign: 'middle' }}>Out of stock</span>}
                   </div>
                   <div className="catalog-brand">{p.brand_name || 'Unbranded'}</div>
                   <div className="catalog-price">
@@ -170,8 +170,8 @@ export default function Catalog() {
                     >
                       <I name="search" size={13} /> View details
                     </button>
-                    <button className="catalog-add" disabled={p.in_stock === false} onClick={(e) => add(e, p)}>
-                      {p.in_stock === false ? 'Out of stock' : 'Add to cart'}
+                    <button className="catalog-add" disabled={p.in_stock === 0 || p.in_stock === false} onClick={(e) => add(e, p)}>
+                      {p.in_stock === 0 || p.in_stock === false ? 'Out of stock' : 'Add to cart'}
                     </button>
                   </div>
                 </div>

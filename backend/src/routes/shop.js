@@ -11,6 +11,7 @@ function sanitize(r) {
   delete r.current_stock;
   delete r.reserved_stock;
   delete r.reorder_level;
+  delete r.purchase_price;
  }
  return r;
 }
@@ -46,7 +47,8 @@ const SHOP_FILTER = `(p.unit IN ${STORE_UNITS} OR (p.unit='piece' AND ${PIECE_AL
 // purchase price to the public endpoint; the product page fetches the full row
 // from /shop/products/:id instead.
 const SHOP_LIST_COLUMNS = `p.id, p.sku, p.barcode, p.name, p.category_id, p.unit,
-  p.selling_price, p.image, p.status, c.name AS category_name, b.name AS brand_name`;
+  p.selling_price, p.image, p.status, c.name AS category_name, b.name AS brand_name,
+  CASE WHEN p.current_stock > 0 THEN 1 ELSE 0 END AS in_stock`;
 
 router.get('/categories', (req, res) => {
  // One pass over the shop catalog instead of two correlated subqueries per
