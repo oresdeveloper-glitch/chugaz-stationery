@@ -488,11 +488,11 @@ router.put('/:id', requireRole('admin', 'manager'), async (req, res) => {
   }
  });
  for (const url of variantPhotoUrls) dropUnusedMedia(url);
- await sharedState.remember({ sku: p.sku ?? existing.sku, name: p.name ?? existing.name }, {
-  image: p.image !== undefined ? p.image : existing.image,
-  status: p.status ?? existing.status,
-  deleted: false,
- });
+ // Only mirror the photo when this edit actually changed it: a stale instance
+ // must not push its old copy back over a newer photo set elsewhere.
+ const patch = { status: p.status ?? existing.status, deleted: false };
+ if (p.image !== undefined) patch.image = p.image;
+ await sharedState.remember({ sku: p.sku ?? existing.sku, name: p.name ?? existing.name }, patch);
  res.json({ ok: true });
 });
 
