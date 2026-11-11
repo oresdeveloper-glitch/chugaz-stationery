@@ -113,7 +113,10 @@ async function readAll() {
   } while (cursor);
 
   const nextKnown = new Map();
-  const nextMap = { ...cache.map };
+  // Rebuild only from the blobs that still exist: carrying the old map forward
+  // would keep serving a removed overlay forever, because a deleted blob simply
+  // disappears from `list` and would never be overwritten by a newer copy.
+  const nextMap = {};
   const refreshes = [];
   for (const b of items) {
     const hash = String(b.pathname || '').slice(PREFIX.length).replace(/\.json$/, '');
@@ -122,6 +125,7 @@ async function readAll() {
     const prev = known.get(hash);
     if (prev && prev.at === at) {
       nextKnown.set(hash, prev);
+      nextMap[prev.entry.key] = prev.entry;
       continue;
     }
     refreshes.push(readBlob(b).then((entry) => {
