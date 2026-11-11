@@ -35,7 +35,11 @@ let loading = null;
 // dependencies it can see as literals, and a require buried in a function is
 // what made the deployed build fail with "Cannot find module '@vercel/blob'".
 let blobSdk = null;
-try { blobSdk = require('@vercel/blob'); } catch (_) { blobSdk = null; }
+let blobSdkError = null;
+try { blobSdk = require('@vercel/blob'); } catch (e) {
+  blobSdk = null;
+  blobSdkError = String((e && e.message) || e);
+}
 
 function enabled() {
   return !!process.env.BLOB_READ_WRITE_TOKEN && !!blobSdk;
@@ -211,13 +215,16 @@ function firstImage(map, row) {
 // Read-only diagnostics: proves the shared overlay store is reachable from the
 // deployed function (and how many product entries it holds).
 async function diagnose() {
-  if (!enabled()) return { ok: false, error: 'BLOB_READ_WRITE_TOKEN not configured' };
+  const hasToken = !!process.env.BLOB_READ_WRITE_TOKEN;
+  const hasSdk = !!blobSdk;
+  if (!hasSdk) return { ok: false, sdk: false, token: hasToken, error: blobSdkError || '@vercel/blob not bundled' };
+  if (!hasToken) return { ok: false, sdk: true, token: false, error: 'BLOB_READ_WRITE_TOKEN not configured' };
   try {
     const map = await readAll();
     cache = { at: Date.now(), map };
-    return { ok: true, entries: Object.keys(map).length };
+    return { ok: true, sdk: true, token: true, entries: Object.keys(map).length };
   } catch (e) {
-    return { ok: false, error: String((e && e.message) || e) };
+    return { ok: false, sdk: true, token: true, error: String((e && e.message) || e) };
   }
 }
 

@@ -119,10 +119,10 @@ app.get('/api/health', async (req, res) => {
   try {
     // eslint-disable-next-line no-eval
     const ss = eval('require')('./backend/src/shared-state');
-    blob = ss.enabled() ? 'configured' : 'off';
-    if (req.query.blob === '1' && blob === 'configured') {
-      const d = await ss.diagnose();
-      blob = d.ok ? 'ok' : 'error';
+    const d = req.query.blob === '1' ? await ss.diagnose() : { ok: ss.enabled() };
+    blob = d.ok ? 'configured' : (!d.sdk ? 'no-sdk' : (!d.token ? 'no-token' : 'error'));
+    if (req.query.blob === '1') {
+      blob = d.ok ? 'ok' : blob;
       blob_overlay = d.ok ? d.entries : d.error;
     }
   } catch (e) {
