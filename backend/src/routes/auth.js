@@ -1,6 +1,7 @@
 const express = require('express');
 const { db, audit } = require('../db');
 const { signToken, requireAuth, verifyForRefresh } = require('../auth');
+const sharedUsers = require('../shared-users');
 const { rateLimit, registerFailure, lockState, clearFailures, clientIp, registerIpFailure, ipLockState } = require('../security');
 const { hashPassword, verifyPassword, upgradeUserPassword, passwordPolicy } = require('../pwd');
 const { sendVerificationCode, smtpReady } = require('../mailer');
@@ -13,11 +14,25 @@ function asyncRoute(fn) {
  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
 
-function findUserByEmail(email) {
- return db.prepare(`
-  SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.status, u.token_ver, u.failed_attempts, u.locked_until, u.office_id, r.name AS role, o.name AS office
+async function findUserByEmail(email) {
+ const row = db.prepare(`
+  SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.status, u.token_ver, u.failed_attempts, u.locked_until, u.office_id, u.role_id, r.name AS role, o.name AS office
   FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN offices o ON o.id = u.office_id WHERE u.email = ?
  `).get(String(email).toLowerCase().trim());
+ if (!row) return row;
+ const map = await sharedUsers.overrides();
+ if (sharedUsers.apply(map, row)) return null; // deleted on another instance
+ if (row.role_id != null) {
+  const rr = db.prepare('SELECT name FROM roles WHERE id=?').get(row.role_id);
+  if (rr) row.role = rr.name;
+ }
+ if (row.office_id != null) {
+  const oo = db.prepare('SELECT name FROM offices WHERE id=?').get(row.office_id);
+  if (oo) row.office = oo.name;
+ } else {
+  row.office = null;
+ }
+ return row;
 }
 
 function twoFactorEnabled() {
@@ -43,7 +58,7 @@ router.post('/login', asyncRoute(async (req, res, next) => {
  // Customers (and unknown emails the shop may still recover) run through the
  // customer handler: it owns self-heal, unverified handling, guest-cart merge
  // and its own rate/lock keys. Lazy require avoids a cycle.
- const user = findUserByEmail(email);
+ const user = await findUserByEmail(email);
  if (!user || user.role === 'customer') {
   const { handleCustomerLogin } = require('./customer');
   return handleCustomerLogin(req, res);
@@ -162,11 +177,18 @@ router.post('/refresh', (req, res) => {
  const payload = verifyForRefresh(token);
  if (!payload) return res.status(401).json({ error: 'Session expired — sign in again' });
  const row = db.prepare(`
-  SELECT u.id, u.name, u.email, u.phone, u.status, u.token_ver, u.office_id, r.name AS role, o.name AS office
+  SELECT u.id, u.name, u.email, u.phone, u.status, u.token_ver, u.office_id, u.role_id, r.name AS role, o.name AS office
   FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN offices o ON o.id = u.office_id WHERE u.id = ?
  `).get(payload.id);
- if (!row || row.status !== 'active' || (row.token_ver ?? 0) !== (payload.ver ?? 0)) {
+ if (!row) return res.status(401).json({ error: 'Session expired — sign in again' });
+ try { sharedUsers.overrides().catch(() => {}); } catch (_) {}
+ const deleted = sharedUsers.apply(sharedUsers.cached(), row);
+ if (deleted || row.status !== 'active' || (row.token_ver ?? 0) !== (payload.ver ?? 0)) {
   return res.status(401).json({ error: 'Session expired — sign in again' });
+ }
+ if (row.role_id != null) {
+  const rr = db.prepare('SELECT name FROM roles WHERE id=?').get(row.role_id);
+  if (rr) row.role = rr.name;
  }
  res.json({ token: signToken(row, { orig: payload.orig || payload.iat }) });
 });
@@ -182,12 +204,19 @@ router.post('/logout-all', requireAuth, (req, res) => {
 });
 
 router.get('/me', requireAuth, (req, res) => {
- const user = db.prepare(`
-  SELECT u.id, u.name, u.email, u.status, u.office_id, r.name AS role, o.name AS office
+ const row = db.prepare(`
+  SELECT u.id, u.name, u.email, u.status, u.office_id, u.role_id, r.name AS role, o.name AS office
   FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN offices o ON o.id = u.office_id WHERE u.id = ?
  `).get(req.user.id);
- if (!user) return res.status(404).json({ error: 'User not found' });
- res.json({ user });
+ if (!row) return res.status(404).json({ error: 'User not found' });
+ try { sharedUsers.overrides().catch(() => {}); } catch (_) {}
+ const deleted = sharedUsers.apply(sharedUsers.cached(), row);
+ if (deleted || row.status !== 'active') return res.status(404).json({ error: 'User not found' });
+ if (row.role_id != null) {
+  const rr = db.prepare('SELECT name FROM roles WHERE id=?').get(row.role_id);
+  if (rr) row.role = rr.name;
+ }
+ res.json({ user: row });
 });
 
 router.put('/password', requireAuth, (req, res) => {

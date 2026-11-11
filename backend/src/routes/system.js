@@ -245,7 +245,7 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
          userMap.set(Number(r.__id), Number(ex.id));
          continue;
         }
-        const id = ins('users', ul, ul.map((c) => (c === 'role_id' ? 5 : c === 'password_hash' ? '' : remapV(c, r[c], { office_id: officeMap }))));
+        const id = ins('users', ul, ul.map((c) => (c === 'role_id' ? 5 : c === 'password_hash' ? '' : c === 'updated_at' ? (r[c] || '1970-01-01 00:00:00') : remapV(c, r[c], { office_id: officeMap }))));
         userMap.set(Number(r.__id), id);
         bump('users');
        }

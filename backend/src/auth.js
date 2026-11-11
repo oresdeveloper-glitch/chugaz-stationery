@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
+const sharedUsers = require('./shared-users');
 
 const DATA_DIR = process.env.VERCEL === '1' ? '/tmp/stationery-data' : path.join(__dirname, '..', 'data');
 
@@ -59,10 +60,17 @@ function verifyLive(token) {
   return null;
  }
  const row = db.db.prepare(`
-  SELECT u.id, u.name, u.email, u.status, u.token_ver, u.office_id, r.name AS role, o.name AS office
+  SELECT u.id, u.name, u.email, u.status, u.token_ver, u.office_id, u.role_id, r.name AS role, o.name AS office
   FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN offices o ON o.id = u.office_id WHERE u.id = ?
  `).get(payload.id);
- if (!row || row.status !== 'active') return null;
+ if (!row) return null;
+ try { sharedUsers.overrides().catch(() => {}); } catch (_) {}
+ const deleted = sharedUsers.apply(sharedUsers.cached(), row);
+ if (deleted || row.status !== 'active') return null;
+ if (row.role_id != null) {
+  const rr = db.db.prepare('SELECT name FROM roles WHERE id=?').get(row.role_id);
+  if (rr) row.role = rr.name;
+ }
  if ((row.token_ver ?? 0) !== (payload.ver ?? 0)) return null;
  return { id: row.id, email: row.email, name: row.name, role: row.role, office_id: row.office_id ?? null, office: row.office };
 }
