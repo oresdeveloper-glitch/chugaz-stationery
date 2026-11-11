@@ -4,6 +4,7 @@ const { db, audit, transact } = require('../db');
 const { requireRole } = require('../auth');
 const { accountingUse, hasAccountingHistory, productPhotoUrls, purgeProductRows, dropUnusedMedia, tombstone, clearTombstones, applyTombstones } = require('../product-cleanup');
 const { record, forget, identityKeys } = require('../tombstones');
+const sharedState = require('../shared-state');
 const u = require('../units');
 
 const router = express.Router();
@@ -170,8 +171,11 @@ function familyIds(id) {
 // the product (and its variants) is only removed when no invoice or purchase
 // line points at it; otherwise it is archived instead.
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
  try { applyTombstones(); } catch (_) { /* cleanup must never fail the request */ }
+ // The shared overlay is what makes an edit/delete made on another serverless
+ // instance show up here (each instance has its own SQLite copy).
+ const shared = await sharedState.overrides();
  const { q, barcode, category_id, status, low, office_id } = req.query;
  const conds = [];
  const params = [];
@@ -235,15 +239,22 @@ router.get('/', (req, res) => {
  }
  // Admin and managers work with real stock numbers; cashiers/clerk only see a yes/no flag.
  const hideStock = !['admin', 'manager'].includes(req.user.role);
+ const visible = [];
  for (const r of withCount) {
+  // Apply the cross-instance overlay before answering: a photo or archive
+  // change made elsewhere is reflected here, and a product another instance
+  // deleted is not listed at all.
+  if (sharedState.apply(shared, r)) continue;
+  if (status && r.status !== status) continue;
   r.in_stock = Number(r.current_stock) > 0;
   if (hideStock) {
    delete r.current_stock;
    delete r.reorder_level;
    delete r.reserved_stock;
   }
+  visible.push(r);
  }
- res.json(withCount);
+ res.json(visible);
 });
 
 // EAN-13 check digit (12 digits -> 13th check digit)
@@ -313,9 +324,13 @@ router.get('/barcode/generate', requireRole('admin', 'manager'), (req, res) => {
  res.status(409).json({ error: 'Could not generate a unique barcode, please retry.' });
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
  const row = db.prepare(productSelect('WHERE p.id = ?')).get(req.params.id);
  if (!row) return res.status(404).json({ error: 'Product not found' });
+ // A delete or photo change made on another instance is reflected here too.
+ if (sharedState.apply(await sharedState.overrides(), row)) {
+  return res.status(404).json({ error: 'Product not found' });
+ }
  withUnits(row);
  row.variants = variantsOf(row.id);
  row.images = imagesFor(row.id);
@@ -341,7 +356,7 @@ router.get('/:id', (req, res) => {
  res.json(row);
 });
 
-router.post('/', requireRole('admin', 'manager'), (req, res) => {
+router.post('/', requireRole('admin', 'manager'), async (req, res) => {
  const p = req.body;
  if (!p.name) return res.status(400).json({ error: 'Product name is required' });
  const { ids, primary } = targetCategoryIds(p);
@@ -367,6 +382,11 @@ router.post('/', requireRole('admin', 'manager'), (req, res) => {
    audit(req.user.id, 'CREATE', 'product', pid, { name: p.name });
    return pid;
   });
+  // Mirror the new product's photo/status for the other instances, and clear a
+  // delete marker left by a previous product with the same identity.
+  await sharedState.remember({ sku: p.sku || null, name: p.name }, {
+   image: p.image || null, status: p.status || 'active', deleted: false,
+  });
   res.status(201).json({ id, barcode });
  } catch (e) {
   if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'SKU or barcode already exists' });
@@ -374,7 +394,7 @@ router.post('/', requireRole('admin', 'manager'), (req, res) => {
  }
 });
 
-router.put('/:id', requireRole('admin', 'manager'), (req, res) => {
+router.put('/:id', requireRole('admin', 'manager'), async (req, res) => {
  const p = req.body;
  const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
  if (!existing) return res.status(404).json({ error: 'Product not found' });
@@ -468,12 +488,17 @@ router.put('/:id', requireRole('admin', 'manager'), (req, res) => {
   }
  });
  for (const url of variantPhotoUrls) dropUnusedMedia(url);
+ await sharedState.remember({ sku: p.sku ?? existing.sku, name: p.name ?? existing.name }, {
+  image: p.image !== undefined ? p.image : existing.image,
+  status: p.status ?? existing.status,
+  deleted: false,
+ });
  res.json({ ok: true });
 });
 
-router.delete('/:id', requireRole('admin', 'manager'), (req, res) => {
+router.delete('/:id', requireRole('admin', 'manager'), async (req, res) => {
  const id = Number(req.params.id);
- const product = db.prepare('SELECT id, name FROM products WHERE id = ?').get(id);
+ const product = db.prepare('SELECT id, name, sku, image, status FROM products WHERE id = ?').get(id);
  if (!product) return res.status(404).json({ error: 'Product not found' });
  // Managers maintain the catalog, so they may delete products too - the same
  // people who create and edit them.
@@ -489,6 +514,7 @@ router.delete('/:id', requireRole('admin', 'manager'), (req, res) => {
    db.prepare(`UPDATE products SET status='inactive' WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
   });
   audit(req.user.id, 'ARCHIVE', 'product', id, { reason: 'has accounting history', ...used });
+  await sharedState.remember(product, { status: 'inactive' });
   const parts = [];
   if (used.sales) parts.push(`${used.sales} sale line${used.sales === 1 ? '' : 's'}`);
   if (used.purchases) parts.push(`${used.purchases} purchase line${used.purchases === 1 ? '' : 's'}`);
@@ -511,13 +537,16 @@ router.delete('/:id', requireRole('admin', 'manager'), (req, res) => {
  });
  for (const url of urls) dropUnusedMedia(url);
  audit(req.user.id, 'DELETE', 'product', id, { variants: ids.length - 1 });
+ // Other instances keep their own copy of the row; this overlay is what makes
+ // the delete apply there without waiting for a whole-database merge.
+ await sharedState.remember(product, { deleted: true });
  res.json({ ok: true, deleted: true, archived: false, deleted_ids: ids });
 });
 
 router.post('/:id/image', requireRole('admin', 'manager'), upload.single('image'), async (req, res) => {
  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
  const pid = Number(req.params.id);
- const product = db.prepare('SELECT id, image FROM products WHERE id=?').get(pid);
+ const product = db.prepare('SELECT id, name, sku, image FROM products WHERE id=?').get(pid);
  if (!product) return res.status(404).json({ error: 'Product not found' });
  const url = await saveUploadedImage(req.file);
  transact(() => {
@@ -527,6 +556,9 @@ router.post('/:id/image', requireRole('admin', 'manager'), upload.single('image'
   db.prepare('UPDATE products SET image=? WHERE id=?').run(url, pid);
   audit(req.user.id, 'UPDATE', 'product', pid, { image: url });
  });
+ // Publish the new main photo to the shared overlay so every account on every
+ // instance sees the same picture.
+ await sharedState.remember(product, { image: url, deleted: false });
  res.json({ ok: true, url, image: url, images: imagesFor(pid) });
 });
 
@@ -534,7 +566,7 @@ router.post('/:id/image', requireRole('admin', 'manager'), upload.single('image'
 router.post('/:id/images', requireRole('admin', 'manager'), upload.array('images', 8), async (req, res) => {
  if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
  const pid = Number(req.params.id);
- const product = db.prepare('SELECT id, image FROM products WHERE id=?').get(pid);
+ const product = db.prepare('SELECT id, name, sku, image FROM products WHERE id=?').get(pid);
  if (!product) return res.status(404).json({ error: 'Product not found' });
  const urls = await Promise.all(req.files.map(saveUploadedImage));
  // The newly added photo becomes the one shown on the catalog and storefront.
@@ -551,6 +583,9 @@ router.post('/:id/images', requireRole('admin', 'manager'), upload.array('images
   if (makeMain) db.prepare('UPDATE products SET image=? WHERE id=?').run(urls[0], pid);
   audit(req.user.id, 'UPDATE', 'product', pid, { images_added: urls.length, main: makeMain ? urls[0] : null });
  });
+ await sharedState.remember(product, {
+  image: makeMain ? urls[0] : product.image, deleted: false,
+ });
  res.json({ ok: true, image: makeMain ? urls[0] : product.image, images: imagesFor(pid) });
 });
 
@@ -558,22 +593,24 @@ router.post('/:id/images', requireRole('admin', 'manager'), upload.array('images
 // the storefront. Without this a new photo only joined the gallery: products
 // that already had an image (the seeded catalog does) kept showing the old one,
 // which looks exactly like "the image cannot be changed".
-router.post('/:id/main-image', requireRole('admin', 'manager'), (req, res) => {
+router.post('/:id/main-image', requireRole('admin', 'manager'), async (req, res) => {
  const pid = Number(req.params.id);
  const url = String((req.body && req.body.path) || '').trim();
  if (!url) return res.status(400).json({ error: 'Choose a photo' });
- const product = db.prepare('SELECT id, image FROM products WHERE id=?').get(pid);
+ const product = db.prepare('SELECT id, name, sku, image FROM products WHERE id=?').get(pid);
  if (!product) return res.status(404).json({ error: 'Product not found' });
  const inGallery = db.prepare('SELECT 1 FROM product_images WHERE product_id=? AND path=?').get(pid, url);
  if (!inGallery && product.image !== url) return res.status(404).json({ error: 'Photo not found on this product' });
  db.prepare('UPDATE products SET image=? WHERE id=?').run(url, pid);
  audit(req.user.id, 'UPDATE', 'product', pid, { main_image: url });
+ await sharedState.remember(product, { image: url, deleted: false });
  res.json({ ok: true, image: url, images: imagesFor(pid) });
 });
 
-router.delete('/:id/images/:imgId', requireRole('admin', 'manager'), (req, res) => {
+router.delete('/:id/images/:imgId', requireRole('admin', 'manager'), async (req, res) => {
  const row = db.prepare('SELECT * FROM product_images WHERE id=? AND product_id=?').get(req.params.imgId, req.params.id);
  if (!row) return res.status(404).json({ error: 'Image not found' });
+ const product = db.prepare('SELECT id, name, sku, image FROM products WHERE id=?').get(Number(req.params.id));
  db.prepare('DELETE FROM product_images WHERE id=?').run(row.id);
  const cur = db.prepare('SELECT image FROM products WHERE id=?').get(req.params.id);
  if (cur.image === row.path) {
@@ -582,6 +619,10 @@ router.delete('/:id/images/:imgId', requireRole('admin', 'manager'), (req, res) 
  }
  audit(req.user.id, 'UPDATE', 'product', Number(req.params.id), { image_removed: row.path });
  dropUnusedMedia(row.path);
+ if (product) {
+  const cur2 = db.prepare('SELECT image FROM products WHERE id=?').get(Number(req.params.id));
+  await sharedState.remember(product, { image: cur2 ? cur2.image : null, deleted: false });
+ }
  res.json({ ok: true, images: imagesFor(Number(req.params.id)) });
 });
 

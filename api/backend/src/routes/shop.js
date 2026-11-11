@@ -1,5 +1,6 @@
 const express = require('express');
 const { db, audit } = require('../db');
+const sharedState = require('../shared-state');
 const u = require('../units');
 const { notifyManagers } = require('../notify');
 
@@ -92,7 +93,10 @@ router.get('/brands', (req, res) => {
  res.json(db.prepare('SELECT * FROM brands ORDER BY name').all());
 });
 
-router.get('/products', (req, res) => {
+router.get('/products', async (req, res) => {
+ // Shared overlay: the storefront on any instance shows the same photo and
+ // hides a product the shop deleted on another instance.
+ const shared = await sharedState.overrides();
  const { q, category_id, brand_id, sort } = req.query;
  const conds = ["p.status = 'active'", 'p.parent_id IS NULL', SHOP_FILTER, 'p.office_id IS NULL'];
  const params = [];
@@ -114,8 +118,14 @@ router.get('/products', (req, res) => {
   WHERE ${conds.join(' AND ')}
   ORDER BY ${orderBy} LIMIT 500
  `).all(...params);
- for (const r of rows) sanitize(r);
- res.json(rows);
+ const visible = [];
+ for (const r of rows) {
+  if (sharedState.apply(shared, r)) continue;
+  if (r.status && r.status !== 'active') continue;
+  sanitize(r);
+  visible.push(r);
+ }
+ res.json(visible);
 });
 
 function shopImagesFor(id) {
@@ -125,7 +135,8 @@ function shopImagesFor(id) {
  return pr && pr.image ? [pr.image] : [];
 }
 
-router.get('/products/:id', (req, res) => {
+router.get('/products/:id', async (req, res) => {
+ const shared = await sharedState.overrides();
  const row = db.prepare(`
   SELECT p.*, c.name AS category_name, b.name AS brand_name
   FROM products p
@@ -134,6 +145,7 @@ router.get('/products/:id', (req, res) => {
   WHERE p.id = ? AND p.status = 'active' AND ${SHOP_FILTER} AND p.office_id IS NULL
  `).get(req.params.id);
  if (!row) return res.status(404).json({ error: 'Product not found' });
+ if (sharedState.apply(shared, row)) return res.status(404).json({ error: 'Product not found' });
 
  // If this is a variant, serve it through its parent so buyers get the full option set.
  let primary = row;
@@ -147,10 +159,11 @@ router.get('/products/:id', (req, res) => {
   `).get(row.parent_id);
   if (parent) primary = parent;
  }
+ if (sharedState.apply(shared, primary)) return res.status(404).json({ error: 'Product not found' });
 
  const variants = db.prepare(`
   SELECT p.* FROM products p WHERE p.status='active' AND p.parent_id = ? AND p.office_id IS NULL ORDER BY p.id
- `).all(primary.id);
+ `).all(primary.id).filter((v) => !sharedState.apply(shared, v) && v.status === 'active');
  for (const v of variants) {
   v.piece_price = u.piecePrice(v);
   v.units = u.unitsFor(v).map((x) => ({ ...x, price: u.unitPrice(x.id, v) }));
@@ -160,16 +173,23 @@ router.get('/products/:id', (req, res) => {
  const similar = db.prepare(`
   SELECT p.* FROM products p WHERE p.status='active' AND p.parent_id IS NULL AND ${SHOP_FILTER} AND p.office_id IS NULL AND (p.category_id = ? OR EXISTS(SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = ?)) AND p.id != ? LIMIT 6
  `).all(primary.category_id, primary.category_id, primary.id);
+ const similarVisible = [];
  for (const s of similar) {
+  if (sharedState.apply(shared, s)) continue;
+  if (s.status && s.status !== 'active') continue;
   s.piece_price = u.piecePrice(s);
   sanitize(s);
+  similarVisible.push(s);
  }
  primary.piece_price = u.piecePrice(primary);
  primary.units = u.unitsFor(primary).map((x) => ({ ...x, price: u.unitPrice(x.id, primary) }));
  sanitize(primary);
  primary.images = shopImagesFor(primary.id);
+ // Put the photo shared from another instance first in the storefront gallery.
+ const sharedMain = sharedState.firstImage(shared, primary);
+ if (sharedMain && !primary.images.includes(sharedMain)) primary.images = [sharedMain, ...primary.images];
  for (const v of variants) v.images = shopImagesFor(v.id);
- res.json({ ...primary, variants, similar });
+ res.json({ ...primary, variants, similar: similarVisible });
 });
 
 router.post('/contact', (req, res) => {
