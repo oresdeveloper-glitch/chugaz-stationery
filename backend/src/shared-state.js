@@ -31,13 +31,19 @@ let cache = { at: 0, map: {} };
 let known = new Map();
 let loading = null;
 
+// Static require at module scope: Vercel's function bundler only traces
+// dependencies it can see as literals, and a require buried in a function is
+// what made the deployed build fail with "Cannot find module '@vercel/blob'".
+let blobSdk = null;
+try { blobSdk = require('@vercel/blob'); } catch (_) { blobSdk = null; }
+
 function enabled() {
-  return !!process.env.BLOB_READ_WRITE_TOKEN;
+  return !!process.env.BLOB_READ_WRITE_TOKEN && !!blobSdk;
 }
 
 function client() {
-  // Required lazily: local dev without the dependency (or token) must still run.
-  return require('@vercel/blob');
+  if (!blobSdk) throw new Error('@vercel/blob is not available in this deployment');
+  return blobSdk;
 }
 
 function clean(v) {

@@ -7,6 +7,10 @@ const { record, forget, identityKeys } = require('../tombstones');
 const sharedState = require('../shared-state');
 const u = require('../units');
 
+// Static require at module scope so Vercel's bundler includes the dependency.
+let blobSdk = null;
+try { blobSdk = require('@vercel/blob'); } catch (_) { blobSdk = null; }
+
 const router = express.Router();
 
 // Normalize admin-entered unit_prices: keep only numeric > 0 entries for known units.
@@ -62,10 +66,9 @@ const upload = multer({
 // is the existing behaviour and still works on a single instance / local dev.
 async function saveUploadedImage(file) {
  const name = `prod-${Date.now()}-${Math.round(Math.random() * 1e6)}${IMAGE_TYPES[file.mimetype] || '.jpg'}`;
- if (process.env.BLOB_READ_WRITE_TOKEN) {
+ if (blobSdk && process.env.BLOB_READ_WRITE_TOKEN) {
   try {
-   const { put } = require('@vercel/blob');
-   const blob = await put(name, file.buffer, { access: 'public', contentType: file.mimetype });
+   const blob = await blobSdk.put(name, file.buffer, { access: 'public', contentType: file.mimetype });
    if (blob && blob.url) return blob.url;
   } catch (e) {
    console.warn('[media] Vercel Blob upload failed, falling back to DB:', e && e.message ? e.message : e);
