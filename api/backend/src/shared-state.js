@@ -202,4 +202,17 @@ function firstImage(map, row) {
   return o && o.image !== undefined ? o.image : undefined;
 }
 
-module.exports = { identityKey, overrides, remember, apply, firstImage, enabled };
+// Read-only diagnostics: proves the shared overlay store is reachable from the
+// deployed function (and how many product entries it holds).
+async function diagnose() {
+  if (!enabled()) return { ok: false, error: 'BLOB_READ_WRITE_TOKEN not configured' };
+  try {
+    const map = await readAll();
+    cache = { at: Date.now(), map };
+    return { ok: true, entries: Object.keys(map).length };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+module.exports = { identityKey, overrides, remember, apply, firstImage, enabled, diagnose };

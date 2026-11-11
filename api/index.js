@@ -78,7 +78,7 @@ const BOOT_TIME = new Date().toISOString();
 
 // Health endpoint FIRST: never depends on DB/routes so the serverless
 // function always responds even if a route module fails to load.
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   let dbReady = false;
   let users = null;
   let db_marker = null;
@@ -112,7 +112,23 @@ app.get('/api/health', (req, res) => {
   } catch (_) {
     secret = 'unknown';
   }
-  res.json({ ok: true, db: dbReady ? 'connected' : 'degraded', users, secret, instance: INSTANCE_ID, boot: BOOT_TIME, db_marker, sales, orders, categories, reset_at, payment_instructions: '356322054 - CHUGAZ STATIONERY' });
+  // Read-only probe of the shared product overlay (photos/deletes mirrored to
+  // Vercel Blob so every instance shows the same state): /api/health?blob=1
+  let blob = 'off';
+  let blob_overlay = null;
+  try {
+    // eslint-disable-next-line no-eval
+    const ss = eval('require')('./backend/src/shared-state');
+    blob = ss.enabled() ? 'configured' : 'off';
+    if (req.query.blob === '1' && blob === 'configured') {
+      const d = await ss.diagnose();
+      blob = d.ok ? 'ok' : 'error';
+      blob_overlay = d.ok ? d.entries : d.error;
+    }
+  } catch (e) {
+    blob = 'unavailable';
+  }
+  res.json({ ok: true, db: dbReady ? 'connected' : 'degraded', users, secret, instance: INSTANCE_ID, boot: BOOT_TIME, db_marker, sales, orders, categories, reset_at, blob, blob_overlay, payment_instructions: '356322054 - CHUGAZ STATIONERY' });
 });
 
 const SYNC_SQL = "SELECT (SELECT COUNT(*) FROM sales) || ':' || COALESCE((SELECT SUM(total) FROM sales),0) || ':' || COALESCE((SELECT SUM(paid_amount) FROM sales),0) || ':' || (SELECT COUNT(*) FROM sale_returns) || '|' || (SELECT COUNT(*) FROM orders) || ':' || COALESCE((SELECT MAX(updated_at) FROM orders),'') || '|' || (SELECT COUNT(*) FROM order_status_history) || '|' || (SELECT COUNT(*) FROM stock_movements) || '|' || (SELECT COUNT(*) FROM products) || ':' || COALESCE((SELECT SUM(selling_price) FROM products),0) || ':' || COALESCE((SELECT SUM(current_stock) FROM products),0) || '|' || (SELECT COUNT(*) FROM purchases) || '|' || (SELECT COUNT(*) FROM expenses) || '|' || (SELECT COUNT(*) FROM customers) || '|' || (SELECT COUNT(*) FROM users) || '|' || (SELECT COUNT(*) FROM payments) || '|' || (SELECT COUNT(*) FROM notifications) || '|' || (SELECT COUNT(*) FROM contact_messages) || '|' || (SELECT COUNT(*) FROM order_returns) || ':' || COALESCE((SELECT MAX(processed_at) FROM order_returns),'') || '|' || (SELECT COUNT(*) FROM audit_logs WHERE action NOT IN ('LOGIN','LOGIN_FAIL','LOGIN_RESTORE','READ','RESTORE','RESTORE_MERGE')) || '|' || (SELECT COUNT(*) FROM categories) || ':' || (SELECT COUNT(*) FROM product_categories) || ':' || (SELECT COUNT(*) FROM brands) || ':' || (SELECT COUNT(*) FROM suppliers) || '|' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(sku,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(image,''))+LENGTH(COALESCE(description,''))+LENGTH(COALESCE(unit,''))),0) FROM products) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(phone,''))+LENGTH(COALESCE(email,''))),0) FROM customers) || ':' || (SELECT COALESCE(SUM(LENGTH(COALESCE(name,''))+LENGTH(COALESCE(email,''))+LENGTH(COALESCE(status,''))+LENGTH(COALESCE(avatar,''))),0) FROM users) AS v";
