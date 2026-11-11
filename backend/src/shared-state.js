@@ -31,12 +31,16 @@ let cache = { at: 0, map: {} };
 let known = new Map();
 let loading = null;
 
-// Static require at module scope: Vercel's function bundler only traces
-// dependencies it can see as literals, and a require buried in a function is
-// what made the deployed build fail with "Cannot find module '@vercel/blob'".
+// Vendored bundle (esbuild) instead of a plain dependency: Vercel's function
+// builder only installs the root package.json, and the backend modules are
+// shipped as plain files (they are loaded through a dynamic require), so their
+// dependencies are never traced into the bundle. The bundle lives inside
+// api/backend, which is included verbatim.
 let blobSdk = null;
 let blobSdkError = null;
-try { blobSdk = require('@vercel/blob'); } catch (e) {
+try {
+  blobSdk = require('./vendor/vercel-blob.cjs');
+} catch (e) {
   blobSdk = null;
   blobSdkError = String((e && e.message) || e);
 }

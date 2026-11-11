@@ -7,9 +7,10 @@ const { record, forget, identityKeys } = require('../tombstones');
 const sharedState = require('../shared-state');
 const u = require('../units');
 
-// Static require at module scope so Vercel's bundler includes the dependency.
+// Vendored bundle: see shared-state.js for why a plain dependency is not
+// available inside the deployed function.
 let blobSdk = null;
-try { blobSdk = require('@vercel/blob'); } catch (_) { blobSdk = null; }
+try { blobSdk = require('../vendor/vercel-blob.cjs'); } catch (_) { blobSdk = null; }
 
 const router = express.Router();
 
