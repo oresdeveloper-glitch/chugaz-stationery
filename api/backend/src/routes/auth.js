@@ -20,8 +20,14 @@ async function findUserByEmail(email) {
   FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN offices o ON o.id = u.office_id WHERE u.email = ?
  `).get(String(email).toLowerCase().trim());
  if (!row) return row;
+ const dbRoleId = row.role_id;
  const map = await sharedUsers.overrides();
  if (sharedUsers.apply(map, row)) return null; // deleted on another instance
+ // The overlay says this account's role changed on another instance but this
+ // database has not caught up. Verifying the password here would let a stale
+ // (or self-healed) customer row authenticate as staff — send it to the
+ // customer handler, which returns a clear "syncing" answer instead.
+ if (dbRoleId !== row.role_id) return null;
  if (row.role_id != null) {
   const rr = db.prepare('SELECT name FROM roles WHERE id=?').get(row.role_id);
   if (rr) row.role = rr.name;
@@ -181,6 +187,7 @@ router.post('/refresh', (req, res) => {
   FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN offices o ON o.id = u.office_id WHERE u.id = ?
  `).get(payload.id);
  if (!row) return res.status(401).json({ error: 'Session expired — sign in again' });
+ const dbRoleId = row.role_id;
  try { sharedUsers.overrides().catch(() => {}); } catch (_) {}
  const deleted = sharedUsers.apply(sharedUsers.cached(), row);
  if (deleted || row.status !== 'active' || (row.token_ver ?? 0) !== (payload.ver ?? 0)) {
@@ -189,6 +196,12 @@ router.post('/refresh', (req, res) => {
  if (row.role_id != null) {
   const rr = db.prepare('SELECT name FROM roles WHERE id=?').get(row.role_id);
   if (rr) row.role = rr.name;
+ }
+ // Never let an old customer token be refreshed into a staff role from the
+ // overlay alone (the role change must be confirmed by this database or by a
+ // token that already carried it).
+ if (dbRoleId !== row.role_id && payload.role && payload.role !== row.role) {
+  return res.status(401).json({ error: 'Account role is syncing — sign in again in a moment', code: 'ROLE_SYNCING' });
  }
  res.json({ token: signToken(row, { orig: payload.orig || payload.iat }) });
 });
@@ -203,14 +216,14 @@ router.post('/logout-all', requireAuth, (req, res) => {
  res.json({ ok: true, token: signToken({ ...req.user, token_ver: ver }) });
 });
 
-router.get('/me', requireAuth, (req, res) => {
+router.get('/me', requireAuth, async (req, res) => {
  const row = db.prepare(`
   SELECT u.id, u.name, u.email, u.status, u.office_id, u.role_id, r.name AS role, o.name AS office
   FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN offices o ON o.id = u.office_id WHERE u.id = ?
  `).get(req.user.id);
  if (!row) return res.status(404).json({ error: 'User not found' });
- try { sharedUsers.overrides().catch(() => {}); } catch (_) {}
- const deleted = sharedUsers.apply(sharedUsers.cached(), row);
+ const map = await sharedUsers.overrides();
+ const deleted = sharedUsers.apply(map, row);
  if (deleted || row.status !== 'active') return res.status(404).json({ error: 'User not found' });
  if (row.role_id != null) {
   const rr = db.prepare('SELECT name FROM roles WHERE id=?').get(row.role_id);

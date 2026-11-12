@@ -8,6 +8,7 @@ const { signToken, requireCustomer } = require('../auth');
 const { rateLimit, registerFailure, lockState, clearFailures, clientIp, registerIpFailure, ipLockState } = require('../security');
 const { hashPassword, verifyPassword, upgradeUserPassword, passwordPolicy, legacyPasswordOk, LEGACY_RULE } = require('../pwd');
 const { checkEmailReal, sendVerificationCode, smtpReady, EMAIL_RE } = require('../mailer');
+const sharedUsers = require('../shared-users');
 
 // Express 4 doesn't forward async rejections to the error middleware.
 function asyncRoute(fn) {
@@ -229,6 +230,24 @@ async function handleCustomerLogin(req, res) {
  if (!emailLimit.ok) return res.status(429).json({ error: `Too many sign-in attempts — try again in ${Math.ceil(emailLimit.retryAfterSec / 60)} minute(s)` });
  const lock = lockState(key);
  if (lock.locked) return res.status(423).json({ error: `Account temporarily locked after repeated failures — try again in ${lock.minutesLeft} minute(s)` });
+
+ // Cross-instance account state. A role change made elsewhere is mirrored in
+ // the shared overlay; if this instance has not caught up yet we must not fall
+ // back to "customer" — that is exactly what made a manager revert after a few
+ // minutes. Never mint a staff role from the overlay without a verified
+ // password, so report a short-lived sync state instead.
+ const shared = await sharedUsers.overrides();
+ const overlay = sharedUsers.forRow(shared, { email: clean });
+ if (overlay && overlay.deleted) return res.status(401).json({ error: 'Invalid email or password' });
+ if (overlay && overlay.role_id != null) {
+  const custRole = db.prepare("SELECT id FROM roles WHERE name='customer'").get();
+  if (!custRole || Number(overlay.role_id) !== Number(custRole.id)) {
+   return res.status(409).json({
+    error: 'This account was changed on another device and is still syncing — please try again in a few seconds',
+    code: 'ACCOUNT_SYNCING',
+   });
+  }
+ }
 
  let user = db.prepare(`
    SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.status, u.token_ver, r.name AS role

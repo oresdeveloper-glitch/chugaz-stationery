@@ -198,4 +198,4 @@ async function diagnose() {
 // Synchronous view of the cached overlay (may be up to TTL_MS stale). Used on
 // hot paths such as verifyLive that cannot await an async refresh.
 function cached() { return cache.map; }
-module.exports = { identityKey, overrides, remember, apply, cached, enabled, diagnose };
+module.exports = { identityKey, overrides, remember, forRow, apply, cached, enabled, diagnose };

@@ -52,7 +52,7 @@ function signToken(user, opts = {}) {
 
 // Verify token AND confirm the account still exists, is active, and the token
 // version matches (password changes bump token_ver -> all old tokens die).
-function verifyLive(token) {
+async function verifyLive(token) {
  let payload;
  try {
   payload = jwt.verify(token, JWT_SECRET, VERIFY_OPTS);
@@ -64,22 +64,32 @@ function verifyLive(token) {
   FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN offices o ON o.id = u.office_id WHERE u.id = ?
  `).get(payload.id);
  if (!row) return null;
- try { sharedUsers.overrides().catch(() => {}); } catch (_) {}
- const deleted = sharedUsers.apply(sharedUsers.cached(), row);
+ // Role the database itself believes, before the cross-instance overlay.
+ const dbRoleId = row.role_id;
+ // Await the shared overlay so a cold instance cannot answer with a stale
+ // role on the very first request of a session.
+ let map;
+ try { map = await sharedUsers.overrides(); } catch (_) { map = sharedUsers.cached(); }
+ const deleted = sharedUsers.apply(map, row);
  if (deleted || row.status !== 'active') return null;
  if (row.role_id != null) {
   const rr = db.db.prepare('SELECT name FROM roles WHERE id=?').get(row.role_id);
   if (rr) row.role = rr.name;
  }
+ // A role change made on another instance has not reached this database yet.
+ // Honour it only for a token that was already minted with the new role — a
+ // customer token must never self-upgrade just because the overlay says so.
+ if (dbRoleId !== row.role_id && payload.role && payload.role !== row.role) return null;
  if ((row.token_ver ?? 0) !== (payload.ver ?? 0)) return null;
  return { id: row.id, email: row.email, name: row.name, role: row.role, office_id: row.office_id ?? null, office: row.office };
 }
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
  const header = req.headers.authorization || '';
  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
  if (!token) return res.status(401).json({ error: 'Authentication required' });
- const user = verifyLive(token);
+ let user = null;
+ try { user = await verifyLive(token); } catch (_) { user = null; }
  if (!user) return res.status(401).json({ error: 'Invalid, expired or revoked session — sign in again' });
  req.user = user;
  next();
@@ -96,12 +106,14 @@ function requireRole(...roles) {
  };
 }
 
-function optionalAuth(req, res, next) {
+async function optionalAuth(req, res, next) {
  const header = req.headers.authorization || '';
  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
  if (token) {
-  const user = verifyLive(token);
-  if (user) req.user = user;
+  try {
+   const user = await verifyLive(token);
+   if (user) req.user = user;
+  } catch (_) { /* anonymous request */ }
  }
  next();
 }

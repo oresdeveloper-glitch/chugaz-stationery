@@ -5,6 +5,7 @@ const multer = require('multer');
 const { db, DB_PATH, audit, reopenDb, writeRedactedCopy, fixBahashaSpelling } = require('../db');
 const { identityKeys, isDeleted, importHints, applyAll } = require('../tombstones');
 const { requireRole } = require('../auth');
+const sharedUsers = require('../shared-users');
 const { importTombstones, applyTombstones } = require('../product-cleanup');
 
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
@@ -114,7 +115,7 @@ router.post('/restore', requireRole('admin'), uploadMem.single('file'), (req, re
 
 // Any staff session may merge DATA back after a disk reset; accounts and
 // settings stay admin-only (non-admin merges never write password hashes).
-router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'), uploadMem.single('file'), (req, res) => {
+router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'), uploadMem.single('file'), asyncRoute(async (req, res) => {
   const mergeAll = req.user.role === 'admin';
   const file = req.file || (Array.isArray(req.files) ? req.files[0] : null);
   if (!file) return res.status(400).json({ error: 'No backup file uploaded' });
@@ -137,6 +138,10 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
 
   const M = {};
   const bump = (k, n = 1) => { M[k] = (M[k] || 0) + n; };
+  // Account roles/status live in the shared overlay and are authoritative over
+  // any snapshot: a stale backup (or a customer row self-healed before this
+  // fix) must never revert a manager back to customer during a merge.
+  const sharedAccounts = await sharedUsers.overrides();
   const tableExists = (t) => {
    try { return !!db.prepare("SELECT 1 FROM bak.sqlite_master WHERE type='table' AND name=?").get(t); } catch (_) { return false; }
   };
@@ -619,6 +624,34 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
    const purgedRecords = applyAll();
    if (purgedRecords) bump('removed_deleted_records', purgedRecords);
 
+   // Re-apply the shared account overlay on top of everything the snapshot just
+   // wrote. This repairs any row whose role was reverted by a stale merge.
+   try {
+    const findUser = db.prepare('SELECT id, role_id, status, name, office_id FROM users WHERE email = ?');
+    const setRole = db.prepare('UPDATE users SET role_id = ? WHERE id = ?');
+    const setStatus = db.prepare('UPDATE users SET status = ? WHERE id = ?');
+    const setName = db.prepare('UPDATE users SET name = ? WHERE id = ?');
+    const setOffice = db.prepare('UPDATE users SET office_id = ? WHERE id = ?');
+    let fixed = 0;
+    for (const o of Object.values(sharedAccounts || {})) {
+     if (!o || !o.email || o.deleted) continue;
+     const u = findUser.get(String(o.email).toLowerCase().trim());
+     if (!u) continue;
+     let changed = false;
+     if (o.role_id != null && Number(o.role_id) !== Number(u.role_id)) { setRole.run(Number(o.role_id), u.id); changed = true; }
+     if (o.status && o.status !== u.status) { setStatus.run(o.status, u.id); changed = true; }
+     if (o.name && o.name !== u.name) { setName.run(o.name, u.id); changed = true; }
+     if (o.office_id !== undefined) {
+      const nextOffice = o.office_id == null ? null : Number(o.office_id);
+      if ((u.office_id ?? null) !== nextOffice) { setOffice.run(nextOffice, u.id); changed = true; }
+     }
+     if (changed) fixed += 1;
+    }
+    if (fixed) bump('shared_accounts_repair', fixed);
+   } catch (e) {
+    console.warn('[restore-merge] account overlay reconcile skipped:', e && e.message ? e.message : e);
+   }
+
    if (prodMap.size && tableExists('sale_items')) {
     const serverSales = "SELECT s.id FROM sales s WHERE COALESCE(s.invoice_number, '') NOT IN (SELECT COALESCE(invoice_number, '') FROM bak.sales)";
     const sold = new Map();
@@ -651,7 +684,7 @@ router.post('/restore-merge', requireRole('admin', 'manager', 'cashier', 'clerk'
     fixBahashaSpelling(db);
    audit(req.user.id, 'RESTORE_MERGE', 'database', null, { merged: M, source: file.originalname || file.name || 'upload' });
   res.json({ ok: true, merged: M });
-});
+}));
 
 // Admin escape hatch: wipe every transaction (sales, orders, purchases,
 // expenses, payments, returns, stock movements) while keeping accounts,
